@@ -1,0 +1,19 @@
+#cloud-config
+hostname: pi-node-1  # Dynamic via variables if needed
+users:
+  - name: admin
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... your-public-key
+package_update: true
+package_upgrade: true
+packages:
+  - curl
+  - git
+runcmd:
+  - echo "cgroup_memory=1 cgroup_enable=memory" >> /boot/firmware/cmdline.txt
+  - swapoff -a && sed -i '/swap/d' /etc/fstab  # Disable swap
+  - reboot  # Apply changes
+  - curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.28.5+k3s1 sh -  # Install K3s (master or agent)
+  - [if joining: curl -sfL https://get.k3s.io | K3S_URL=https://your-master-ip:6443 K3S_TOKEN=your-token-from-repo sh -]
+  - git clone https://github.com/your-username/your-monorepo.git /opt/repo
+  - /opt/repo/pi-setup/scripts/post-install.sh  # Custom script for Rancher registration/GitOps

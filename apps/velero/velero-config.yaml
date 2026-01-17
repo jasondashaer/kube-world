@@ -1,0 +1,264 @@
+# Velero Backup Configuration for kube-world
+# Supports multiple storage backends: AWS S3, GCP GCS, Azure Blob, MinIO
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: velero
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/component: backup
+
+---
+# Velero Helm Values - AWS S3 Backend
+# Use this configuration when deploying to AWS or using S3-compatible storage
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: velero-values-aws
+  namespace: velero
+data:
+  values.yaml: |
+    configuration:
+      backupStorageLocation:
+        - name: default
+          provider: aws
+          bucket: ${VELERO_BUCKET_NAME}
+          config:
+            region: ${AWS_REGION}
+            s3ForcePathStyle: "false"
+      volumeSnapshotLocation:
+        - name: default
+          provider: aws
+          config:
+            region: ${AWS_REGION}
+    
+    credentials:
+      useSecret: true
+      secretContents:
+        cloud: |
+          [default]
+          aws_access_key_id=${AWS_ACCESS_KEY_ID}
+          aws_secret_access_key=${AWS_SECRET_ACCESS_KEY}
+    
+    initContainers:
+      - name: velero-plugin-for-aws
+        image: velero/velero-plugin-for-aws:v1.9.0
+        volumeMounts:
+          - mountPath: /target
+            name: plugins
+    
+    schedules:
+      daily-backup:
+        disabled: false
+        schedule: "0 2 * * *"  # 2 AM daily
+        template:
+          ttl: "720h"  # 30 days
+          includedNamespaces:
+            - home-assistant
+            - cattle-system
+            - fleet-local
+          excludedResources:
+            - events
+            - events.events.k8s.io
+    
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+---
+# Velero Helm Values - GCP GCS Backend
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: velero-values-gcp
+  namespace: velero
+data:
+  values.yaml: |
+    configuration:
+      backupStorageLocation:
+        - name: default
+          provider: gcp
+          bucket: ${VELERO_BUCKET_NAME}
+          config:
+            serviceAccount: ${GCP_SERVICE_ACCOUNT}
+      volumeSnapshotLocation:
+        - name: default
+          provider: gcp
+    
+    credentials:
+      useSecret: true
+      secretContents:
+        cloud: |
+          ${GCP_CREDENTIALS_JSON}
+    
+    initContainers:
+      - name: velero-plugin-for-gcp
+        image: velero/velero-plugin-for-gcp:v1.9.0
+        volumeMounts:
+          - mountPath: /target
+            name: plugins
+    
+    schedules:
+      daily-backup:
+        disabled: false
+        schedule: "0 2 * * *"
+        template:
+          ttl: "720h"
+          includedNamespaces:
+            - home-assistant
+            - cattle-system
+            - fleet-local
+
+---
+# Velero Helm Values - MinIO (Local/Edge Storage)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: velero-values-minio
+  namespace: velero
+data:
+  values.yaml: |
+    configuration:
+      backupStorageLocation:
+        - name: default
+          provider: aws
+          bucket: velero
+          config:
+            region: minio
+            s3ForcePathStyle: "true"
+            s3Url: http://minio.minio-system.svc:9000
+            publicUrl: http://minio.local:9000
+    
+    credentials:
+      useSecret: true
+      secretContents:
+        cloud: |
+          [default]
+          aws_access_key_id=minioadmin
+          aws_secret_access_key=minioadmin
+    
+    initContainers:
+      - name: velero-plugin-for-aws
+        image: velero/velero-plugin-for-aws:v1.9.0
+        volumeMounts:
+          - mountPath: /target
+            name: plugins
+    
+    schedules:
+      daily-backup:
+        disabled: false
+        schedule: "0 2 * * *"
+        template:
+          ttl: "168h"  # 7 days for local storage
+          includedNamespaces:
+            - home-assistant
+          snapshotVolumes: false  # Disable for local path provisioner
+    
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+---
+# MinIO Deployment for Local Backups
+# Deploy this on Pi for local backup storage
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: minio-system
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: minio-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      nodeSelector:
+        workload-type: iot  # Run on Pi with NVMe storage
+      containers:
+        - name: minio
+          image: minio/minio:latest
+          args:
+            - server
+            - /data
+            - --console-address
+            - ":9001"
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: root-user
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: root-password
+          ports:
+            - containerPort: 9000
+              name: api
+            - containerPort: 9001
+              name: console
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: minio-data
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-data
+  namespace: minio-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 50Gi  # Adjust based on NVMe size
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: minio-system
+spec:
+  selector:
+    app: minio
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001

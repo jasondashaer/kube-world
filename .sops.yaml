@@ -1,0 +1,25 @@
+# SOPS Configuration for Encrypted Secrets
+# This file configures SOPS to use age encryption for secrets
+
+# Creation rules - how to encrypt new files
+creation_rules:
+  # Encrypt all secrets in the secrets directory
+  - path_regex: secrets/.*\.yaml$
+    age: >-
+      # Add your age public key here
+      # Generate with: age-keygen -o key.txt
+      age1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    
+  # Encrypt Kubernetes secrets
+  - path_regex: .*secret.*\.yaml$
+    encrypted_regex: "^(data|stringData)$"
+    age: >-
+      age1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+  # Encrypt .env files
+  - path_regex: .*\.env$
+    age: >-
+      age1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# Note: Store your private key (key.txt) securely and NEVER commit it
+# Export the key location: export SOPS_AGE_KEY_FILE=~/.sops/key.txt

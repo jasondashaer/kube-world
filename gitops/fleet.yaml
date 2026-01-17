@@ -1,0 +1,93 @@
+# Fleet GitOps Configuration for kube-world
+# This file configures Fleet to manage deployments from this repository
+---
+apiVersion: fleet.cattle.io/v1alpha1
+kind: GitRepo
+metadata:
+  name: kube-world
+  namespace: fleet-local
+spec:
+  # Repository URL
+  repo: https://github.com/jasondashaer/kube-world
+  
+  # Branch to track
+  branch: main
+  
+  # Paths to scan for bundles
+  paths:
+    - apps/base
+    - apps/home-assistant
+    - apps/velero
+    - apps/monitoring
+    - policies
+  
+  # Poll interval (how often to check for changes)
+  pollingInterval: 15s
+  
+  # Client secret for private repos (if needed)
+  # clientSecretName: git-credentials
+  
+  # Target clusters - local cluster
+  targets:
+    - name: local
+      clusterSelector:
+        matchLabels:
+          management.cattle.io/cluster-display-name: local
+
+---
+# GitRepo for Pi clusters (when registered)
+apiVersion: fleet.cattle.io/v1alpha1
+kind: GitRepo
+metadata:
+  name: kube-world-edge
+  namespace: fleet-default
+spec:
+  repo: https://github.com/jasondashaer/kube-world
+  branch: main
+  
+  paths:
+    - apps/base
+    - apps/home-assistant
+    - apps/velero
+    - apps/edge
+  
+  pollingInterval: 30s
+  
+  # Target edge clusters
+  targets:
+    - name: edge-devices
+      clusterSelector:
+        matchLabels:
+          topology.kubernetes.io/zone: edge
+    - name: pi-clusters
+      clusterSelector:
+        matchLabels:
+          hardware: raspberry-pi
+
+---
+# ClusterGroup for grouping edge devices
+apiVersion: fleet.cattle.io/v1alpha1
+kind: ClusterGroup
+metadata:
+  name: edge-devices
+  namespace: fleet-default
+spec:
+  selector:
+    matchLabels:
+      topology.kubernetes.io/zone: edge
+
+---
+# ClusterGroup for all home automation workloads
+apiVersion: fleet.cattle.io/v1alpha1
+kind: ClusterGroup
+metadata:
+  name: home-automation
+  namespace: fleet-default
+spec:
+  selector:
+    matchExpressions:
+      - key: workload-type
+        operator: In
+        values:
+          - iot
+          - home-assistant

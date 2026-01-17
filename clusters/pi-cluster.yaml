@@ -1,0 +1,98 @@
+# K3s Cluster Configuration for Raspberry Pi
+# This file defines the cluster topology and can be used with k3sup or Ansible
+---
+apiVersion: k3s.cattle.io/v1
+kind: Cluster
+metadata:
+  name: pi-cluster
+  labels:
+    environment: edge
+    platform: raspberry-pi
+    region: home
+spec:
+  # K3s version
+  k3sVersion: v1.29.0+k3s1
+  
+  # Cluster configuration
+  config:
+    # Disable components not needed on Pi
+    disable:
+      - traefik  # We'll use nginx-ingress or skip for now
+      - servicelb  # Use MetalLB instead
+    
+    # Enable embedded etcd for HA (future multi-Pi setup)
+    cluster-init: true
+    
+    # Write kubeconfig with correct permissions
+    write-kubeconfig-mode: "0644"
+    
+    # TLS SAN for remote access
+    tls-san:
+      - "pi-master.local"
+      - "192.168.1.100"  # Update with actual IP
+    
+    # Node labels for scheduling
+    node-label:
+      - "node.kubernetes.io/role=master"
+      - "topology.kubernetes.io/zone=edge"
+      - "workload-type=iot"
+      - "hardware=raspberry-pi-5"
+    
+    # Node taints (optional, for dedicated workloads)
+    # node-taint:
+    #   - "iot-only=true:NoSchedule"
+    
+    # Kubelet arguments for Pi optimization
+    kubelet-arg:
+      - "max-pods=110"
+      - "eviction-hard=memory.available<200Mi,nodefs.available<10%"
+    
+    # Kube-controller arguments
+    kube-controller-manager-arg:
+      - "node-monitor-period=5s"
+      - "node-monitor-grace-period=20s"
+
+---
+# Agent (worker) configuration for additional Pi nodes
+apiVersion: k3s.cattle.io/v1
+kind: AgentConfig
+metadata:
+  name: pi-worker-template
+spec:
+  serverUrl: "https://pi-master.local:6443"
+  # Token will be sourced from secrets
+  tokenSecretRef:
+    name: k3s-token
+    key: token
+  
+  config:
+    node-label:
+      - "node.kubernetes.io/role=worker"
+      - "topology.kubernetes.io/zone=edge"
+      - "hardware=raspberry-pi"
+    
+    kubelet-arg:
+      - "max-pods=50"
+
+---
+# Storage configuration for Pi with NVMe
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pi-storage-config
+  namespace: kube-system
+data:
+  # Local path provisioner config
+  config.json: |
+    {
+      "nodePathMap": [
+        {
+          "node": "DEFAULT_PATH_FOR_NON_LISTED_NODES",
+          "paths": ["/var/lib/rancher/k3s/storage"]
+        },
+        {
+          "node": "pi-master",
+          "paths": ["/mnt/nvme/k8s-storage", "/var/lib/rancher/k3s/storage"]
+        }
+      ]
+    }

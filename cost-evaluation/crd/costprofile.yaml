@@ -1,0 +1,200 @@
+# Cost Evaluation CRD Specification (Future)
+# This CRD will allow declarative cost optimization in Kubernetes
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: costprofiles.kube-world.io
+spec:
+  group: kube-world.io
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                # Workload to evaluate
+                workload:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                    type:
+                      type: string
+                      enum: [deployment, statefulset, daemonset]
+                
+                # Requirements for the workload
+                requirements:
+                  type: object
+                  properties:
+                    compute:
+                      type: object
+                      properties:
+                        minCPU:
+                          type: string
+                        minMemory:
+                          type: string
+                        preferredArchitecture:
+                          type: string
+                          enum: [arm64, amd64, any]
+                    storage:
+                      type: object
+                      properties:
+                        minSize:
+                          type: string
+                        iops:
+                          type: integer
+                        type:
+                          type: string
+                          enum: [ssd, hdd, any]
+                    network:
+                      type: object
+                      properties:
+                        maxLatencyMs:
+                          type: integer
+                        minBandwidthMbps:
+                          type: integer
+                    compliance:
+                      type: object
+                      properties:
+                        dataResidency:
+                          type: array
+                          items:
+                            type: string
+                        certifications:
+                          type: array
+                          items:
+                            type: string
+                
+                # Cost constraints
+                budget:
+                  type: object
+                  properties:
+                    maxMonthlyUSD:
+                      type: number
+                    maxHourlyUSD:
+                      type: number
+                    preferSpotInstances:
+                      type: boolean
+                
+                # Provider preferences
+                providers:
+                  type: object
+                  properties:
+                    allowed:
+                      type: array
+                      items:
+                        type: string
+                        enum: [aws, gcp, azure, local]
+                    preferred:
+                      type: string
+                    excluded:
+                      type: array
+                      items:
+                        type: string
+                
+                # Optimization strategy
+                strategy:
+                  type: string
+                  enum: [cost, performance, balanced, reliability]
+                  default: balanced
+            
+            status:
+              type: object
+              properties:
+                recommendation:
+                  type: object
+                  properties:
+                    provider:
+                      type: string
+                    region:
+                      type: string
+                    instanceType:
+                      type: string
+                    estimatedMonthlyCost:
+                      type: number
+                    score:
+                      type: number
+                alternatives:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      provider:
+                        type: string
+                      region:
+                        type: string
+                      estimatedMonthlyCost:
+                        type: number
+                      score:
+                        type: number
+                lastEvaluated:
+                  type: string
+                  format: date-time
+      additionalPrinterColumns:
+        - name: Strategy
+          type: string
+          jsonPath: .spec.strategy
+        - name: Recommended
+          type: string
+          jsonPath: .status.recommendation.provider
+        - name: Est. Cost
+          type: number
+          jsonPath: .status.recommendation.estimatedMonthlyCost
+        - name: Last Evaluated
+          type: string
+          jsonPath: .status.lastEvaluated
+  scope: Namespaced
+  names:
+    plural: costprofiles
+    singular: costprofile
+    kind: CostProfile
+    shortNames:
+      - cp
+
+---
+# Example CostProfile for Home Assistant
+apiVersion: kube-world.io/v1alpha1
+kind: CostProfile
+metadata:
+  name: home-assistant-cost
+  namespace: home-assistant
+spec:
+  workload:
+    name: home-assistant
+    namespace: home-assistant
+    type: deployment
+  
+  requirements:
+    compute:
+      minCPU: "500m"
+      minMemory: "1Gi"
+      preferredArchitecture: arm64
+    storage:
+      minSize: "10Gi"
+      type: ssd
+    network:
+      maxLatencyMs: 50  # Low latency for IoT
+    compliance:
+      dataResidency:
+        - US
+  
+  budget:
+    maxMonthlyUSD: 25
+    preferSpotInstances: false  # Needs stability
+  
+  providers:
+    allowed:
+      - local  # Pi
+      - aws
+      - gcp
+    preferred: local  # Prefer edge for IoT
+  
+  strategy: balanced

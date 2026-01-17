@@ -1,0 +1,193 @@
+# Home Assistant Kubernetes Deployment
+# Optimized for Raspberry Pi with IoT protocol support
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: home-assistant
+  labels:
+    app.kubernetes.io/name: home-assistant
+    workload-type: iot
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: home-assistant-config
+  namespace: home-assistant
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path  # K3s default, or use longhorn
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: home-assistant
+  namespace: home-assistant
+  labels:
+    app.kubernetes.io/name: home-assistant
+    app.kubernetes.io/component: core
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate  # Required for single-instance with PVC
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: home-assistant
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: home-assistant
+    spec:
+      # Schedule on edge/IoT nodes for low latency
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: workload-type
+                    operator: In
+                    values:
+                      - iot
+            - weight: 80
+              preference:
+                matchExpressions:
+                  - key: topology.kubernetes.io/zone
+                    operator: In
+                    values:
+                      - edge
+            - weight: 50
+              preference:
+                matchExpressions:
+                  - key: hardware
+                    operator: In
+                    values:
+                      - raspberry-pi
+                      - raspberry-pi-5
+      
+      # Required for USB device access (Z-Wave, Zigbee, Thread)
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      
+      containers:
+        - name: home-assistant
+          image: ghcr.io/home-assistant/home-assistant:stable
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8123
+              protocol: TCP
+          env:
+            - name: TZ
+              value: "America/New_York"
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: localtime
+              mountPath: /etc/localtime
+              readOnly: true
+            # USB device mounts for IoT protocols
+            - name: usb
+              mountPath: /dev/bus/usb
+            - name: ttyusb
+              mountPath: /dev/ttyUSB0
+            - name: ttyacm
+              mountPath: /dev/ttyACM0
+          securityContext:
+            privileged: true  # Required for USB/Bluetooth access
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "2Gi"
+              cpu: "2000m"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8123
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8123
+            initialDelaySeconds: 30
+            periodSeconds: 10
+      
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: home-assistant-config
+        - name: localtime
+          hostPath:
+            path: /etc/localtime
+        - name: usb
+          hostPath:
+            path: /dev/bus/usb
+        - name: ttyusb
+          hostPath:
+            path: /dev/ttyUSB0
+            type: CharDevice
+        - name: ttyacm
+          hostPath:
+            path: /dev/ttyACM0
+            type: CharDevice
+      
+      tolerations:
+        - key: "iot-only"
+          operator: "Equal"
+          value: "true"
+          effect: "NoSchedule"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: home-assistant
+  namespace: home-assistant
+  labels:
+    app.kubernetes.io/name: home-assistant
+spec:
+  type: LoadBalancer  # Or ClusterIP with Ingress
+  ports:
+    - port: 8123
+      targetPort: 8123
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: home-assistant
+
+---
+# Ingress for external access (optional)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: home-assistant
+  namespace: home-assistant
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  tls:
+    - hosts:
+        - ha.local
+      secretName: home-assistant-tls
+  rules:
+    - host: ha.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: home-assistant
+                port:
+                  number: 8123

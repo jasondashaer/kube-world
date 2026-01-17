@@ -1,0 +1,7 @@
+# Fleet bundle for policies
+defaultNamespace: kube-system
+
+targets:
+  - name: all-clusters
+    clusterSelector:
+      matchLabels: {}

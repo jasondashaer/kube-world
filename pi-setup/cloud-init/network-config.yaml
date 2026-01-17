@@ -1,0 +1,39 @@
+# Network Configuration for Cloud-Init (Static IP)
+# Copy this to /boot/firmware/network-config on the Pi's boot partition
+# Uncomment and customize the static IP section below
+
+network:
+  version: 2
+  renderer: networkd
+  
+  ethernets:
+    eth0:
+      # Option 1: DHCP (default, simpler)
+      dhcp4: true
+      
+      # Option 2: Static IP (uncomment below, comment out dhcp4: true)
+      # dhcp4: false
+      # addresses:
+      #   - 192.168.1.100/24
+      # routes:
+      #   - to: default
+      #     via: 192.168.1.1
+      # nameservers:
+      #   addresses:
+      #     - 8.8.8.8
+      #     - 8.8.4.4
+      #   search:
+      #     - local
+      
+      # Optional: Wake-on-LAN
+      # wakeonlan: true
+  
+  # WiFi (optional, for headless setup)
+  wifis:
+    wlan0:
+      dhcp4: true
+      access-points:
+        "Peachtree Cottage":
+          password: "NewPass1!"
+        "TheLighthouse5G":
+          password: "thisisthewifipasswordSOMELETTERSARECAPITAL"

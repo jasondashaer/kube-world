@@ -1,0 +1,35 @@
+# Fleet bundle for Velero backups
+defaultNamespace: velero
+
+helm:
+  repo: https://vmware-tanzu.github.io/helm-charts
+  chart: velero
+  version: "5.2.0"
+  releaseName: velero
+
+targets:
+  # Local/Edge clusters use MinIO
+  - name: edge-clusters
+    clusterSelector:
+      matchLabels:
+        topology.kubernetes.io/zone: edge
+    helm:
+      valuesFiles:
+        - velero-values-minio.yaml
+
+  # Cloud clusters use provider-specific storage
+  - name: aws-clusters
+    clusterSelector:
+      matchLabels:
+        cloud-provider: aws
+    helm:
+      valuesFiles:
+        - velero-values-aws.yaml
+
+  - name: gcp-clusters
+    clusterSelector:
+      matchLabels:
+        cloud-provider: gcp
+    helm:
+      valuesFiles:
+        - velero-values-gcp.yaml

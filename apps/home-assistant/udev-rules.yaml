@@ -1,0 +1,130 @@
+# udev Rules for IoT Devices
+# Deploy this ConfigMap to nodes running Home Assistant
+# These rules ensure consistent device naming and permissions
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: udev-rules
+  namespace: home-assistant
+  labels:
+    app.kubernetes.io/name: home-assistant
+    app.kubernetes.io/component: udev
+data:
+  # Zigbee Controllers
+  99-zigbee.rules: |
+    # Sonoff Zigbee 3.0 USB Dongle Plus (CC2652P)
+    SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", SYMLINK+="zigbee", MODE="0666", GROUP="dialout"
+    
+    # ConBee II (Dresden Elektronik)
+    SUBSYSTEM=="tty", ATTRS{idVendor}=="1cf1", ATTRS{idProduct}=="0030", SYMLINK+="zigbee", MODE="0666", GROUP="dialout"
+    
+    # Sonoff Zigbee 3.0 USB Dongle Plus-E (EFR32MG21)
+    SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="55d4", SYMLINK+="zigbee", MODE="0666", GROUP="dialout"
+    
+    # SMLIGHT SLZB-06 Series
+    SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="zigbee", MODE="0666", GROUP="dialout"
+    
+    # Generic Zigbee placeholder - update with your device
+    # SUBSYSTEM=="tty", ATTRS{idVendor}=="XXXX", ATTRS{idProduct}=="XXXX", SYMLINK+="zigbee", MODE="0666", GROUP="dialout"
+
+  # Z-Wave Controllers
+  99-zwave.rules: |
+    # Zooz ZST39 800LR Z-Wave Stick
+    SUBSYSTEM=="tty", ATTRS{idVendor}=="0658", ATTRS{idProduct}=="0200", SYMLINK+="zwave", MODE="0666", GROUP="dialout"
+    
+    # Aeotec Z-Stick Gen5+
+    SUBSYSTEM=="tty", ATTRS{idVendor}=="0658", ATTRS{idProduct}=="0200", SYMLINK+="zwave", MODE="0666", GROUP="dialout"
+    
+    # Silicon Labs UZB-7 (used in many Z-Wave sticks)
+    SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="8a2a", SYMLINK+="zwave", MODE="0666", GROUP="dialout"
+    
+    # Home Assistant Connect ZWA-2 (Nabu Casa)
+    SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", ATTRS{product}=="ZWA-2*", SYMLINK+="zwave", MODE="0666", GROUP="dialout"
+
+  # Thread/Matter Border Routers
+  99-thread.rules: |
+    # Home Assistant Connect ZBT-2 (Nabu Casa) - Thread Border Router
+    SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", ATTRS{product}=="ZBT-2*", SYMLINK+="thread", MODE="0666", GROUP="dialout"
+    
+    # Apple HomePod Mini / Apple TV (Thread border router via mDNS, no USB rule needed)
+    
+    # Generic Thread device placeholder
+    # SUBSYSTEM=="tty", ATTRS{idVendor}=="XXXX", ATTRS{idProduct}=="XXXX", SYMLINK+="thread", MODE="0666", GROUP="dialout"
+
+  # Bluetooth Controllers (usually built-in on Pi)
+  99-bluetooth.rules: |
+    # External Bluetooth USB adapters
+    SUBSYSTEM=="usb", ATTRS{idVendor}=="0a12", ATTRS{idProduct}=="0001", MODE="0666", GROUP="bluetooth"
+
+---
+# DaemonSet to deploy udev rules to all edge nodes
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: udev-rules-deployer
+  namespace: home-assistant
+  labels:
+    app.kubernetes.io/name: udev-deployer
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: udev-deployer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: udev-deployer
+    spec:
+      # Only run on edge/IoT nodes
+      nodeSelector:
+        workload-type: iot
+      
+      tolerations:
+        - key: "iot-only"
+          operator: "Equal"
+          value: "true"
+          effect: "NoSchedule"
+      
+      hostPID: true
+      hostNetwork: true
+      
+      initContainers:
+        - name: deploy-rules
+          image: busybox:latest
+          securityContext:
+            privileged: true
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Deploying udev rules..."
+              cp /rules/*.rules /host-udev/
+              # Trigger udev reload via nsenter to host
+              nsenter --target 1 --mount -- udevadm control --reload-rules
+              nsenter --target 1 --mount -- udevadm trigger
+              echo "udev rules deployed successfully"
+          volumeMounts:
+            - name: rules
+              mountPath: /rules
+            - name: host-udev
+              mountPath: /host-udev
+      
+      containers:
+        - name: pause
+          image: gcr.io/google-containers/pause:3.9
+          resources:
+            requests:
+              cpu: 1m
+              memory: 1Mi
+            limits:
+              cpu: 10m
+              memory: 10Mi
+      
+      volumes:
+        - name: rules
+          configMap:
+            name: udev-rules
+        - name: host-udev
+          hostPath:
+            path: /etc/udev/rules.d
+            type: Directory

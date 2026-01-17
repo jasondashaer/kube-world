@@ -1,0 +1,279 @@
+---
+# Main Ansible Playbook for Raspberry Pi K3s Cluster Setup
+# This playbook configures Pi hardware, installs K3s, and prepares for GitOps
+
+- name: Validate connectivity and gather facts
+  hosts: k3s_cluster
+  gather_facts: yes
+  tasks:
+    - name: Display host information
+      debug:
+        msg: "Connected to {{ inventory_hostname }} ({{ ansible_host }})"
+
+- name: Configure Raspberry Pi base system
+  hosts: k3s_cluster
+  become: yes
+  vars:
+    required_packages:
+      - curl
+      - wget
+      - git
+      - jq
+      - htop
+      - iotop
+      - vim
+      - open-iscsi  # For Longhorn storage
+      - nfs-common
+      - util-linux  # For NVMe utilities
+  
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Upgrade all packages
+      apt:
+        upgrade: dist
+      when: upgrade_packages | default(false)
+
+    - name: Install required packages
+      apt:
+        name: "{{ required_packages }}"
+        state: present
+
+    - name: Set hostname
+      hostname:
+        name: "{{ node_name | default(inventory_hostname) }}"
+
+    - name: Update /etc/hosts
+      lineinfile:
+        path: /etc/hosts
+        regexp: '^127\.0\.1\.1'
+        line: "127.0.1.1 {{ node_name | default(inventory_hostname) }}"
+        state: present
+
+    - name: Configure kernel parameters for Kubernetes
+      sysctl:
+        name: "{{ item.key }}"
+        value: "{{ item.value }}"
+        sysctl_set: yes
+        state: present
+        reload: yes
+      loop:
+        - { key: 'net.bridge.bridge-nf-call-iptables', value: '1' }
+        - { key: 'net.bridge.bridge-nf-call-ip6tables', value: '1' }
+        - { key: 'net.ipv4.ip_forward', value: '1' }
+        - { key: 'vm.swappiness', value: '0' }
+
+    - name: Ensure br_netfilter module is loaded
+      modprobe:
+        name: br_netfilter
+        state: present
+
+    - name: Persist br_netfilter module
+      lineinfile:
+        path: /etc/modules-load.d/k8s.conf
+        line: br_netfilter
+        create: yes
+
+    - name: Disable swap
+      command: swapoff -a
+      changed_when: false
+
+    - name: Remove swap from fstab
+      replace:
+        path: /etc/fstab
+        regexp: '^([^#].*?\sswap\s+sw\s+.*)$'
+        replace: '# \1'
+
+    - name: Configure cgroup memory (Raspberry Pi specific)
+      lineinfile:
+        path: /boot/firmware/cmdline.txt
+        regexp: '^(.*?)$'
+        line: '\1 cgroup_memory=1 cgroup_enable=memory'
+        backrefs: yes
+      register: cgroup_config
+      when: ansible_architecture == "aarch64"
+
+    - name: Reboot if cgroup config changed
+      reboot:
+        reboot_timeout: 300
+      when: cgroup_config.changed | default(false)
+
+- name: Configure NVMe storage (if present)
+  hosts: k3s_cluster
+  become: yes
+  tasks:
+    - name: Check for NVMe devices
+      shell: lsblk -d -o NAME,TYPE | grep nvme || true
+      register: nvme_check
+      changed_when: false
+
+    - name: Configure NVMe storage
+      when: nvme_check.stdout != ""
+      block:
+        - name: Create mount point for NVMe
+          file:
+            path: /mnt/nvme
+            state: directory
+            mode: '0755'
+
+        - name: Check if NVMe is already formatted
+          command: blkid /dev/nvme0n1p1
+          register: nvme_formatted
+          failed_when: false
+          changed_when: false
+
+        - name: Create partition on NVMe
+          parted:
+            device: /dev/nvme0n1
+            number: 1
+            state: present
+            fs_type: ext4
+          when: nvme_formatted.rc != 0
+
+        - name: Format NVMe partition
+          filesystem:
+            fstype: ext4
+            dev: /dev/nvme0n1p1
+          when: nvme_formatted.rc != 0
+
+        - name: Mount NVMe storage
+          mount:
+            path: /mnt/nvme
+            src: /dev/nvme0n1p1
+            fstype: ext4
+            opts: defaults,noatime
+            state: mounted
+
+        - name: Create K8s storage directory on NVMe
+          file:
+            path: /mnt/nvme/k8s-storage
+            state: directory
+            mode: '0755'
+
+- name: Install K3s on master nodes
+  hosts: masters
+  become: yes
+  vars:
+    k3s_server_args: >-
+      --cluster-init
+      --disable=traefik
+      --disable=servicelb
+      --write-kubeconfig-mode=0644
+      --tls-san={{ ansible_host }}
+      --tls-san={{ node_name }}
+      --node-label=node.kubernetes.io/role=master
+      --node-label=topology.kubernetes.io/zone=edge
+      --node-label=workload-type=iot
+      --node-label=hardware=raspberry-pi-5
+  
+  tasks:
+    - name: Check if K3s is already installed
+      stat:
+        path: /usr/local/bin/k3s
+      register: k3s_installed
+
+    - name: Install K3s server
+      shell: |
+        curl -sfL https://get.k3s.io | \
+        INSTALL_K3S_VERSION={{ k3s_version }} \
+        sh -s - server {{ k3s_server_args }}
+      when: not k3s_installed.stat.exists
+
+    - name: Wait for K3s to be ready
+      command: kubectl get nodes
+      register: k3s_ready
+      until: k3s_ready.rc == 0
+      retries: 30
+      delay: 10
+      changed_when: false
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    - name: Get K3s token
+      slurp:
+        src: /var/lib/rancher/k3s/server/node-token
+      register: k3s_token
+
+    - name: Store token for workers
+      set_fact:
+        k3s_join_token: "{{ k3s_token.content | b64decode | trim }}"
+        k3s_master_ip: "{{ ansible_host }}"
+      delegate_facts: true
+      delegate_to: localhost
+
+    - name: Copy kubeconfig to user home
+      copy:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: "/home/{{ ansible_user }}/.kube/config"
+        remote_src: yes
+        owner: "{{ ansible_user }}"
+        mode: '0600'
+      become: yes
+
+- name: Install K3s on worker nodes
+  hosts: workers
+  become: yes
+  vars:
+    k3s_agent_args: >-
+      --node-label=node.kubernetes.io/role=worker
+      --node-label=topology.kubernetes.io/zone=edge
+      --node-label=hardware=raspberry-pi
+  
+  tasks:
+    - name: Check if K3s agent is already installed
+      stat:
+        path: /usr/local/bin/k3s
+      register: k3s_installed
+
+    - name: Install K3s agent
+      shell: |
+        curl -sfL https://get.k3s.io | \
+        INSTALL_K3S_VERSION={{ k3s_version }} \
+        K3S_URL=https://{{ hostvars['localhost']['k3s_master_ip'] }}:6443 \
+        K3S_TOKEN={{ hostvars['localhost']['k3s_join_token'] }} \
+        sh -s - agent {{ k3s_agent_args }}
+      when: 
+        - not k3s_installed.stat.exists
+        - hostvars['localhost']['k3s_join_token'] is defined
+
+- name: Post-installation configuration
+  hosts: masters[0]
+  become: yes
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  
+  tasks:
+    - name: Wait for all nodes to be ready
+      command: kubectl wait --for=condition=Ready nodes --all --timeout=300s
+      changed_when: false
+
+    - name: Install Helm
+      shell: |
+        curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+      args:
+        creates: /usr/local/bin/helm
+
+    - name: Create namespaces
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ item }}"
+      loop:
+        - home-assistant
+        - monitoring
+        - velero
+
+    - name: Display cluster status
+      command: kubectl get nodes -o wide
+      register: cluster_status
+      changed_when: false
+
+    - name: Show cluster status
+      debug:
+        var: cluster_status.stdout_lines

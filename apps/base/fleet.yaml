@@ -1,0 +1,8 @@
+# Fleet bundle configuration for base resources
+defaultNamespace: default
+
+# Apply to all clusters
+targets:
+  - name: all
+    clusterSelector:
+      matchLabels: {}

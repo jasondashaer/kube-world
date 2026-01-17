@@ -1,0 +1,125 @@
+# Pod Priority Classes for Dynamic Workload Scheduling
+# Enables prioritization based on workload importance
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: critical-system
+  labels:
+    app.kubernetes.io/part-of: kube-world
+globalDefault: false
+value: 1000000
+preemptionPolicy: PreemptLowerPriority
+description: "Critical system components that must always run"
+
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: iot-realtime
+  labels:
+    app.kubernetes.io/part-of: kube-world
+globalDefault: false
+value: 900000
+preemptionPolicy: PreemptLowerPriority
+description: "Real-time IoT workloads requiring low latency (Home Assistant, MQTT)"
+
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: monitoring
+  labels:
+    app.kubernetes.io/part-of: kube-world
+globalDefault: false
+value: 800000
+preemptionPolicy: PreemptLowerPriority
+description: "Monitoring and observability workloads"
+
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: standard
+  labels:
+    app.kubernetes.io/part-of: kube-world
+globalDefault: true
+value: 500000
+preemptionPolicy: PreemptLowerPriority
+description: "Standard workloads - default priority"
+
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: batch-low
+  labels:
+    app.kubernetes.io/part-of: kube-world
+globalDefault: false
+value: 100000
+preemptionPolicy: Never
+description: "Batch/background jobs that can be preempted"
+
+---
+# Node Affinity examples for workload placement
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: scheduling-examples
+  namespace: kube-system
+data:
+  # Example: Schedule IoT workloads on Pi
+  iot-affinity.yaml: |
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: workload-type
+                  operator: In
+                  values:
+                    - iot
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+                - key: hardware
+                  operator: In
+                  values:
+                    - raspberry-pi-5
+  
+  # Example: Schedule compute-intensive on Mac/Cloud
+  compute-affinity.yaml: |
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+                - key: topology.kubernetes.io/zone
+                  operator: In
+                  values:
+                    - local
+                    - cloud
+          - weight: 50
+            preference:
+              matchExpressions:
+                - key: kubernetes.io/arch
+                  operator: In
+                  values:
+                    - amd64
+  
+  # Example: Anti-affinity for HA
+  anti-affinity.yaml: |
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                      - my-app
+              topologyKey: kubernetes.io/hostname

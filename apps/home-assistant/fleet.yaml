@@ -1,0 +1,30 @@
+# Fleet bundle configuration for Home Assistant
+# Allows Fleet to deploy this application
+defaultNamespace: home-assistant
+
+helm:
+  # Optional: use Helm chart instead of raw manifests
+  # chart: home-assistant
+  # repo: https://k8s-at-home.com/charts/
+  releaseName: home-assistant
+
+# Target specific clusters
+targets:
+  - name: edge-iot
+    clusterSelector:
+      matchLabels:
+        workload-type: iot
+    
+  - name: pi-clusters
+    clusterSelector:
+      matchLabels:
+        hardware: raspberry-pi
+
+# Deployment options
+diff:
+  comparePatches:
+    - apiVersion: apps/v1
+      kind: Deployment
+      operations:
+        - op: remove
+          path: /spec/template/spec/containers/0/resources

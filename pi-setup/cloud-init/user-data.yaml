@@ -1,19 +1,143 @@
 #cloud-config
-hostname: pi-node-1  # Dynamic via variables if needed
+# Cloud-init configuration for Raspberry Pi
+# Flash this to the boot partition of your Pi's SD card or NVMe
+
+# Basic system configuration
+hostname: pi-node-1
+manage_etc_hosts: true
+locale: en_US.UTF-8
+timezone: America/New_York
+
+# User configuration
 users:
   - name: admin
+    groups: [sudo, docker, adm]
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    lock_passwd: false
+    # Generate password hash with: mkpasswd -m sha-512
+    # Default password: 'changeme' - CHANGE THIS!
+    passwd: $6$rounds=4096$randomsalt$hashedpasswordhere
     ssh_authorized_keys:
-      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... your-public-key
+      # Add your public SSH key here
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... your-key-here
+
+# SSH configuration
+ssh_pwauth: false
+disable_root: true
+
+# Package management
 package_update: true
 package_upgrade: true
+package_reboot_if_required: true
+
 packages:
   - curl
+  - wget
   - git
+  - vim
+  - htop
+  - iotop
+  - jq
+  - open-iscsi
+  - nfs-common
+  - linux-modules-extra-raspi
+
+# Write files
+write_files:
+  # Kernel modules for Kubernetes
+  - path: /etc/modules-load.d/k8s.conf
+    content: |
+      br_netfilter
+      overlay
+    permissions: '0644'
+
+  # Sysctl settings for Kubernetes
+  - path: /etc/sysctl.d/99-kubernetes.conf
+    content: |
+      net.bridge.bridge-nf-call-iptables = 1
+      net.bridge.bridge-nf-call-ip6tables = 1
+      net.ipv4.ip_forward = 1
+      vm.swappiness = 0
+    permissions: '0644'
+
+  # Script to complete setup after first boot
+  - path: /opt/kube-world/first-boot.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      set -e
+      
+      LOG_FILE="/var/log/kube-world-setup.log"
+      exec > >(tee -a "$LOG_FILE") 2>&1
+      
+      echo "=== kube-world first-boot setup started at $(date) ==="
+      
+      # Wait for network
+      until ping -c1 github.com &>/dev/null; do
+        echo "Waiting for network..."
+        sleep 5
+      done
+      
+      # Load kernel modules
+      modprobe br_netfilter
+      modprobe overlay
+      
+      # Apply sysctl settings
+      sysctl --system
+      
+      # Disable swap
+      swapoff -a
+      sed -i '/swap/d' /etc/fstab
+      
+      # Clone kube-world repository
+      if [ ! -d /opt/kube-world/repo ]; then
+        git clone https://github.com/jasondashaer/kube-world.git /opt/kube-world/repo
+      fi
+      
+      echo "=== First-boot setup complete at $(date) ==="
+      echo "Run Ansible playbook from management machine to complete K3s installation."
+
+# Run commands
 runcmd:
-  - echo "cgroup_memory=1 cgroup_enable=memory" >> /boot/firmware/cmdline.txt
-  - swapoff -a && sed -i '/swap/d' /etc/fstab  # Disable swap
-  - reboot  # Apply changes
-  - curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.28.5+k3s1 sh -  # Install K3s (master or agent)
-  - [if joining: curl -sfL https://get.k3s.io | K3S_URL=https://your-master-ip:6443 K3S_TOKEN=your-token-from-repo sh -]
-  - git clone https://github.com/your-username/your-monorepo.git /opt/repo
-  - /opt/repo/pi-setup/scripts/post-install.sh  # Custom script for Rancher registration/GitOps
+  # Enable cgroup memory (required for K3s on Pi)
+  - |
+    if ! grep -q "cgroup_memory=1" /boot/firmware/cmdline.txt; then
+      sed -i 's/$/ cgroup_memory=1 cgroup_enable=memory/' /boot/firmware/cmdline.txt
+    fi
+  
+  # Load kernel modules
+  - modprobe br_netfilter || true
+  - modprobe overlay || true
+  
+  # Apply sysctl
+  - sysctl --system
+  
+  # Disable swap
+  - swapoff -a
+  - sed -i '/swap/d' /etc/fstab
+  
+  # Create kube-world directory
+  - mkdir -p /opt/kube-world
+  
+  # Run first-boot script
+  - /opt/kube-world/first-boot.sh
+  
+  # Reboot to apply cgroup changes
+  - 'if ! grep -q "cgroup_memory=1" /proc/cmdline; then reboot; fi'
+
+# Final message
+final_message: |
+  ===========================================
+  kube-world Pi Node Setup Complete!
+  ===========================================
+  
+  Cloud-init finished at $TIMESTAMP
+  System uptime: $UPTIME
+  
+  Next steps:
+  1. SSH to this node: ssh admin@<ip-address>
+  2. Run Ansible from management machine to install K3s
+  
+  Logs: /var/log/cloud-init-output.log
+  ===========================================

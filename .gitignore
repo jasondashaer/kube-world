@@ -1,0 +1,58 @@
+# Logs
+*.log
+.bootstrap.log
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+
+# Editor directories and files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Secrets - NEVER commit unencrypted secrets
+secrets/*.yaml
+!secrets/*.template.yaml
+!secrets/README.md
+
+# Age private keys
+*.txt
+key.txt
+
+# Kubeconfig files
+kubeconfig*
+*.kubeconfig
+
+# Terraform (if added later)
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+
+# Ansible
+*.retry
+
+# Temp files
+tmp/
+temp/
+.tmp/
+
+# Python (for ansible)
+__pycache__/
+*.py[cod]
+.Python
+venv/
+ENV/
+
+# Node (if any tooling)
+node_modules/
+
+# KIND cluster data
+/tmp/kube-world/

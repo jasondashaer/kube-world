@@ -3,23 +3,19 @@
 
 # Creation rules - how to encrypt new files
 creation_rules:
+  # Central config file (contains WiFi passwords, etc.)
+  - path_regex: ^config\.yaml$
+    encrypted_regex: "^(password|secret|key|token)$"
+    age: "age19grykgll3ugdtt0z98p4j0qefrt6alqesnwsw7gwj8kteamt2swslppqtc"
   # Encrypt all secrets in the secrets directory
   - path_regex: secrets/.*\.yaml$
-    age: >-
-      # Add your age public key here
-      # Generate with: age-keygen -o key.txt
-      age1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-    
+    age: "age19grykgll3ugdtt0z98p4j0qefrt6alqesnwsw7gwj8kteamt2swslppqtc"
   # Encrypt Kubernetes secrets
   - path_regex: .*secret.*\.yaml$
     encrypted_regex: "^(data|stringData)$"
-    age: >-
-      age1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-
+    age: "age19grykgll3ugdtt0z98p4j0qefrt6alqesnwsw7gwj8kteamt2swslppqtc"
   # Encrypt .env files
   - path_regex: .*\.env$
-    age: >-
-      age1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-
+    age: "age19grykgll3ugdtt0z98p4j0qefrt6alqesnwsw7gwj8kteamt2swslppqtc"
 # Note: Store your private key (key.txt) securely and NEVER commit it
 # Export the key location: export SOPS_AGE_KEY_FILE=~/.sops/key.txt

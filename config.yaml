@@ -1,0 +1,270 @@
+# kube-world Central Configuration
+# ================================
+# This is the single source of truth for all configurable parameters.
+# All other configs reference or are templated from this file.
+#
+# USAGE:
+#   - Update values here before running bootstrap.sh
+#   - Secrets (marked [SOPS]) should be encrypted before committing
+#   - Run: yq eval '.network.wifi.ssids[0].password = "newpass"' -i config.yaml
+#
+# RELATED FILES:
+#   - inventory/hardware.yaml: Auto-generated from nodes/iot_devices sections
+#   - pi-setup/cloud-init/network-config.yaml: Uses network.wifi settings
+#   - infrastructure/terraform.tfvars: Uses cloud/dns/backup sections
+#   - secrets/.sops.yaml: Encryption config for [SOPS] fields
+#
+apiVersion: kube-world.io/v1
+kind: ClusterConfig
+metadata:
+    name: kube-world
+    version: 1.0.0
+    lastUpdated: "2026-01-16"
+#===============================================================================
+# Deployment Settings
+#===============================================================================
+deployment:
+    # Target mode: dev | prod
+    mode: dev
+    # Primary platform: mac-arm64 | mac-amd64 | pi | cloud
+    # Set to 'auto' for auto-detection
+    platform: auto
+    # Kubernetes distribution versions
+    versions:
+        k3s: v1.29.0+k3s1
+        rancher: 2.8.0
+        helm: 3.14.0
+    # Feature flags
+    features:
+        rancher: true
+        fleet_gitops: true
+        velero_backups: true
+        kyverno_policies: true
+        home_assistant: true
+        # Future: Prometheus/Grafana stack
+        monitoring: false
+#===============================================================================
+# Network Configuration
+#===============================================================================
+network:
+    # Home network settings (used for Pi deployments)
+    home:
+        subnet: 192.168.1.0/24
+        gateway: 192.168.1.1
+        dns:
+            - 8.8.8.8
+            - 8.8.4.4
+        # DNS search domain
+        search_domain: local
+    # Static IP assignments for nodes
+    # These should also be reserved in your router's DHCP settings
+    static_ips:
+        pi5-master-1: 192.168.1.100
+        pi5-worker-1: 192.168.1.101
+        pi5-worker-2: 192.168.1.102
+    # WiFi configuration for Pi headless setup
+    # NOTE: Passwords are sensitive - consider using SOPS encryption
+    # See: secrets/README.md for encryption instructions
+    wifi:
+        enabled: true
+        # Priority order - first available will be used
+        ssids:
+            # [UPDATE] Your primary WiFi
+            - name: TheLighthouse5G
+              # [SOPS] Encrypt this value
+              password: ENC[AES256_GCM,data:aiQmZuCwNH/dX8hBjCgyynmTJt68EIynXXasbcrRC8fnf1EI8njgfZzZ3v+R6fgdDiDPPw==,iv:2JYbeRT/L8ctE5Rm1TNT3IttUNTNIYcj2JsIBonoIvw=,tag:gxOUkHo9c3eM8fzXlY7t/w==,type:str]
+              priority: 10
+            # [UPDATE] Backup WiFi (optional)
+            - name: Peachtree Cottage
+              # [SOPS] Encrypt this value
+              password: ENC[AES256_GCM,data:0DpAxW7sVFHR,iv:Ucjo6hjUKC30t3vDcqlCb16Whx3Cc6Z+xoYyZ18Grdo=,tag:tBUHhIAfhsX4XiwgHk8uXw==,type:str]
+              priority: 5
+#===============================================================================
+# Node Inventory
+#===============================================================================
+# Primary compute nodes - sync with inventory/hardware.yaml
+nodes:
+    # Development machine
+    macbook:
+        id: macbook-pro-m3
+        enabled: true
+        role: management
+        # Network interfaces - useful for identification but not critical
+        # Dongle MACs are transient; built-in interfaces are stable
+        network:
+            # Built-in interfaces (stable)
+            # [UPDATE] en0 MAC address
+            wifi_mac: 60:3e:5f:64:df:21
+            # Thunderbolt/USB adapters (transient - for reference only)
+            # These may change with different dongles
+            thunderbolt_macs:
+                # [UPDATE] en8/en9 if using
+                - XX:XX:XX:XX:XX:XX
+    # Raspberry Pi nodes
+    pi_nodes:
+        - id: pi5-master-1
+          enabled: true
+          role: master
+          # MAC address for DHCP reservation
+          # [UPDATE] eth0 MAC from Pi
+          mac: XX:XX:XX:XX:XX:XX
+          ip: 192.168.1.100
+          # WiFi MAC (if using WiFi instead of ethernet)
+          # [UPDATE] wlan0 MAC from Pi
+          wifi_mac: 88:a2:9e:4a:d8:8a
+#===============================================================================
+# IoT Device Inventory
+#===============================================================================
+# Home automation controllers - sync with inventory/hardware.yaml
+iot_devices:
+    zigbee:
+        # [UPDATE] Set true when purchased
+        enabled: false
+        # e.g., "Sonoff Zigbee 3.0 USB Dongle Plus"
+        controller: TBD
+        # [UPDATE] from lsusb
+        vendor_id: XXXX
+        # [UPDATE] from lsusb
+        product_id: XXXX
+        # zha | zigbee2mqtt
+        integration: zha
+    zwave:
+        # [UPDATE] Set true when purchased
+        enabled: false
+        controller: Home Assistant Connect ZWA-2
+        vendor_id: 10c4
+        product_id: ea60
+        integration: zwave_js
+    thread:
+        # [UPDATE] Set true when purchased
+        enabled: false
+        controller: Home Assistant Connect ZBT-2
+        # [UPDATE] from lsusb
+        vendor_id: XXXX
+        # [UPDATE] from lsusb
+        product_id: XXXX
+#===============================================================================
+# Cloud Provider Configuration
+#===============================================================================
+# Cloud-agnostic settings - populate based on your chosen provider
+cloud:
+    # Primary provider: aws | gcp | azure | none
+    primary_provider: none
+    # AWS Configuration
+    aws:
+        enabled: false
+        region: us-east-1
+        # Credentials should be in ~/.aws/credentials or environment variables
+        # DO NOT store credentials in this file
+    # GCP Configuration  
+    gcp:
+        enabled: false
+        # [UPDATE] Your GCP project ID
+        project_id: ""
+        region: us-central1
+        # Credentials via GOOGLE_APPLICATION_CREDENTIALS env var
+    # Azure Configuration
+    azure:
+        enabled: false
+        # [UPDATE] Your Azure subscription
+        subscription_id: ""
+        location: eastus
+        resource_group: kube-world-rg
+#===============================================================================
+# DNS Configuration
+#===============================================================================
+dns:
+    # Domain for your services
+    # [UPDATE] e.g., "home.yourdomain.com"
+    domain: ""
+    # DNS provider: route53 | clouddns | azure_dns | cloudflare | none
+    provider: none
+    # Provider-specific settings
+    route53:
+        # [UPDATE] If using Route53
+        zone_id: ""
+    clouddns:
+        # [UPDATE] If using Cloud DNS
+        zone_name: ""
+    # Local DNS (for Pi/home network)
+    local:
+        # Use mDNS for local discovery
+        mdns_enabled: true
+        # Local hostnames
+        hostnames:
+            rancher: rancher.local
+            home_assistant: homeassistant.local
+#===============================================================================
+# Backup Configuration
+#===============================================================================
+backup:
+    # Backup provider: s3 | gcs | azure_blob | minio | none
+    # Default to local MinIO for self-hosted
+    provider: minio
+    # Schedule (cron format)
+    # Daily at 2 AM
+    schedule: 0 2 * * *
+    # Retention
+    retention:
+        daily: 7
+        weekly: 4
+        monthly: 3
+    # S3/MinIO settings
+    s3:
+        bucket: kube-world-backups
+        region: us-east-1
+        # For MinIO, use local endpoint
+        endpoint: http://minio.minio-system.svc:9000
+    # GCS settings
+    gcs:
+        bucket: kube-world-backups
+        # [UPDATE] If using GCS
+        project_id: ""
+#===============================================================================
+# Security Configuration
+#===============================================================================
+security:
+    # SOPS encryption
+    sops:
+        # Age public key for encryption
+        # Generate with: age-keygen -o secrets/age.key
+        # [UPDATE] Your age public key
+        age_public_key: ""
+    # SSH key for Pi access
+    ssh:
+        # Path to public key (will be added to Pi authorized_keys)
+        public_key_path: ~/.ssh/id_ed25519.pub
+    # TLS certificates
+    tls:
+        # cert-manager issuer: letsencrypt-staging | letsencrypt-prod | selfsigned
+        issuer: selfsigned
+        # Email for Let's Encrypt (required for letsencrypt-*)
+        # [UPDATE] Your email for LE
+        email: ""
+#===============================================================================
+# Repository Settings
+#===============================================================================
+repository:
+    # Git repository URL (for Fleet GitOps)
+    url: https://github.com/jasondashaer/kube-world.git
+    branch: main
+    # Paths to watch for GitOps
+    paths:
+        - apps/
+        - policies/
+        - gitops/
+sops:
+    age:
+        - recipient: age19grykgll3ugdtt0z98p4j0qefrt6alqesnwsw7gwj8kteamt2swslppqtc
+          enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBOSk5DbXR1b1d2bkx5WnJI
+            L2FuSFh2T2MrUG9PTU51dEg0c0QxdUZtQnlJClZHNXJ1ZEtZa1lFN25oNE1aVUdU
+            cE5OTDlwVnhKVnhUQURSamxpZkkzbFkKLS0tIE9Ld0RjZDBYZkRyVWxhV3krWXla
+            Ui85ZDBwdGI1RUZnZFpyUTVmSGxNUXcKMR3VdVeIa9PtURz3pnUAA8WFWY63u79l
+            MGX/iYegqClyFjmQnr4ii7/qkrnNn8uM0xxL6znybbe9ICf+scvXKg==
+            -----END AGE ENCRYPTED FILE-----
+    lastmodified: "2026-01-17T05:18:45Z"
+    mac: ENC[AES256_GCM,data:WcmhDtfIZxtugaWSXR6ZYpcciwJyxhWjxP2jYmK4lUA9CJj2tV3RUoWL6hwKL4tTTIUxNiXAobs13XAY6JcyrtLyFoXaNAST+MBKIiCg4eRd6d8UdQWTb1vjDr7pTiBhwpsy6Z9Ixg7v/NQnqGtPDYZJqBrMMEzMBkZOb2fWncA=,iv:ZKomVQgid9GeZmU6XQbTT44Is2NX6N6FjzbzquMWGIo=,tag:cUhVYOf8j8lS4lF7/eYeeQ==,type:str]
+    encrypted_regex: ^(password|secret|key|token)$
+    version: 3.11.0

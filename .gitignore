@@ -21,6 +21,7 @@ Thumbs.db
 secrets/*.yaml
 !secrets/*.template.yaml
 !secrets/README.md
+age.key
 
 # Age private keys
 *.txt

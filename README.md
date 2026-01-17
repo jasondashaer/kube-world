@@ -18,9 +18,18 @@ A comprehensive, ephemeral Kubernetes orchestration framework designed for seaml
 
 ### Prerequisites
 
-- macOS or Linux machine (management workstation)
-- Git, Homebrew (macOS), or apt (Linux)
-- SSH key pair (`~/.ssh/id_ed25519`)
+**Required:**
+- macOS (Apple Silicon or Intel) or Linux machine
+- Git
+
+**For Mac Development (KIND cluster):**
+- **Docker Desktop** - [Download here](https://www.docker.com/products/docker-desktop/)
+  - Choose "Mac with Apple Chip" for M1/M2/M3 Macs
+  - Launch Docker Desktop and wait for it to fully start before running bootstrap
+
+**For Pi Deployment:**
+- Raspberry Pi 5 (recommended) or Pi 4 with 4GB+ RAM
+- SSH access to Pi
 
 ### One-Command Bootstrap
 
@@ -29,11 +38,19 @@ A comprehensive, ephemeral Kubernetes orchestration framework designed for seaml
 git clone https://github.com/jasondashaer/kube-world.git
 cd kube-world
 
-# Run bootstrap (auto-detects platform)
-./bootstrap.sh
+# FIRST: Edit config.yaml with your settings
+# - WiFi credentials (for Pi)
+# - Static IP reservations
+# - Cloud provider settings (optional)
 
-# Or specify options
+# For Mac development (requires Docker Desktop running)
 ./bootstrap.sh --platform mac --mode dev --verbose
+
+# For Raspberry Pi
+./bootstrap.sh --platform pi --mode dev --verbose
+
+# Or auto-detect platform
+./bootstrap.sh
 ```
 
 ### Bootstrap Options
@@ -157,12 +174,31 @@ GitHub Actions workflows (planned):
 - [x] Home Assistant deployment
 - [x] Kyverno security policies
 - [x] SOPS secrets management
+- [x] Central configuration (config.yaml)
+- [x] Cloud-agnostic Terraform modules
+- [x] Velero multi-backend backup config
+- [x] Hardware inventory system
 - [ ] Prometheus/Grafana monitoring stack
-- [ ] Velero backup configuration
 - [ ] AWS EKS provisioning
 - [ ] GCP GKE provisioning
 - [ ] Karmada multi-cluster federation
 - [ ] GitHub Actions CI/CD
+
+## ⚙️ Configuration
+
+All settings are centralized in `config.yaml`:
+
+| Section | Purpose |
+|---------|---------|
+| `deployment` | Mode, platform, versions, feature flags |
+| `network` | Home network, static IPs, WiFi settings |
+| `nodes` | MacBook and Pi node inventory |
+| `iot_devices` | Zigbee, Z-Wave, Thread controllers |
+| `cloud` | AWS/GCP/Azure provider settings |
+| `backup` | Velero backup destinations |
+| `security` | SOPS keys, SSH, TLS settings |
+
+Edit `config.yaml` before running bootstrap to customize your deployment.
 
 ## 🤝 Contributing
 

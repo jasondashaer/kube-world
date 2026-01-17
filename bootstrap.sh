@@ -93,6 +93,62 @@ install_prereqs_mac() {
         /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
     fi
     
+    # Docker Desktop is required for KIND - cannot be installed via Homebrew easily
+    if ! check_command docker; then
+        echo ""
+        error "Docker Desktop is required but not installed."
+        echo ""
+        echo "============================================="
+        echo "  Docker Desktop Installation Required"
+        echo "============================================="
+        echo ""
+        echo "KIND (Kubernetes in Docker) requires Docker Desktop on macOS."
+        echo ""
+        echo "Install Docker Desktop:"
+        echo "  1. Download from: https://www.docker.com/products/docker-desktop/"
+        echo "     (Choose 'Mac with Apple Chip' for M1/M2/M3 Macs)"
+        echo ""
+        echo "  2. Or install via Homebrew Cask:"
+        echo "     brew install --cask docker"
+        echo ""
+        echo "  3. After installation, launch Docker Desktop from Applications"
+        echo "     and wait for it to fully start (whale icon in menu bar)"
+        echo ""
+        echo "  4. Re-run this bootstrap script"
+        echo ""
+        echo "Alternative: For Pi deployment, use --platform pi instead."
+        echo ""
+        
+        # Offer to install via Homebrew
+        read -p "Would you like to install Docker Desktop via Homebrew now? [y/N] " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            log "Installing Docker Desktop via Homebrew..."
+            brew install --cask docker
+            echo ""
+            warn "Docker Desktop installed. Please launch it from Applications."
+            warn "Wait for Docker to fully start, then re-run this script."
+            exit 0
+        else
+            exit 1
+        fi
+    fi
+    
+    # Verify Docker daemon is running
+    if ! docker info &>/dev/null; then
+        echo ""
+        error "Docker Desktop is installed but not running."
+        echo ""
+        echo "Please:"
+        echo "  1. Launch Docker Desktop from Applications"
+        echo "  2. Wait for it to fully start (whale icon in menu bar stops animating)"
+        echo "  3. Re-run this bootstrap script"
+        echo ""
+        exit 1
+    fi
+    
+    log "Docker Desktop detected and running ✓"
+    
     local packages=("kubectl" "helm" "kind" "ansible" "sops" "age" "jq" "yq")
     for pkg in "${packages[@]}"; do
         if ! check_command "$pkg"; then

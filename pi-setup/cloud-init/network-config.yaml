@@ -1,6 +1,15 @@
 # Network Configuration for Cloud-Init (Static IP)
 # Copy this to /boot/firmware/network-config on the Pi's boot partition
-# Uncomment and customize the static IP section below
+#
+# IMPORTANT: This is a TEMPLATE file. WiFi credentials should be:
+#   1. Stored in config.yaml (network.wifi section)
+#   2. Encrypted with SOPS before committing
+#   3. Rendered at deploy time by Ansible/cloud-init templating
+#
+# For quick testing, you can manually add WiFi credentials before copying
+# to the Pi, but DO NOT commit plaintext passwords to Git.
+#
+# See: docs/pi-setup.md for detailed instructions
 
 network:
   version: 2
@@ -8,10 +17,11 @@ network:
   
   ethernets:
     eth0:
-      # Option 1: DHCP (default, simpler)
+      # Option 1: DHCP (default, recommended for most setups)
       dhcp4: true
       
-      # Option 2: Static IP (uncomment below, comment out dhcp4: true)
+      # Option 2: Static IP (uncomment below, comment out dhcp4: true above)
+      # Configure IP reservation in your router for better reliability
       # dhcp4: false
       # addresses:
       #   - 192.168.1.100/24
@@ -25,15 +35,18 @@ network:
       #   search:
       #     - local
       
-      # Optional: Wake-on-LAN
+      # Optional: Wake-on-LAN for remote power management
       # wakeonlan: true
   
-  # WiFi (optional, for headless setup)
+  # WiFi Configuration (for headless/portable setup)
+  # SECURITY: Credentials are templated from encrypted config at deploy time
+  # Manual setup: Uncomment and fill before copying to Pi (don't commit!)
   wifis:
     wlan0:
       dhcp4: true
-      access-points:
-        "Peachtree Cottage":
-          password: "NewPass1!"
-        "TheLighthouse5G":
-          password: "thisisthewifipasswordSOMELETTERSARECAPITAL"
+      # access-points:
+      #   "YOUR_WIFI_SSID":
+      #     password: "YOUR_WIFI_PASSWORD"
+      #   # Add backup networks as needed
+      #   "BACKUP_SSID":
+      #     password: "BACKUP_PASSWORD"

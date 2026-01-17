@@ -48,6 +48,60 @@ debug() { [[ "$VERBOSE" == "true" ]] && echo -e "${BLUE}[DEBUG]${NC} $*" | tee -
 #===============================================================================
 # Utility Functions
 #===============================================================================
+
+# Wait for a CRD to be available in the cluster
+# Usage: wait_for_crd <crd-name> [timeout_seconds]
+wait_for_crd() {
+    local crd_name="$1"
+    local timeout="${2:-300}"  # Default 5 minutes
+    local interval=5
+    local elapsed=0
+    
+    log "Waiting for CRD '${crd_name}' to be available..."
+    
+    while [[ $elapsed -lt $timeout ]]; do
+        if kubectl get crd "${crd_name}" &>/dev/null; then
+            log "CRD '${crd_name}' is available ✓"
+            return 0
+        fi
+        debug "CRD '${crd_name}' not yet available, waiting ${interval}s... (${elapsed}/${timeout}s)"
+        sleep $interval
+        elapsed=$((elapsed + interval))
+    done
+    
+    error "Timeout waiting for CRD '${crd_name}' after ${timeout}s"
+    return 1
+}
+
+# Wait for Fleet CRDs specifically (installed by Rancher)
+wait_for_fleet_crds() {
+    log "Waiting for Fleet CRDs to be installed by Rancher..."
+    
+    local fleet_crds=(
+        "gitrepos.fleet.cattle.io"
+        "bundles.fleet.cattle.io"
+        "clustergroups.fleet.cattle.io"
+        "clusters.fleet.cattle.io"
+    )
+    
+    for crd in "${fleet_crds[@]}"; do
+        if ! wait_for_crd "$crd" 300; then
+            error "Fleet CRD '$crd' not available. Is Rancher fully installed?"
+            return 1
+        fi
+    done
+    
+    # Also wait for fleet-controller to be ready
+    log "Waiting for Fleet controller to be ready..."
+    kubectl wait --for=condition=Available deployment/fleet-controller \
+        -n cattle-fleet-system --timeout=300s 2>/dev/null || \
+    kubectl wait --for=condition=Available deployment/fleet-controller \
+        -n fleet-system --timeout=300s 2>/dev/null || true
+    
+    log "Fleet CRDs and controller ready ✓"
+    return 0
+}
+
 detect_platform() {
     local os arch
     os="$(uname -s | tr '[:upper:]' '[:lower:]')"
@@ -360,9 +414,34 @@ install_rancher() {
 setup_gitops() {
     log "Setting up GitOps with Fleet..."
     
-    # Fleet is installed with Rancher, just need to configure it
+    # CRITICAL: Fleet CRDs are installed asynchronously by Rancher
+    # We must wait for them before applying our GitRepo resources
+    if ! wait_for_fleet_crds; then
+        error "Fleet CRDs not available. Cannot configure GitOps."
+        error "This usually means Rancher installation is incomplete."
+        error "Check Rancher pods: kubectl -n cattle-system get pods"
+        return 1
+    fi
+    
+    # Ensure fleet-local namespace exists (created by Rancher)
+    log "Waiting for Fleet namespaces..."
+    local ns_timeout=60
+    local ns_elapsed=0
+    while [[ $ns_elapsed -lt $ns_timeout ]]; do
+        if kubectl get namespace fleet-local &>/dev/null; then
+            break
+        fi
+        debug "Waiting for fleet-local namespace..."
+        sleep 5
+        ns_elapsed=$((ns_elapsed + 5))
+    done
+    
     # Apply Fleet GitRepo configuration
-    kubectl apply -f "${SCRIPT_DIR}/gitops/fleet.yaml"
+    log "Applying Fleet GitRepo configuration..."
+    if ! kubectl apply -f "${SCRIPT_DIR}/gitops/fleet.yaml"; then
+        error "Failed to apply Fleet configuration"
+        return 1
+    fi
     
     # Create Fleet clusters if needed
     if [[ -f "${SCRIPT_DIR}/gitops/clusters.yaml" ]]; then
@@ -378,13 +457,24 @@ setup_gitops() {
 deploy_core_apps() {
     log "Deploying core applications..."
     
-    # Apply base configurations
-    kubectl apply -f "${SCRIPT_DIR}/apps/base/" --recursive 2>/dev/null || true
+    # Apply base configurations (excluding fleet.yaml which is processed by Fleet)
+    # Fleet bundle configs (fleet.yaml) don't have apiVersion/kind - they're Fleet-specific
+    for manifest in "${SCRIPT_DIR}"/apps/base/*.yaml; do
+        if [[ -f "$manifest" && "$(basename "$manifest")" != "fleet.yaml" ]]; then
+            debug "Applying: $manifest"
+            kubectl apply -f "$manifest" 2>/dev/null || true
+        fi
+    done
     
     # Apply platform-specific configurations
     local platform_apps="${SCRIPT_DIR}/apps/${PLATFORM}/"
     if [[ -d "$platform_apps" ]]; then
-        kubectl apply -f "$platform_apps" --recursive
+        for manifest in "${platform_apps}"*.yaml; do
+            if [[ -f "$manifest" && "$(basename "$manifest")" != "fleet.yaml" ]]; then
+                debug "Applying: $manifest"
+                kubectl apply -f "$manifest" 2>/dev/null || true
+            fi
+        done
     fi
     
     log "Core apps deployed ✓"

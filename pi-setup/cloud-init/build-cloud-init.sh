@@ -445,6 +445,9 @@ package_reboot_if_required: true
 packages:
   # SSH server (ensure it's installed and enabled)
   - openssh-server
+  # mDNS/Bonjour - REQUIRED for .local hostname resolution
+  - avahi-daemon
+  - libnss-mdns
   - curl
   - wget
   - git
@@ -458,7 +461,10 @@ packages:
   # WiFi support (CRITICAL for networkd renderer)
   - wpasupplicant
   - wireless-tools
-  - crda${role_packages}
+  - crda
+  # Network diagnostics
+  - net-tools
+  - iputils-ping${role_packages}
 
 # Write configuration files
 write_files:
@@ -555,10 +561,21 @@ runcmd:
   # Ensure SSH service is enabled and started
   - systemctl enable ssh
   - systemctl start ssh
+  # Ensure avahi-daemon (mDNS) is enabled for .local hostname resolution
+  - systemctl enable avahi-daemon
+  - systemctl start avahi-daemon
   # Ensure .ssh directory has correct permissions
   - chmod 700 /home/admin/.ssh || true
   - chmod 600 /home/admin/.ssh/authorized_keys || true
   - chown -R admin:admin /home/admin/.ssh || true
+  # Log network status for debugging
+  - echo "=== Network Status ===" >> /var/log/kube-world-network.log
+  - ip addr >> /var/log/kube-world-network.log 2>&1
+  - echo "=== SSH Status ===" >> /var/log/kube-world-network.log
+  - systemctl status ssh >> /var/log/kube-world-network.log 2>&1
+  - ss -tlnp | grep 22 >> /var/log/kube-world-network.log 2>&1
+  - echo "=== Avahi Status ===" >> /var/log/kube-world-network.log
+  - systemctl status avahi-daemon >> /var/log/kube-world-network.log 2>&1
   # Create kube-world directories
   - mkdir -p /opt/kube-world
   - mkdir -p /etc/kube-world

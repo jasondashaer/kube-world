@@ -77,6 +77,31 @@ wait_for_crd() {
 wait_for_fleet_crds() {
     log "Waiting for Fleet CRDs to be installed by Rancher..."
     
+    # First, ensure Rancher is FULLY ready (not just deployed)
+    log "Verifying Rancher internal components are running..."
+    local rancher_ready_timeout=300
+    local rancher_elapsed=0
+    while [[ $rancher_elapsed -lt $rancher_ready_timeout ]]; do
+        # Check if rancher pods are all running (not just deployment ready)
+        local not_ready
+        not_ready=$(kubectl -n cattle-system get pods -o jsonpath='{.items[*].status.phase}' 2>/dev/null | tr ' ' '\n' | grep -v "Running" | grep -v "Succeeded" | wc -l | tr -d ' ')
+        if [[ "$not_ready" == "0" ]]; then
+            # Also check that fleet-controller namespace exists (created by Rancher)
+            if kubectl get namespace cattle-fleet-system &>/dev/null || kubectl get namespace fleet-system &>/dev/null; then
+                log "Rancher internal components ready ✓"
+                break
+            fi
+        fi
+        debug "Rancher internal components not fully ready, waiting... (${rancher_elapsed}/${rancher_ready_timeout}s)"
+        sleep 10
+        rancher_elapsed=$((rancher_elapsed + 10))
+    done
+    
+    if [[ $rancher_elapsed -ge $rancher_ready_timeout ]]; then
+        warn "Rancher internal components may not be fully ready, continuing anyway..."
+        kubectl -n cattle-system get pods
+    fi
+    
     local fleet_crds=(
         "gitrepos.fleet.cattle.io"
         "bundles.fleet.cattle.io"
@@ -87,6 +112,8 @@ wait_for_fleet_crds() {
     for crd in "${fleet_crds[@]}"; do
         if ! wait_for_crd "$crd" 300; then
             error "Fleet CRD '$crd' not available. Is Rancher fully installed?"
+            error "Debug: kubectl -n cattle-system get pods"
+            error "Debug: kubectl get crd | grep fleet"
             return 1
         fi
     done

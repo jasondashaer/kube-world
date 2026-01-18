@@ -466,6 +466,7 @@ packages:
   # WiFi support (CRITICAL for networkd renderer)
   - wpasupplicant
   - wireless-tools
+  - iw
   - crda
   # Network diagnostics
   - net-tools

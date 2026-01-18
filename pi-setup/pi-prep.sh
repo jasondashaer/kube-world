@@ -55,7 +55,7 @@ discover_pis() {
     
     echo ""
     echo "  Checking ARP table for known Pi MAC addresses..."
-    echo "  (Pi MACs start with: d8:3a:dd, dc:a6:32, e4:5f:01, 2c:cf:67, b8:27:eb)"
+    echo "  (Pi MACs start with: 88:a2:9e, d8:3a:dd, dc:a6:32, e4:5f:01, 2c:cf:67, b8:27:eb)"
     echo ""
     
     # Check ARP table for known Raspberry Pi MAC prefixes
@@ -67,7 +67,7 @@ discover_pis() {
             local mac=$(echo "$line" | grep -oE '([0-9a-f]{1,2}:){5}[0-9a-f]{1,2}' | head -1)
             echo "    Found Pi: $ip ($mac)"
         fi
-    done < <(arp -a 2>/dev/null | grep -iE "d8:3a:dd|dc:a6:32|e4:5f:01|2c:cf:67|b8:27:eb")
+    done < <(arp -a 2>/dev/null | grep -iE "88:a2:9e:4a:d8:8a|d8:3a:dd|dc:a6:32|e4:5f:01|2c:cf:67|b8:27:eb")
     
     if [[ "$found" == "false" ]]; then
         warn "No Pis found in ARP cache."

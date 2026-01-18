@@ -20,7 +20,7 @@ users:
     passwd: JsttodKsvldpm12!
     ssh_authorized_keys:
       # Add your public SSH key here
-      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIM3wxlKGNVmY39Kn29DcbToQdQrff5zaeqdpZ/kJTdph jax3200@gmail.com
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPwwEqm9UP4LND/8HmDhNoA3r4CNqxGXsgISE5Hi1O8y jacksonharris@Jacksons-MacBook-Pro-2.local
 
 # SSH configuration
 ssh_pwauth: false

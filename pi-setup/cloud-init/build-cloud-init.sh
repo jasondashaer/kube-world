@@ -583,6 +583,40 @@ runcmd:
   - chmod 700 /home/admin/.ssh || true
   - chmod 600 /home/admin/.ssh/authorized_keys || true
   - chown -R admin:admin /home/admin/.ssh || true
+  # CRITICAL: Disable WiFi power management to prevent disconnects during K3s load
+  - iw dev wlan0 set power_save off || true
+  # Make WiFi power management disable persistent
+  - |
+    cat > /etc/NetworkManager/conf.d/wifi-powersave-off.conf << 'NMCONF'
+    [connection]
+    wifi.powersave = 2
+    NMCONF
+  - |
+    cat > /etc/systemd/system/wifi-powersave-off.service << 'WIFISERVICE'
+    [Unit]
+    Description=Disable WiFi Power Save
+    After=network.target
+    
+    [Service]
+    Type=oneshot
+    ExecStart=/sbin/iw dev wlan0 set power_save off
+    RemainAfterExit=yes
+    
+    [Install]
+    WantedBy=multi-user.target
+    WIFISERVICE
+  - systemctl daemon-reload
+  - systemctl enable wifi-powersave-off.service
+  - systemctl start wifi-powersave-off.service || true
+  # Configure power button to reboot instead of shutdown
+  - |
+    mkdir -p /etc/systemd/logind.conf.d
+    cat > /etc/systemd/logind.conf.d/power-button.conf << 'LOGIND'
+    [Login]
+    HandlePowerKey=reboot
+    HandlePowerKeyLongPress=poweroff
+    LOGIND
+  - systemctl restart systemd-logind || true
   # Verify cgroups are enabled (K3s requirement)
   - |
     if grep -q "cgroup_memory=1" /proc/cmdline; then
@@ -605,6 +639,8 @@ runcmd:
   - echo "=== System Info ===" >> /var/log/kube-world-network.log
   - free -h >> /var/log/kube-world-network.log 2>&1
   - cat /proc/cmdline >> /var/log/kube-world-network.log 2>&1
+  - echo "=== WiFi Power Save Status ===" >> /var/log/kube-world-network.log
+  - iw dev wlan0 get power_save >> /var/log/kube-world-network.log 2>&1 || echo "WiFi power_save check failed" >> /var/log/kube-world-network.log
   # Create kube-world directories
   - mkdir -p /opt/kube-world
   - mkdir -p /etc/kube-world

@@ -589,15 +589,39 @@ main() {
         if ssh "${PI_USER}@${pi_host}" "grep -q 'cgroup_memory=1' /boot/firmware/cmdline.txt" 2>/dev/null; then
             if ! ssh "${PI_USER}@${pi_host}" "cat /proc/cmdline | grep -q cgroup_memory=1" 2>/dev/null; then
                 warn "Cgroups were just enabled. Rebooting Pi..."
-                ssh "${PI_USER}@${pi_host}" "sudo reboot" || true
-                log "Waiting 60s for Pi to reboot..."
-                sleep 60
-                test_ssh "$pi_host" || { error "Pi didn't come back after reboot"; exit 1; }
+                # Use -t for TTY allocation (required for sudo on some systems)
+                # Use nohup to ensure reboot completes even if SSH disconnects
+                ssh -t "${PI_USER}@${pi_host}" "sudo nohup sh -c 'sleep 2 && reboot' &>/dev/null &" || true
+                log "Waiting for Pi to reboot (90s timeout)..."
+                sleep 15  # Wait for Pi to actually start rebooting
+                
+                # Poll for SSH to come back (up to 90 seconds)
+                local reboot_attempts=0
+                local max_reboot_wait=18  # 18 * 5s = 90s
+                while [[ $reboot_attempts -lt $max_reboot_wait ]]; do
+                    sleep 5
+                    reboot_attempts=$((reboot_attempts + 1))
+                    if ssh -o ConnectTimeout=3 -o BatchMode=yes "${PI_USER}@${pi_host}" "echo 'SSH OK'" &>/dev/null; then
+                        log "Pi is back online after reboot ✓"
+                        break
+                    fi
+                    debug "  Waiting for reboot... (${reboot_attempts}/${max_reboot_wait})"
+                done
+                
+                if [[ $reboot_attempts -ge $max_reboot_wait ]]; then
+                    error "Pi didn't come back after reboot within 90 seconds"
+                    error "Please check Pi manually and try again"
+                    exit 1
+                fi
             fi
         fi
         
         # Install K3s
         install_k3s "$pi_host" "server"
+        
+        # Disable WiFi power save immediately after K3s install to prevent disconnects
+        log "Disabling WiFi power save for stability..."
+        ssh "${PI_USER}@${pi_host}" "sudo iw dev wlan0 set power_save off 2>/dev/null || true" || true
         
         # Wait for K3s to be ready with proper polling
         if ! wait_for_k3s_ready "$pi_host" 60 5; then
@@ -610,6 +634,14 @@ main() {
         if ! fetch_kubeconfig "$pi_host" "$target_ip" 10; then
             error "Failed to fetch kubeconfig. K3s may still be initializing."
             exit 1
+        fi
+        
+        # Final stability check - verify WiFi is still connected
+        log "Verifying network stability..."
+        if ! ssh -o ConnectTimeout=5 "${PI_USER}@${pi_host}" "ping -c 2 8.8.8.8" &>/dev/null; then
+            warn "Network connectivity may be unstable. Consider using Ethernet for Pi."
+        else
+            log "Network connectivity verified ✓"
         fi
         
         # Show static IP recommendation

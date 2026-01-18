@@ -33,12 +33,62 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
 log() { echo -e "${GREEN}[PI-PREP]${NC} $*"; }
 warn() { echo -e "${YELLOW}[PI-PREP]${NC} $*"; }
 error() { echo -e "${RED}[PI-PREP]${NC} $*" >&2; }
 debug() { [[ "${VERBOSE:-false}" == "true" ]] && echo -e "${BLUE}[DEBUG]${NC} $*"; }
+info() { echo -e "${CYAN}[PI-PREP]${NC} $*"; }
+
+#===============================================================================
+# Discover Pis on Network
+#===============================================================================
+discover_pis() {
+    log "Scanning network for Raspberry Pis..."
+    
+    # Get local IP and subnet
+    local local_ip
+    local_ip=$(ifconfig | grep -Eo 'inet (addr:)?([0-9]*\.){3}[0-9]*' | grep -Eo '([0-9]*\.){3}[0-9]*' | grep -v '127.0.0.1' | head -1)
+    local subnet="${local_ip%.*}.0/24"
+    
+    echo ""
+    echo "  Checking ARP table for known Pi MAC addresses..."
+    echo "  (Pi MACs start with: d8:3a:dd, dc:a6:32, e4:5f:01, 2c:cf:67, b8:27:eb)"
+    echo ""
+    
+    # Check ARP table for known Raspberry Pi MAC prefixes
+    local found=false
+    while IFS= read -r line; do
+        if [[ -n "$line" ]]; then
+            found=true
+            local ip=$(echo "$line" | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -1)
+            local mac=$(echo "$line" | grep -oE '([0-9a-f]{1,2}:){5}[0-9a-f]{1,2}' | head -1)
+            echo "    Found Pi: $ip ($mac)"
+        fi
+    done < <(arp -a 2>/dev/null | grep -iE "d8:3a:dd|dc:a6:32|e4:5f:01|2c:cf:67|b8:27:eb")
+    
+    if [[ "$found" == "false" ]]; then
+        warn "No Pis found in ARP cache."
+        echo ""
+        echo "  Try these methods to find your Pi:"
+        echo "    1. Check router DHCP leases"
+        echo "    2. If Pi hostname is known: ping <hostname>.local"
+        echo "    3. Scan network: nmap -sP $subnet"
+        echo ""
+    fi
+    
+    # Also try mDNS discovery (macOS)
+    echo "  Checking mDNS for .local hostnames..."
+    if command -v dns-sd &>/dev/null; then
+        (timeout 3 dns-sd -B _ssh._tcp local 2>/dev/null || true) | grep -v "^Browsing\|^DATE\|STARTING" | head -5 | while read -r line; do
+            [[ -n "$line" ]] && echo "    Found: $line"
+        done
+    fi
+    
+    echo ""
+}
 
 #===============================================================================
 # Display Help
@@ -51,8 +101,12 @@ show_help() {
 
 USAGE:
     ./pi-prep.sh <PI_IP_OR_HOSTNAME> [OPTIONS]
+    ./pi-prep.sh --discover
 
 EXAMPLES:
+    # Find Pis on the network
+    ./pi-prep.sh --discover
+
     # Prep a new Pi (shows flashing instructions first)
     ./pi-prep.sh 192.168.1.100 --new-pi --verbose
 
@@ -62,10 +116,15 @@ EXAMPLES:
     # Just configure WiFi
     ./pi-prep.sh 192.168.1.100 --wifi-only
 
+    # Diagnose SSH issues
+    ./pi-prep.sh pi5-master-1.local --diagnose
+
 OPTIONS:
     --new-pi          Show SD card flashing instructions, then configure
     --join-cluster    Install K3s and join to management cluster
     --wifi-only       Only configure WiFi (for headless setup)
+    --discover        Scan network for Raspberry Pis (no host required)
+    --diagnose        Run SSH diagnostics for troubleshooting
     --dry-run         Preview actions without executing
     --verbose         Show detailed output
     -h, --help        Show this help message
@@ -115,7 +174,7 @@ check_prereqs() {
 }
 
 #===============================================================================
-# Test SSH Connectivity (with retry)
+# Test SSH Connectivity (with retry and comprehensive diagnostics)
 #===============================================================================
 test_ssh() {
     local pi_host="$1"
@@ -124,15 +183,48 @@ test_ssh() {
     
     log "Testing SSH connection to ${PI_USER}@${pi_host}..."
     
+    # First: Verify SSH key exists and is loaded
+    if ! verify_ssh_key; then
+        error "SSH key verification failed"
+        return 1
+    fi
+    
+    # Second: Try to resolve the hostname
+    local resolved_ip=""
+    resolved_ip=$(resolve_pi_hostname "$pi_host")
+    if [[ -z "$resolved_ip" ]]; then
+        warn "Could not resolve hostname: $pi_host"
+        warn "Trying direct connection anyway..."
+    else
+        debug "Resolved $pi_host to $resolved_ip"
+    fi
+    
+    # Third: Clean known_hosts for this host to avoid stale entries
+    clean_known_hosts "$pi_host" "$resolved_ip"
+    
     local attempt=1
     while [[ $attempt -le $max_attempts ]]; do
-        if ssh -o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${PI_USER}@${pi_host}" "echo 'SSH OK'" &>/dev/null; then
+        debug "SSH attempt ${attempt}/${max_attempts}..."
+        
+        # Try with verbose output on later attempts for debugging
+        local ssh_opts="-o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+        if [[ $attempt -gt 2 ]]; then
+            ssh_opts="$ssh_opts -o PreferredAuthentications=publickey,password"
+        fi
+        
+        if ssh $ssh_opts "${PI_USER}@${pi_host}" "echo 'SSH OK'" &>/dev/null; then
             log "SSH connection successful ✓"
             return 0
         fi
         
         if [[ $attempt -lt $max_attempts ]]; then
             warn "SSH attempt ${attempt}/${max_attempts} failed, retrying in ${interval}s..."
+            
+            # On third failure, show diagnostic info
+            if [[ $attempt -eq 3 ]]; then
+                show_ssh_diagnostics "$pi_host"
+            fi
+            
             sleep "$interval"
         fi
         attempt=$((attempt + 1))
@@ -143,12 +235,236 @@ test_ssh() {
     if ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new "${PI_USER}@${pi_host}" "echo 'SSH OK'" 2>/dev/null; then
         log "SSH with password successful ✓"
         warn "Consider setting up SSH key authentication for passwordless access"
+        suggest_ssh_key_setup "$pi_host"
         return 0
     fi
     
     error "Cannot connect to Pi via SSH after ${max_attempts} attempts"
     error "Ensure Pi is running and SSH is enabled"
+    show_ssh_troubleshooting "$pi_host"
     return 1
+}
+
+#===============================================================================
+# Verify SSH Key Exists and is Valid
+#===============================================================================
+verify_ssh_key() {
+    local key_path="${SSH_KEY_PATH:-$HOME/.ssh/id_ed25519}"
+    
+    debug "Checking SSH key at: $key_path"
+    
+    # Check if private key exists
+    if [[ ! -f "$key_path" ]]; then
+        warn "SSH private key not found at: $key_path"
+        
+        # Check for RSA key as fallback
+        if [[ -f "$HOME/.ssh/id_rsa" ]]; then
+            key_path="$HOME/.ssh/id_rsa"
+            warn "Using RSA key instead: $key_path"
+        else
+            error "No SSH key found. Generate one with: ssh-keygen -t ed25519"
+            return 1
+        fi
+    fi
+    
+    # Check if public key exists
+    if [[ ! -f "${key_path}.pub" ]]; then
+        error "SSH public key not found at: ${key_path}.pub"
+        return 1
+    fi
+    
+    # Verify key permissions
+    local perms
+    perms=$(stat -f "%OLp" "$key_path" 2>/dev/null || stat -c "%a" "$key_path" 2>/dev/null)
+    if [[ "$perms" != "600" && "$perms" != "400" ]]; then
+        warn "SSH key has incorrect permissions ($perms). Fixing..."
+        chmod 600 "$key_path"
+    fi
+    
+    # Check if key is loaded in ssh-agent
+    if ! ssh-add -l 2>/dev/null | grep -q "$(cat ${key_path}.pub | awk '{print $2}')"; then
+        debug "SSH key not in agent. Adding..."
+        ssh-add "$key_path" 2>/dev/null || true
+    fi
+    
+    debug "SSH key verified ✓"
+    return 0
+}
+
+#===============================================================================
+# Resolve Pi Hostname (with mDNS and fallback methods)
+#===============================================================================
+resolve_pi_hostname() {
+    local hostname="$1"
+    
+    # If already an IP, return it
+    if [[ "$hostname" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "$hostname"
+        return 0
+    fi
+    
+    # Try standard DNS resolution first
+    local resolved
+    resolved=$(getent hosts "$hostname" 2>/dev/null | awk '{print $1}' | head -1)
+    if [[ -n "$resolved" ]]; then
+        echo "$resolved"
+        return 0
+    fi
+    
+    # Try mDNS resolution with dns-sd (macOS)
+    if command -v dns-sd &>/dev/null; then
+        # Background dns-sd query with timeout
+        resolved=$(timeout 5 dns-sd -G v4 "$hostname" 2>/dev/null | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -1) || true
+        if [[ -n "$resolved" ]]; then
+            echo "$resolved"
+            return 0
+        fi
+    fi
+    
+    # Try ping as last resort (helps trigger mDNS)
+    resolved=$(ping -c 1 -W 2 "$hostname" 2>/dev/null | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -1)
+    if [[ -n "$resolved" ]]; then
+        echo "$resolved"
+        return 0
+    fi
+    
+    return 1
+}
+
+#===============================================================================
+# Clean Known Hosts (remove stale entries that could cause SSH failures)
+#===============================================================================
+clean_known_hosts() {
+    local hostname="$1"
+    local ip="${2:-}"
+    
+    local known_hosts="$HOME/.ssh/known_hosts"
+    
+    [[ ! -f "$known_hosts" ]] && return 0
+    
+    debug "Cleaning known_hosts for: $hostname ${ip:+and $ip}"
+    
+    # Remove hostname entry if it exists
+    if grep -q "$hostname" "$known_hosts" 2>/dev/null; then
+        debug "Removing stale entry for: $hostname"
+        if [[ "$(uname)" == "Darwin" ]]; then
+            sed -i '' "/$hostname/d" "$known_hosts" 2>/dev/null || true
+        else
+            sed -i "/$hostname/d" "$known_hosts" 2>/dev/null || true
+        fi
+    fi
+    
+    # Remove IP entry if it exists and is different from what we expect
+    if [[ -n "$ip" ]] && grep -q "^$ip " "$known_hosts" 2>/dev/null; then
+        debug "Removing stale entry for IP: $ip"
+        if [[ "$(uname)" == "Darwin" ]]; then
+            sed -i '' "/^$ip /d" "$known_hosts" 2>/dev/null || true
+        else
+            sed -i "/^$ip /d" "$known_hosts" 2>/dev/null || true
+        fi
+    fi
+}
+
+#===============================================================================
+# Show SSH Diagnostics (when connection fails repeatedly)
+#===============================================================================
+show_ssh_diagnostics() {
+    local pi_host="$1"
+    
+    echo ""
+    warn "=== SSH Diagnostics ==="
+    
+    # Check if host is reachable at all
+    echo -n "  Ping test: "
+    if ping -c 1 -W 2 "$pi_host" &>/dev/null; then
+        echo "✓ Host responds to ping"
+    else
+        echo "✗ Host does not respond to ping"
+        echo "    -> Pi may be powered off, not connected to network, or hostname wrong"
+    fi
+    
+    # Check if SSH port is open
+    echo -n "  Port 22:   "
+    if nc -z -w 2 "$pi_host" 22 &>/dev/null; then
+        echo "✓ SSH port is open"
+    else
+        echo "✗ SSH port not reachable"
+        echo "    -> SSH may not be enabled on Pi, or firewall blocking"
+    fi
+    
+    # Show local SSH key
+    echo "  Local key: $(cat ~/.ssh/id_ed25519.pub 2>/dev/null | cut -d' ' -f1-2 | head -c 50)..."
+    
+    # Try verbose SSH to show actual error
+    echo ""
+    echo "  Verbose SSH output (last 10 lines):"
+    ssh -vvv -o ConnectTimeout=5 -o BatchMode=yes "${PI_USER}@${pi_host}" "true" 2>&1 | tail -10 | sed 's/^/    /'
+    
+    echo ""
+}
+
+#===============================================================================
+# Show SSH Troubleshooting Steps
+#===============================================================================
+show_ssh_troubleshooting() {
+    local pi_host="$1"
+    
+    cat << EOF
+
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║                         SSH Troubleshooting Guide                              ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+POSSIBLE CAUSES:
+  1. Pi is not powered on or not booted completely
+  2. Pi is not connected to the network
+  3. Hostname resolution failing (mDNS issue)
+  4. SSH key not in Pi's authorized_keys
+  5. SSH service not running on Pi
+  6. known_hosts conflict after Pi reimage
+
+QUICK FIXES:
+  1. Try using IP address instead of hostname:
+     ./pi-prep.sh 192.168.x.x --join-cluster
+
+  2. Find Pi on network:
+     arp -a | grep -i "d8:3a\|dc:a6\|e4:5f\|2c:cf:67"
+     # or
+     nmap -sP 192.168.1.0/24 | grep -i raspberry
+
+  3. Clear stale known_hosts:
+     ssh-keygen -R ${pi_host}
+
+  4. Copy SSH key manually (if Pi has password access):
+     ssh-copy-id ${PI_USER}@${pi_host}
+
+  5. Verify cloud-init applied SSH key (connect via HDMI/keyboard):
+     cat /home/${PI_USER}/.ssh/authorized_keys
+
+  6. Check Pi SSH service:
+     sudo systemctl status ssh
+
+MANUAL SSH TEST:
+  ssh -vvv ${PI_USER}@${pi_host}
+
+EOF
+}
+
+#===============================================================================
+# Suggest SSH Key Setup
+#===============================================================================
+suggest_ssh_key_setup() {
+    local pi_host="$1"
+    
+    cat << EOF
+
+To set up passwordless SSH, run:
+  ssh-copy-id ${PI_USER}@${pi_host}
+
+Or manually add this key to Pi's ~/.ssh/authorized_keys:
+  $(cat ~/.ssh/id_ed25519.pub 2>/dev/null || cat ~/.ssh/id_rsa.pub 2>/dev/null)
+
+EOF
 }
 
 #===============================================================================
@@ -595,6 +911,8 @@ main() {
     local join_cluster=false
     local wifi_only=false
     local dry_run=false
+    local discover_mode=false
+    local diagnose_mode=false
     
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -619,6 +937,14 @@ main() {
                 VERBOSE=true
                 shift
                 ;;
+            --discover)
+                discover_mode=true
+                shift
+                ;;
+            --diagnose)
+                diagnose_mode=true
+                shift
+                ;;
             -h|--help)
                 show_help
                 exit 0
@@ -635,9 +961,32 @@ main() {
         esac
     done
     
+    # Handle special modes
+    if [[ "$discover_mode" == "true" ]]; then
+        discover_pis
+        exit 0
+    fi
+    
+    # Handle diagnose mode (needs a host)
+    if [[ "$diagnose_mode" == "true" ]]; then
+        if [[ -z "$pi_host" ]]; then
+            error "Diagnose mode requires a hostname or IP"
+            exit 1
+        fi
+        log "Running SSH diagnostics for: $pi_host"
+        verify_ssh_key || true
+        echo ""
+        show_ssh_diagnostics "$pi_host"
+        show_ssh_troubleshooting "$pi_host"
+        exit 0
+    fi
+    
     # Validate arguments
     if [[ -z "$pi_host" && "$new_pi" != "true" ]]; then
         error "PI_IP_OR_HOSTNAME is required"
+        echo ""
+        info "Tip: Use --discover to find Pis on your network"
+        echo ""
         show_help
         exit 1
     fi

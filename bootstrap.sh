@@ -312,6 +312,33 @@ preflight_checks() {
         warn "Low disk space: ${free_space}GB available (10GB recommended)"
     fi
     
+    # Check Docker Desktop memory allocation for Mac
+    if [[ "$PLATFORM" == mac-* ]] && check_command docker; then
+        local docker_memory_gb
+        docker_memory_gb=$(docker system info 2>/dev/null | grep "Total Memory" | awk '{print int($3)}')
+        if [[ -n "$docker_memory_gb" ]] && [[ "$docker_memory_gb" -lt 10 ]]; then
+            echo ""
+            warn "Docker Desktop has only ${docker_memory_gb}GB RAM allocated."
+            warn "Rancher + KIND needs at least 10GB RAM for reliable operation."
+            warn ""
+            warn "To increase Docker memory:"
+            warn "  1. Open Docker Desktop -> Settings -> Resources"
+            warn "  2. Increase Memory to 10GB or more"
+            warn "  3. Click 'Apply & Restart'"
+            warn ""
+            if [[ "${FORCE_LOW_MEMORY:-}" != "true" ]]; then
+                read -p "Continue anyway? (may cause Rancher pods to fail) [y/N] " -n 1 -r
+                echo
+                if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                    error "Aborted. Please increase Docker memory and retry."
+                    exit 1
+                fi
+            fi
+        else
+            debug "Docker memory: ${docker_memory_gb}GB ✓"
+        fi
+    fi
+    
     # Check network connectivity
     if ! curl -s --connect-timeout 5 https://github.com > /dev/null; then
         error "Cannot reach GitHub. Check network connectivity."
@@ -352,9 +379,34 @@ cleanup_existing() {
     
     case "$PLATFORM" in
         mac-*)
-            # Delete KIND cluster if exists
+            # Check if KIND cluster exists and clean up Helm releases first
+            if kind get clusters 2>/dev/null | grep -q "kube-world"; then
+                log "Cleaning up Helm releases..."
+                kubectl config use-context kind-kube-world 2>/dev/null || true
+                
+                # Uninstall Helm releases in reverse dependency order
+                helm uninstall rancher -n cattle-system 2>/dev/null || true
+                helm uninstall cert-manager -n cert-manager 2>/dev/null || true
+                
+                # Delete Rancher/Fleet namespaces (can take time due to finalizers)
+                log "Deleting Rancher namespaces (may take a minute)..."
+                for ns in cattle-system cattle-fleet-system cattle-fleet-local-system fleet-system fleet-local cert-manager; do
+                    kubectl delete namespace "$ns" --timeout=60s 2>/dev/null || true
+                done
+                
+                # Remove Fleet CRDs that might have finalizers
+                log "Removing Fleet CRDs..."
+                kubectl get crd -o name 2>/dev/null | grep -E 'fleet|cattle|rancher' | xargs -r kubectl delete --timeout=30s 2>/dev/null || true
+            fi
+            
+            # Delete KIND clusters
+            log "Deleting KIND clusters..."
             kind delete cluster --name management 2>/dev/null || true
             kind delete cluster --name kube-world 2>/dev/null || true
+            
+            # Clean up any orphaned Docker containers from KIND
+            docker ps -a --filter "name=kube-world" -q 2>/dev/null | xargs -r docker rm -f 2>/dev/null || true
+            docker ps -a --filter "name=management" -q 2>/dev/null | xargs -r docker rm -f 2>/dev/null || true
             ;;
         pi|linux-*)
             # Uninstall K3s if present
@@ -431,8 +483,11 @@ setup_pi_cluster() {
 install_rancher() {
     log "Installing Rancher..."
     
-    # Source the install script
+    # Source the install script and call main to actually install
     source "${SCRIPT_DIR}/rancher/install-rancher.sh"
+    
+    # CRITICAL: The sourced script only defines functions, we must call main()
+    main
 }
 
 #===============================================================================

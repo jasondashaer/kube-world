@@ -30,7 +30,47 @@ add_helm_repos() {
     
     helm repo add rancher-stable https://releases.rancher.com/server-charts/stable 2>/dev/null || true
     helm repo add jetstack https://charts.jetstack.io 2>/dev/null || true
+    helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx 2>/dev/null || true
     helm repo update
+}
+
+#===============================================================================
+# Install NGINX Ingress Controller (for KIND clusters)
+#===============================================================================
+install_ingress_controller() {
+    # Check if this is a KIND cluster
+    if ! kubectl get nodes -o jsonpath='{.items[0].metadata.labels}' 2>/dev/null | grep -q "kind"; then
+        debug "Not a KIND cluster, skipping ingress controller installation"
+        return 0
+    fi
+    
+    log "Installing NGINX Ingress Controller for KIND..."
+    
+    # Check if already installed
+    if helm status ingress-nginx -n ingress-nginx &>/dev/null; then
+        log "Ingress controller already installed"
+        return 0
+    fi
+    
+    # Create namespace
+    kubectl create namespace ingress-nginx --dry-run=client -o yaml | kubectl apply -f -
+    
+    # Install ingress-nginx with KIND-specific configuration
+    helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+        --namespace ingress-nginx \
+        --set controller.hostPort.enabled=true \
+        --set controller.service.type=NodePort \
+        --set controller.watchIngressWithoutClass=true \
+        --set controller.nodeSelector."kubernetes\.io/os"=linux \
+        --set controller.admissionWebhooks.enabled=false \
+        --wait --timeout 5m
+    
+    # Wait for ingress controller to be ready
+    log "Waiting for ingress controller..."
+    kubectl wait --for=condition=Available deployment/ingress-nginx-controller \
+        -n ingress-nginx --timeout=120s
+    
+    log "Ingress controller installed ✓"
 }
 
 #===============================================================================
@@ -88,6 +128,14 @@ install_rancher() {
         log "Rancher already installed, upgrading..."
     fi
     
+    # For KIND clusters, we may need to adjust resources for limited environments
+    local resource_args=""
+    if kubectl get nodes -o jsonpath='{.items[0].metadata.labels}' 2>/dev/null | grep -q "kind"; then
+        log "KIND cluster detected - adjusting for local development..."
+        # Reduce resource requests for KIND (won't have full cloud resources)
+        resource_args="--set resources.requests.memory=256Mi --set resources.requests.cpu=100m"
+    fi
+    
     # Install/upgrade Rancher
     helm upgrade --install rancher rancher-stable/rancher \
         --namespace cattle-system \
@@ -97,8 +145,35 @@ install_rancher() {
         --set bootstrapPassword="${RANCHER_BOOTSTRAP_PASSWORD}" \
         --set ingress.tls.source="${tls_source}" \
         --set global.cattle.psp.enabled=false \
+        ${resource_args} \
         ${extra_args} \
         --wait --timeout 10m
+    
+    log "Rancher Helm install complete ✓"
+    
+    # Verify pods are actually running
+    log "Verifying Rancher pods are running..."
+    local verify_timeout=120
+    local verify_elapsed=0
+    while [[ $verify_elapsed -lt $verify_timeout ]]; do
+        local ready_pods
+        ready_pods=$(kubectl -n cattle-system get pods -l app=rancher -o jsonpath='{.items[*].status.containerStatuses[*].ready}' 2>/dev/null | tr ' ' '\n' | grep -c "true" || echo "0")
+        local total_pods
+        total_pods=$(kubectl -n cattle-system get pods -l app=rancher --no-headers 2>/dev/null | wc -l | tr -d ' ')
+        
+        if [[ "$ready_pods" -gt 0 ]] && [[ "$ready_pods" == "$total_pods" ]]; then
+            log "Rancher pods ready: ${ready_pods}/${total_pods} ✓"
+            break
+        fi
+        debug "Waiting for Rancher pods: ${ready_pods}/${total_pods} ready (${verify_elapsed}/${verify_timeout}s)"
+        sleep 10
+        verify_elapsed=$((verify_elapsed + 10))
+    done
+    
+    if [[ $verify_elapsed -ge $verify_timeout ]]; then
+        warn "Some Rancher pods may not be fully ready. Checking status..."
+        kubectl -n cattle-system get pods
+    fi
     
     log "Rancher installed ✓"
 }
@@ -188,6 +263,7 @@ main() {
     fi
     
     add_helm_repos
+    install_ingress_controller  # Required for KIND clusters
     install_cert_manager
     install_rancher
     post_install

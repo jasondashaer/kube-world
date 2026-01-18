@@ -44,9 +44,11 @@ network:
   wifis:
     wlan0:
       dhcp4: true
-      # access-points:
-      #   "YOUR_WIFI_SSID":
-      #     password: "YOUR_WIFI_PASSWORD"
-      #   # Add backup networks as needed
-      #   "BACKUP_SSID":
-      #     password: "BACKUP_PASSWORD"
+      regulatory-domain: "US"
+      access-points:
+        "Peachtree Cottage":
+          password: "e0c6c890081de3a7bf18615b386326d80d68c1b3803906ca144033628b652b2a"
+        # Add backup networks as needed
+        # "BACKUP_SSID":
+        #   password: "BACKUP_PASSWORD"
+      optional: true

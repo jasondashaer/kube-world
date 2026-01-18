@@ -35,26 +35,46 @@ Complete guide for provisioning Raspberry Pi nodes for kube-world.
    rpi-imager --cli ubuntu-24.04-preinstalled-server-arm64+raspi.img.xz /dev/diskX
    ```
 
-3. **Copy cloud-init files**
+3. **Generate cloud-init files with the builder script**
    ```bash
-   # Mount the boot partition
-   # Copy files from this repo
-   cp pi-setup/cloud-init/user-data.yaml /Volumes/system-boot/user-data
-   cp pi-setup/cloud-init/meta-data.yaml /Volumes/system-boot/meta-data
+   cd pi-setup/cloud-init
+   
+   # Worker node with WiFi
+   ./build-cloud-init.sh \
+       --hostname pi-worker-1 \
+       --role worker \
+       --wifi-ssid "YourNetwork" \
+       --wifi-pass "YourPassword" \
+       --user-pass "AdminPassword123" \
+       --copy-to /Volumes/system-boot
+   
+   # Master node with static IP (ethernet)
+   ./build-cloud-init.sh \
+       --hostname pi-master-1 \
+       --role master \
+       --ip 192.168.1.100/24 \
+       --gateway 192.168.1.1 \
+       --user-pass "AdminPassword123" \
+       --copy-to /Volumes/system-boot
    ```
+   
+   The script automatically:
+   - Generates WPA PSK hash for WiFi passwords
+   - Creates SHA-512 hash for user passwords
+   - Pulls your SSH public key from `~/.ssh/`
+   - Validates all YAML output
 
-4. **Customize configuration**
-   Edit `user-data` on the boot partition:
-   - Set your SSH public key
-   - Set hostname
-   - Set timezone
-   - Optionally set static IP
-
-5. **Boot the Pi**
+4. **Boot the Pi**
    - Insert SD card/NVMe
-   - Connect ethernet
+   - Connect ethernet (or WiFi if configured)
    - Power on
    - Wait ~5 minutes for cloud-init
+
+5. **Verify connection**
+   ```bash
+   # SSH with your configured username
+   ssh admin@pi-worker-1.local
+   ```
 
 6. **Run Ansible from management machine**
    ```bash

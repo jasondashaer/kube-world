@@ -17,10 +17,10 @@ users:
     lock_passwd: false
     # Generate password hash with: mkpasswd -m sha-512
     # Default password: 'changeme' - CHANGE THIS!
-    passwd: $6$rounds=4096$randomsalt$hashedpasswordhere
+    passwd: JsttodKsvldpm12!
     ssh_authorized_keys:
       # Add your public SSH key here
-      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... your-key-here
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIM3wxlKGNVmY39Kn29DcbToQdQrff5zaeqdpZ/kJTdph jax3200@gmail.com
 
 # SSH configuration
 ssh_pwauth: false

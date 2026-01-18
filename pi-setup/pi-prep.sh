@@ -1,0 +1,548 @@
+#!/usr/bin/env bash
+#===============================================================================
+# pi-prep.sh - Raspberry Pi 5 Preparation Script
+# 
+# Prepares a Raspberry Pi 5 for joining the kube-world cluster.
+# Can be run from Mac (management machine) or directly on Pi.
+#
+# Usage:
+#   ./pi-prep.sh <PI_IP_OR_HOSTNAME> [OPTIONS]
+#
+# Options:
+#   --new-pi          First-time setup (includes flashing instructions)
+#   --join-cluster    Join the Pi to existing cluster
+#   --wifi-only       Configure WiFi without cluster join
+#   --dry-run         Show what would be done
+#   --verbose         Enable verbose output
+#
+# Prerequisites:
+#   - SSH access to Pi (password or key-based)
+#   - Pi connected to same network as management machine
+#   - For new Pi: SD card flashed with Raspberry Pi OS Lite (64-bit)
+#===============================================================================
+set -euo pipefail
+
+# Configuration
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+PI_USER="${PI_USER:-admin}"
+K3S_VERSION="${K3S_VERSION:-v1.29.0+k3s1}"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+log() { echo -e "${GREEN}[PI-PREP]${NC} $*"; }
+warn() { echo -e "${YELLOW}[PI-PREP]${NC} $*"; }
+error() { echo -e "${RED}[PI-PREP]${NC} $*" >&2; }
+debug() { [[ "${VERBOSE:-false}" == "true" ]] && echo -e "${BLUE}[DEBUG]${NC} $*"; }
+
+#===============================================================================
+# Display Help
+#===============================================================================
+show_help() {
+    cat << 'EOF'
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║                     Pi Preparation Script for kube-world                       ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+USAGE:
+    ./pi-prep.sh <PI_IP_OR_HOSTNAME> [OPTIONS]
+
+EXAMPLES:
+    # Prep a new Pi (shows flashing instructions first)
+    ./pi-prep.sh 192.168.1.100 --new-pi --verbose
+
+    # Join existing Pi to cluster
+    ./pi-prep.sh pi5-master-1.local --join-cluster
+
+    # Just configure WiFi
+    ./pi-prep.sh 192.168.1.100 --wifi-only
+
+OPTIONS:
+    --new-pi          Show SD card flashing instructions, then configure
+    --join-cluster    Install K3s and join to management cluster
+    --wifi-only       Only configure WiFi (for headless setup)
+    --dry-run         Preview actions without executing
+    --verbose         Show detailed output
+    -h, --help        Show this help message
+
+PREREQUISITES:
+    1. Pi must be running Raspberry Pi OS Lite (64-bit) - ARM64
+    2. SSH must be enabled (done via Imager or cloud-init)
+    3. Pi must be on the same network as your Mac
+    4. For new Pi: Have an SD card ready to flash
+
+FOR NEW PI SETUP:
+    1. Download Raspberry Pi Imager: https://www.raspberrypi.com/software/
+    2. Select: Raspberry Pi OS Lite (64-bit)
+    3. Click gear icon to configure:
+       - Hostname: pi5-master-1
+       - Enable SSH: Yes
+       - Username: admin
+       - Password: (your choice)
+       - WiFi: (optional, can configure later)
+    4. Flash and boot the Pi
+    5. Run this script with --new-pi flag
+
+EOF
+}
+
+#===============================================================================
+# Check Prerequisites
+#===============================================================================
+check_prereqs() {
+    log "Checking prerequisites..."
+    
+    # Check for required tools
+    local missing=()
+    for cmd in ssh scp ansible-playbook; do
+        if ! command -v "$cmd" &>/dev/null; then
+            missing+=("$cmd")
+        fi
+    done
+    
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        error "Missing required tools: ${missing[*]}"
+        error "Install with: brew install ${missing[*]}"
+        exit 1
+    fi
+    
+    log "Prerequisites OK ✓"
+}
+
+#===============================================================================
+# Test SSH Connectivity
+#===============================================================================
+test_ssh() {
+    local pi_host="$1"
+    log "Testing SSH connection to ${PI_USER}@${pi_host}..."
+    
+    if ssh -o ConnectTimeout=10 -o BatchMode=yes "${PI_USER}@${pi_host}" "echo 'SSH OK'" &>/dev/null; then
+        log "SSH connection successful ✓"
+        return 0
+    else
+        warn "SSH connection failed. Trying with password..."
+        if ssh -o ConnectTimeout=10 "${PI_USER}@${pi_host}" "echo 'SSH OK'" 2>/dev/null; then
+            log "SSH with password successful ✓"
+            warn "Consider setting up SSH key authentication for passwordless access"
+            return 0
+        fi
+        error "Cannot connect to Pi via SSH"
+        error "Ensure Pi is running and SSH is enabled"
+        return 1
+    fi
+}
+
+#===============================================================================
+# Configure WiFi
+#===============================================================================
+configure_wifi() {
+    local pi_host="$1"
+    log "Configuring WiFi on Pi..."
+    
+    # Read WiFi config from config.yaml if available
+    local wifi_ssid=""
+    local wifi_pass=""
+    
+    if [[ -f "${REPO_ROOT}/config.yaml" ]]; then
+        # Try to read from config (simplified - assumes unencrypted)
+        wifi_ssid=$(grep -A1 "ssids:" "${REPO_ROOT}/config.yaml" | grep "name:" | head -1 | cut -d'"' -f2 || echo "")
+    fi
+    
+    if [[ -z "$wifi_ssid" ]]; then
+        read -p "Enter WiFi SSID: " wifi_ssid
+        read -sp "Enter WiFi password: " wifi_pass
+        echo
+    fi
+    
+    if [[ -n "$wifi_ssid" && -n "$wifi_pass" ]]; then
+        ssh "${PI_USER}@${pi_host}" "sudo nmcli device wifi connect '${wifi_ssid}' password '${wifi_pass}'" || {
+            warn "nmcli failed, trying wpa_supplicant method..."
+            ssh "${PI_USER}@${pi_host}" "cat << EOF | sudo tee /etc/wpa_supplicant/wpa_supplicant.conf
+country=US
+ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
+update_config=1
+network={
+    ssid=\"${wifi_ssid}\"
+    psk=\"${wifi_pass}\"
+}
+EOF
+sudo systemctl restart wpa_supplicant"
+        }
+        log "WiFi configured ✓"
+    fi
+}
+
+#===============================================================================
+# Configure Static IP (via DHCP reservation recommendation)
+#===============================================================================
+configure_static_ip() {
+    local pi_host="$1"
+    local target_ip="$2"
+    
+    log "Configuring static IP: ${target_ip}"
+    
+    # Get Pi's MAC address for DHCP reservation
+    local mac_address
+    mac_address=$(ssh "${PI_USER}@${pi_host}" "cat /sys/class/net/eth0/address 2>/dev/null || cat /sys/class/net/wlan0/address")
+    
+    echo ""
+    echo "════════════════════════════════════════════════════════════════════"
+    echo "  DHCP Reservation Required"
+    echo "════════════════════════════════════════════════════════════════════"
+    echo ""
+    echo "  To ensure stable networking, configure your router to reserve:"
+    echo ""
+    echo "    MAC Address: ${mac_address}"
+    echo "    IP Address:  ${target_ip}"
+    echo "    Hostname:    $(ssh "${PI_USER}@${pi_host}" 'hostname')"
+    echo ""
+    echo "  This is more reliable than static IP configuration on the Pi."
+    echo "════════════════════════════════════════════════════════════════════"
+    echo ""
+}
+
+#===============================================================================
+# Enable Always-On K3s (systemd)
+#===============================================================================
+enable_always_on() {
+    local pi_host="$1"
+    log "Enabling always-on K3s via systemd..."
+    
+    ssh "${PI_USER}@${pi_host}" << 'REMOTE_SCRIPT'
+        # Enable K3s to start on boot
+        if systemctl list-unit-files | grep -q k3s; then
+            sudo systemctl enable k3s
+            sudo systemctl start k3s || true
+            echo "K3s enabled for auto-start on boot"
+        else
+            echo "K3s not yet installed - will be enabled after installation"
+        fi
+        
+        # Configure kernel parameters for K8s
+        sudo tee /etc/sysctl.d/k8s.conf << EOF
+net.bridge.bridge-nf-call-iptables = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.ipv4.ip_forward = 1
+EOF
+        sudo sysctl --system
+        
+        # Disable swap (required for K8s)
+        sudo swapoff -a
+        sudo sed -i '/ swap / s/^/#/' /etc/fstab
+        
+        # Enable cgroups (required for K3s)
+        if ! grep -q "cgroup_memory=1" /boot/firmware/cmdline.txt; then
+            sudo sed -i 's/$/ cgroup_memory=1 cgroup_enable=memory/' /boot/firmware/cmdline.txt
+            echo "Cgroups enabled - REBOOT REQUIRED"
+        fi
+REMOTE_SCRIPT
+    
+    log "Always-on configuration complete ✓"
+}
+
+#===============================================================================
+# Install K3s
+#===============================================================================
+install_k3s() {
+    local pi_host="$1"
+    local role="${2:-server}"  # server or agent
+    local server_url="${3:-}"  # For agents: URL of server
+    local token="${4:-}"       # For agents: Join token
+    
+    log "Installing K3s (${role}) on Pi..."
+    
+    if [[ "$role" == "server" ]]; then
+        ssh "${PI_USER}@${pi_host}" << REMOTE_SCRIPT
+            curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="${K3S_VERSION}" sh -s - server \
+                --write-kubeconfig-mode 644 \
+                --disable traefik \
+                --disable servicelb \
+                --node-label "topology.kubernetes.io/zone=edge" \
+                --node-label "hardware=raspberry-pi" \
+                --node-label "workload-type=iot"
+REMOTE_SCRIPT
+    else
+        if [[ -z "$server_url" || -z "$token" ]]; then
+            error "Agent install requires --server-url and --token"
+            return 1
+        fi
+        ssh "${PI_USER}@${pi_host}" << REMOTE_SCRIPT
+            curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="${K3S_VERSION}" K3S_URL="${server_url}" K3S_TOKEN="${token}" sh -s - agent \
+                --node-label "topology.kubernetes.io/zone=edge" \
+                --node-label "hardware=raspberry-pi"
+REMOTE_SCRIPT
+    fi
+    
+    # Enable auto-start
+    ssh "${PI_USER}@${pi_host}" "sudo systemctl enable k3s || sudo systemctl enable k3s-agent"
+    
+    log "K3s ${role} installed and enabled ✓"
+}
+
+#===============================================================================
+# Fetch Kubeconfig from Pi
+#===============================================================================
+fetch_kubeconfig() {
+    local pi_host="$1"
+    local target_ip="$2"
+    
+    log "Fetching kubeconfig from Pi..."
+    
+    mkdir -p ~/.kube
+    scp "${PI_USER}@${pi_host}:/etc/rancher/k3s/k3s.yaml" ~/.kube/pi-config
+    
+    # Update the server address to Pi's IP
+    sed -i.bak "s/127.0.0.1/${target_ip}/g" ~/.kube/pi-config
+    
+    log "Kubeconfig saved to ~/.kube/pi-config"
+    log "To use: export KUBECONFIG=~/.kube/pi-config"
+}
+
+#===============================================================================
+# Run Ansible Playbook
+#===============================================================================
+run_ansible() {
+    local pi_host="$1"
+    log "Running Ansible playbook for full configuration..."
+    
+    # Update inventory with Pi IP
+    local inventory="${REPO_ROOT}/pi-setup/inventory.ini"
+    
+    if [[ -f "$inventory" ]]; then
+        # Run the playbook
+        ansible-playbook -i "$inventory" "${REPO_ROOT}/pi-setup/ansible/playbook.yml" \
+            --extra-vars "pi_ip=${pi_host}" \
+            --extra-vars "k3s_version=${K3S_VERSION}"
+    else
+        warn "Ansible inventory not found at $inventory"
+        warn "Skipping Ansible configuration"
+    fi
+}
+
+#===============================================================================
+# Show New Pi Instructions
+#===============================================================================
+show_new_pi_instructions() {
+    cat << 'EOF'
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║                      New Raspberry Pi 5 Setup Instructions                     ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+STEP 1: FLASH THE SD CARD
+─────────────────────────
+1. Download Raspberry Pi Imager: https://www.raspberrypi.com/software/
+2. Insert your SD card (32GB+ recommended)
+3. Open Imager and select:
+   - Device: Raspberry Pi 5
+   - OS: Raspberry Pi OS Lite (64-bit) - NO desktop
+   - Storage: Your SD card
+
+4. Click the GEAR ICON (⚙️) to configure:
+   ┌────────────────────────────────────┐
+   │ Set hostname:     pi5-master-1    │
+   │ Enable SSH:       ✓ Yes           │
+   │ Username:         admin           │
+   │ Password:         (your choice)   │
+   │ Configure WiFi:   (optional)      │
+   │ Locale:           Your timezone   │
+   └────────────────────────────────────┘
+
+5. Click SAVE, then WRITE
+
+STEP 2: CLOUD-INIT (OPTIONAL - Advanced)
+────────────────────────────────────────
+For fully automated setup, copy cloud-init files to the boot partition:
+   cp pi-setup/cloud-init/user-data.yaml /Volumes/bootfs/user-data
+   cp pi-setup/cloud-init/meta-data.yaml /Volumes/bootfs/meta-data
+   cp pi-setup/cloud-init/network-config.yaml /Volumes/bootfs/network-config
+
+STEP 3: BOOT THE PI
+───────────────────
+1. Insert SD card into Pi
+2. Connect ethernet (recommended) or ensure WiFi is configured
+3. Connect power
+4. Wait 2-3 minutes for first boot
+
+STEP 4: FIND YOUR PI
+────────────────────
+Option A (mDNS):
+   ping pi5-master-1.local
+
+Option B (Network scan):
+   # Find devices on your network
+   arp -a | grep -i "d8:3a\|dc:a6\|e4:5f"  # Raspberry Pi MAC prefixes
+
+Option C (Router):
+   Check your router's DHCP client list
+
+STEP 5: RUN THIS SCRIPT AGAIN
+─────────────────────────────
+Once you can ping the Pi, run:
+   ./pi-prep.sh <PI_IP> --join-cluster
+
+═══════════════════════════════════════════════════════════════════════════════
+EOF
+    
+    read -p "Press ENTER when Pi is ready, or Ctrl+C to exit..."
+}
+
+#===============================================================================
+# Main
+#===============================================================================
+main() {
+    local pi_host=""
+    local new_pi=false
+    local join_cluster=false
+    local wifi_only=false
+    local dry_run=false
+    
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --new-pi)
+                new_pi=true
+                shift
+                ;;
+            --join-cluster)
+                join_cluster=true
+                shift
+                ;;
+            --wifi-only)
+                wifi_only=true
+                shift
+                ;;
+            --dry-run)
+                dry_run=true
+                shift
+                ;;
+            --verbose)
+                VERBOSE=true
+                shift
+                ;;
+            -h|--help)
+                show_help
+                exit 0
+                ;;
+            -*)
+                error "Unknown option: $1"
+                show_help
+                exit 1
+                ;;
+            *)
+                pi_host="$1"
+                shift
+                ;;
+        esac
+    done
+    
+    # Validate arguments
+    if [[ -z "$pi_host" && "$new_pi" != "true" ]]; then
+        error "PI_IP_OR_HOSTNAME is required"
+        show_help
+        exit 1
+    fi
+    
+    echo ""
+    echo "╔═══════════════════════════════════════════════════════════════════════════════╗"
+    echo "║                     Pi Preparation for kube-world                              ║"
+    echo "║                     $(date '+%Y-%m-%d %H:%M:%S')                                        ║"
+    echo "╚═══════════════════════════════════════════════════════════════════════════════╝"
+    echo ""
+    
+    # Check prerequisites
+    check_prereqs
+    
+    # New Pi flow
+    if [[ "$new_pi" == "true" ]]; then
+        show_new_pi_instructions
+        if [[ -z "$pi_host" ]]; then
+            read -p "Enter Pi IP address or hostname: " pi_host
+        fi
+    fi
+    
+    # Dry run mode
+    if [[ "$dry_run" == "true" ]]; then
+        log "DRY RUN MODE - showing what would be done:"
+        echo "  1. Test SSH to ${pi_host}"
+        [[ "$wifi_only" == "true" ]] && echo "  2. Configure WiFi"
+        [[ "$join_cluster" == "true" ]] && echo "  2. Enable always-on config"
+        [[ "$join_cluster" == "true" ]] && echo "  3. Install K3s"
+        [[ "$join_cluster" == "true" ]] && echo "  4. Fetch kubeconfig"
+        [[ "$join_cluster" == "true" ]] && echo "  5. Run Ansible playbook"
+        exit 0
+    fi
+    
+    # Test connectivity
+    test_ssh "$pi_host" || exit 1
+    
+    # WiFi only
+    if [[ "$wifi_only" == "true" ]]; then
+        configure_wifi "$pi_host"
+        log "WiFi configuration complete!"
+        exit 0
+    fi
+    
+    # Full cluster join
+    if [[ "$join_cluster" == "true" ]]; then
+        log "Starting full cluster join process..."
+        
+        # Get target IP for static config
+        local target_ip
+        target_ip=$(ssh "${PI_USER}@${pi_host}" "hostname -I | awk '{print \$1}'")
+        
+        # Configure basics
+        enable_always_on "$pi_host"
+        
+        # Check if reboot needed
+        if ssh "${PI_USER}@${pi_host}" "grep -q 'cgroup_memory=1' /boot/firmware/cmdline.txt" 2>/dev/null; then
+            if ! ssh "${PI_USER}@${pi_host}" "cat /proc/cmdline | grep -q cgroup_memory=1" 2>/dev/null; then
+                warn "Cgroups were just enabled. Rebooting Pi..."
+                ssh "${PI_USER}@${pi_host}" "sudo reboot" || true
+                log "Waiting 60s for Pi to reboot..."
+                sleep 60
+                test_ssh "$pi_host" || { error "Pi didn't come back after reboot"; exit 1; }
+            fi
+        fi
+        
+        # Install K3s
+        install_k3s "$pi_host" "server"
+        
+        # Wait for K3s to be ready
+        log "Waiting for K3s to be ready..."
+        sleep 30
+        
+        # Fetch kubeconfig
+        fetch_kubeconfig "$pi_host" "$target_ip"
+        
+        # Show static IP recommendation
+        configure_static_ip "$pi_host" "$target_ip"
+        
+        # Run Ansible for additional config
+        run_ansible "$pi_host"
+        
+        echo ""
+        echo "╔═══════════════════════════════════════════════════════════════════════════════╗"
+        echo "║                     Pi Preparation Complete! 🎉                                ║"
+        echo "╚═══════════════════════════════════════════════════════════════════════════════╝"
+        echo ""
+        echo "  Pi IP:        ${target_ip}"
+        echo "  Kubeconfig:   ~/.kube/pi-config"
+        echo ""
+        echo "  To access the Pi cluster:"
+        echo "    export KUBECONFIG=~/.kube/pi-config"
+        echo "    kubectl get nodes"
+        echo ""
+        echo "  To register with Rancher (from Mac cluster):"
+        echo "    1. Access Rancher UI"
+        echo "    2. Go to Cluster Management > Import Existing"
+        echo "    3. Follow the instructions to import the Pi cluster"
+        echo ""
+    fi
+}
+
+main "$@"

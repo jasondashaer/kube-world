@@ -57,3 +57,4 @@ node_modules/
 
 # KIND cluster data
 /tmp/kube-world/
+pi-setup/cloud-init/output/

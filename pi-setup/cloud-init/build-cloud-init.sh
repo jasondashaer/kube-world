@@ -449,6 +449,10 @@ packages:
   # mDNS/Bonjour - REQUIRED for .local hostname resolution
   - avahi-daemon
   - libnss-mdns
+  # iptables - REQUIRED for K3s networking (fixes "iptables-save not found" warning)
+  - iptables
+  - ip6tables
+  - iptables-persistent
   - curl
   - wget
   - git
@@ -465,7 +469,9 @@ packages:
   - crda
   # Network diagnostics
   - net-tools
-  - iputils-ping${role_packages}
+  - iputils-ping
+  # Performance monitoring (useful for debugging resource exhaustion)
+  - sysstat${role_packages}
 
 # Write configuration files
 write_files:
@@ -556,6 +562,12 @@ write_files:
 bootcmd:
   - [ sh, -c, 'iw reg set ${WIFI_COUNTRY}' ]
   - [ sh, -c, 'echo "REGDOMAIN=${WIFI_COUNTRY}" > /etc/default/crda' ]
+  # Enable cgroups for Kubernetes (critical for K3s)
+  - |
+    if ! grep -q "cgroup_memory=1" /boot/firmware/cmdline.txt 2>/dev/null; then
+      sed -i 's/$/ cgroup_memory=1 cgroup_enable=memory/' /boot/firmware/cmdline.txt
+      echo "cgroups enabled - reboot scheduled" >> /var/log/kube-world-network.log
+    fi
 
 # Run commands - executed in order after cloud-init completes user setup
 runcmd:
@@ -571,6 +583,17 @@ runcmd:
   - chmod 700 /home/admin/.ssh || true
   - chmod 600 /home/admin/.ssh/authorized_keys || true
   - chown -R admin:admin /home/admin/.ssh || true
+  # Verify cgroups are enabled (K3s requirement)
+  - |
+    if grep -q "cgroup_memory=1" /proc/cmdline; then
+      echo "cgroups OK" >> /var/log/kube-world-network.log
+    else
+      echo "WARNING: cgroups not active, reboot required" >> /var/log/kube-world-network.log
+    fi
+  # Optimize system for K3s stability (prevent OOM during startup)
+  - sysctl -w vm.overcommit_memory=1
+  - sysctl -w kernel.panic=10
+  - sysctl -w kernel.panic_on_oops=1
   # Log network status for debugging
   - echo "=== Network Status ===" >> /var/log/kube-world-network.log
   - ip addr >> /var/log/kube-world-network.log 2>&1
@@ -579,6 +602,9 @@ runcmd:
   - ss -tlnp | grep 22 >> /var/log/kube-world-network.log 2>&1
   - echo "=== Avahi Status ===" >> /var/log/kube-world-network.log
   - systemctl status avahi-daemon >> /var/log/kube-world-network.log 2>&1
+  - echo "=== System Info ===" >> /var/log/kube-world-network.log
+  - free -h >> /var/log/kube-world-network.log 2>&1
+  - cat /proc/cmdline >> /var/log/kube-world-network.log 2>&1
   # Create kube-world directories
   - mkdir -p /opt/kube-world
   - mkdir -p /etc/kube-world

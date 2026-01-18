@@ -115,26 +115,40 @@ check_prereqs() {
 }
 
 #===============================================================================
-# Test SSH Connectivity
+# Test SSH Connectivity (with retry)
 #===============================================================================
 test_ssh() {
     local pi_host="$1"
+    local max_attempts="${2:-5}"
+    local interval="${3:-10}"
+    
     log "Testing SSH connection to ${PI_USER}@${pi_host}..."
     
-    if ssh -o ConnectTimeout=10 -o BatchMode=yes "${PI_USER}@${pi_host}" "echo 'SSH OK'" &>/dev/null; then
-        log "SSH connection successful ✓"
-        return 0
-    else
-        warn "SSH connection failed. Trying with password..."
-        if ssh -o ConnectTimeout=10 "${PI_USER}@${pi_host}" "echo 'SSH OK'" 2>/dev/null; then
-            log "SSH with password successful ✓"
-            warn "Consider setting up SSH key authentication for passwordless access"
+    local attempt=1
+    while [[ $attempt -le $max_attempts ]]; do
+        if ssh -o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${PI_USER}@${pi_host}" "echo 'SSH OK'" &>/dev/null; then
+            log "SSH connection successful ✓"
             return 0
         fi
-        error "Cannot connect to Pi via SSH"
-        error "Ensure Pi is running and SSH is enabled"
-        return 1
+        
+        if [[ $attempt -lt $max_attempts ]]; then
+            warn "SSH attempt ${attempt}/${max_attempts} failed, retrying in ${interval}s..."
+            sleep "$interval"
+        fi
+        attempt=$((attempt + 1))
+    done
+    
+    # Final attempt with password prompt
+    warn "Key-based SSH failed. Trying with password..."
+    if ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new "${PI_USER}@${pi_host}" "echo 'SSH OK'" 2>/dev/null; then
+        log "SSH with password successful ✓"
+        warn "Consider setting up SSH key authentication for passwordless access"
+        return 0
     fi
+    
+    error "Cannot connect to Pi via SSH after ${max_attempts} attempts"
+    error "Ensure Pi is running and SSH is enabled"
+    return 1
 }
 
 #===============================================================================
@@ -255,13 +269,19 @@ install_k3s() {
     local token="${4:-}"       # For agents: Join token
     
     log "Installing K3s (${role}) on Pi..."
+    log "This may take 2-5 minutes on first run..."
     
     if [[ "$role" == "server" ]]; then
+        # K3s server with optimizations for Pi stability
         ssh "${PI_USER}@${pi_host}" << REMOTE_SCRIPT
+            # Install K3s with settings optimized for Raspberry Pi
             curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="${K3S_VERSION}" sh -s - server \
                 --write-kubeconfig-mode 644 \
                 --disable traefik \
                 --disable servicelb \
+                --kubelet-arg="max-pods=50" \
+                --kubelet-arg="kube-reserved=cpu=200m,memory=256Mi" \
+                --kubelet-arg="system-reserved=cpu=200m,memory=256Mi" \
                 --node-label "topology.kubernetes.io/zone=edge" \
                 --node-label "hardware=raspberry-pi" \
                 --node-label "workload-type=iot"
@@ -273,6 +293,9 @@ REMOTE_SCRIPT
         fi
         ssh "${PI_USER}@${pi_host}" << REMOTE_SCRIPT
             curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="${K3S_VERSION}" K3S_URL="${server_url}" K3S_TOKEN="${token}" sh -s - agent \
+                --kubelet-arg="max-pods=50" \
+                --kubelet-arg="kube-reserved=cpu=200m,memory=256Mi" \
+                --kubelet-arg="system-reserved=cpu=200m,memory=256Mi" \
                 --node-label "topology.kubernetes.io/zone=edge" \
                 --node-label "hardware=raspberry-pi"
 REMOTE_SCRIPT
@@ -285,22 +308,86 @@ REMOTE_SCRIPT
 }
 
 #===============================================================================
-# Fetch Kubeconfig from Pi
+# Wait for K3s to be Ready (with polling)
+#===============================================================================
+wait_for_k3s_ready() {
+    local pi_host="$1"
+    local max_attempts="${2:-60}"  # Default 60 attempts = 5 minutes
+    local interval="${3:-5}"       # Check every 5 seconds
+    
+    log "Waiting for K3s to be ready (max ${max_attempts} attempts, ${interval}s interval)..."
+    
+    local attempt=1
+    while [[ $attempt -le $max_attempts ]]; do
+        # Check if k3s.service is active
+        if ssh -o ConnectTimeout=5 "${PI_USER}@${pi_host}" "sudo systemctl is-active k3s" &>/dev/null; then
+            # Check if kubectl can reach the API server
+            if ssh -o ConnectTimeout=5 "${PI_USER}@${pi_host}" "sudo k3s kubectl get nodes" &>/dev/null; then
+                # Check if node is Ready
+                local node_status
+                node_status=$(ssh "${PI_USER}@${pi_host}" "sudo k3s kubectl get nodes -o jsonpath='{.items[0].status.conditions[?(@.type==\"Ready\")].status}'" 2>/dev/null)
+                if [[ "$node_status" == "True" ]]; then
+                    log "K3s is ready! Node status: Ready ✓"
+                    return 0
+                fi
+            fi
+        fi
+        
+        # Show progress with resource usage
+        if [[ $((attempt % 6)) -eq 0 ]]; then  # Every 30 seconds
+            local cpu_usage
+            cpu_usage=$(ssh -o ConnectTimeout=5 "${PI_USER}@${pi_host}" "top -bn1 | grep 'Cpu(s)' | awk '{print \$2}'" 2>/dev/null || echo "N/A")
+            local mem_usage
+            mem_usage=$(ssh -o ConnectTimeout=5 "${PI_USER}@${pi_host}" "free -m | awk '/^Mem:/{printf \"%.0f%%\", \$3/\$2*100}'" 2>/dev/null || echo "N/A")
+            log "  Attempt ${attempt}/${max_attempts} - CPU: ${cpu_usage}%, Mem: ${mem_usage} - Still initializing..."
+        else
+            debug "  Attempt ${attempt}/${max_attempts} - K3s not ready yet..."
+        fi
+        
+        sleep "$interval"
+        attempt=$((attempt + 1))
+    done
+    
+    error "K3s did not become ready within $((max_attempts * interval)) seconds"
+    error "Check Pi logs with: ssh ${PI_USER}@${pi_host} 'sudo journalctl -u k3s -n 100'"
+    return 1
+}
+
+#===============================================================================
+# Fetch Kubeconfig from Pi (with retry)
 #===============================================================================
 fetch_kubeconfig() {
     local pi_host="$1"
     local target_ip="$2"
+    local max_attempts="${3:-10}"
     
     log "Fetching kubeconfig from Pi..."
     
-    mkdir -p ~/.kube
-    scp "${PI_USER}@${pi_host}:/etc/rancher/k3s/k3s.yaml" ~/.kube/pi-config
+    local attempt=1
+    while [[ $attempt -le $max_attempts ]]; do
+        # Check if kubeconfig file exists
+        if ssh "${PI_USER}@${pi_host}" "test -f /etc/rancher/k3s/k3s.yaml" &>/dev/null; then
+            mkdir -p ~/.kube
+            if scp "${PI_USER}@${pi_host}:/etc/rancher/k3s/k3s.yaml" ~/.kube/pi-config 2>/dev/null; then
+                # Update the server address to Pi's IP
+                if [[ "$(uname)" == "Darwin" ]]; then
+                    sed -i '' "s/127.0.0.1/${target_ip}/g" ~/.kube/pi-config
+                else
+                    sed -i "s/127.0.0.1/${target_ip}/g" ~/.kube/pi-config
+                fi
+                log "Kubeconfig saved to ~/.kube/pi-config ✓"
+                log "To use: export KUBECONFIG=~/.kube/pi-config"
+                return 0
+            fi
+        fi
+        
+        warn "Kubeconfig not yet available (attempt ${attempt}/${max_attempts}), waiting..."
+        sleep 5
+        attempt=$((attempt + 1))
+    done
     
-    # Update the server address to Pi's IP
-    sed -i.bak "s/127.0.0.1/${target_ip}/g" ~/.kube/pi-config
-    
-    log "Kubeconfig saved to ~/.kube/pi-config"
-    log "To use: export KUBECONFIG=~/.kube/pi-config"
+    error "Failed to fetch kubeconfig after ${max_attempts} attempts"
+    return 1
 }
 
 #===============================================================================
@@ -512,12 +599,18 @@ main() {
         # Install K3s
         install_k3s "$pi_host" "server"
         
-        # Wait for K3s to be ready
-        log "Waiting for K3s to be ready..."
-        sleep 30
+        # Wait for K3s to be ready with proper polling
+        if ! wait_for_k3s_ready "$pi_host" 60 5; then
+            error "K3s installation may have issues. Please check Pi manually."
+            error "Try: ssh ${PI_USER}@${pi_host} 'sudo journalctl -u k3s -f'"
+            exit 1
+        fi
         
-        # Fetch kubeconfig
-        fetch_kubeconfig "$pi_host" "$target_ip"
+        # Fetch kubeconfig (with retry)
+        if ! fetch_kubeconfig "$pi_host" "$target_ip" 10; then
+            error "Failed to fetch kubeconfig. K3s may still be initializing."
+            exit 1
+        fi
         
         # Show static IP recommendation
         configure_static_ip "$pi_host" "$target_ip"

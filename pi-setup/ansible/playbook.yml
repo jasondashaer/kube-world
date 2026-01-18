@@ -1,19 +1,40 @@
 ---
 # Main Ansible Playbook for Raspberry Pi K3s Cluster Setup
 # This playbook configures Pi hardware, installs K3s, and prepares for GitOps
+#
+# RELIABILITY NOTES:
+# - Each play re-establishes connection to handle WiFi drops
+# - Long-running tasks have explicit timeouts
+# - Package operations are batched to avoid resource exhaustion
 
 - name: Validate connectivity and gather facts
   hosts: k3s_cluster
   gather_facts: yes
+  vars:
+    ansible_ssh_timeout: 60
+    ansible_command_timeout: 120
   tasks:
     - name: Display host information
       debug:
         msg: "Connected to {{ inventory_hostname }} ({{ ansible_host }})"
 
+    - name: Verify network connectivity
+      wait_for_connection:
+        timeout: 60
+      register: connection_check
+
+    - name: Ensure WiFi power save is disabled (stability)
+      shell: iw dev wlan0 set power_save off 2>/dev/null || true
+      become: yes
+      changed_when: false
+      ignore_errors: yes
+
 - name: Configure Raspberry Pi base system
   hosts: k3s_cluster
   become: yes
+  gather_facts: no  # Already gathered above
   vars:
+    ansible_ssh_timeout: 60
     required_packages:
       - curl
       - wget
@@ -27,20 +48,62 @@
       - util-linux  # For NVMe utilities
   
   tasks:
+    - name: Re-verify connectivity before base configuration
+      wait_for_connection:
+        timeout: 30
+
     - name: Update apt cache
       apt:
         update_cache: yes
         cache_valid_time: 3600
+      retries: 3
+      delay: 10
+      register: apt_update
+      until: apt_update is success
 
     - name: Upgrade all packages
       apt:
         upgrade: dist
+      async: 600  # 10 minute timeout for upgrades
+      poll: 30
       when: upgrade_packages | default(false)
 
-    - name: Install required packages
+    - name: Install required packages (batch 1 - essentials)
       apt:
-        name: "{{ required_packages }}"
+        name:
+          - curl
+          - wget
+          - git
+          - jq
         state: present
+      retries: 3
+      delay: 10
+      register: pkg_batch1
+      until: pkg_batch1 is success
+
+    - name: Install required packages (batch 2 - monitoring)
+      apt:
+        name:
+          - htop
+          - iotop
+          - vim
+        state: present
+      retries: 3
+      delay: 10
+      register: pkg_batch2
+      until: pkg_batch2 is success
+
+    - name: Install required packages (batch 3 - storage)
+      apt:
+        name:
+          - open-iscsi
+          - nfs-common
+          - util-linux
+        state: present
+      retries: 3
+      delay: 10
+      register: pkg_batch3
+      until: pkg_batch3 is success
 
     - name: Set hostname
       hostname:
@@ -96,15 +159,45 @@
       register: cgroup_config
       when: ansible_architecture == "aarch64"
 
-    - name: Reboot if cgroup config changed
+    - name: Notify about required reboot
+      debug:
+        msg: "CGROUP CONFIG CHANGED - Reboot will be required"
+      when: cgroup_config.changed | default(false)
+      changed_when: true
+      notify: reboot_if_required
+
+  handlers:
+    - name: reboot_if_required
       reboot:
         reboot_timeout: 300
-      when: cgroup_config.changed | default(false)
+        msg: "Rebooting for cgroup configuration"
+        post_reboot_delay: 30
+      listen: reboot_if_required
+
+- name: Post-reboot connectivity verification
+  hosts: k3s_cluster
+  gather_facts: no
+  tasks:
+    - name: Wait for Pi to be reachable after any reboot
+      wait_for_connection:
+        timeout: 120
+        delay: 10
+
+    - name: Re-disable WiFi power save after reboot
+      shell: iw dev wlan0 set power_save off 2>/dev/null || true
+      become: yes
+      changed_when: false
+      ignore_errors: yes
 
 - name: Configure NVMe storage (if present)
   hosts: k3s_cluster
   become: yes
+  gather_facts: no
   tasks:
+    - name: Re-verify connectivity before NVMe configuration
+      wait_for_connection:
+        timeout: 30
+
     - name: Check for NVMe devices
       shell: lsblk -d -o NAME,TYPE | grep nvme || true
       register: nvme_check
@@ -156,6 +249,7 @@
 - name: Install K3s on master nodes
   hosts: masters
   become: yes
+  gather_facts: no
   vars:
     k3s_server_args: >-
       --cluster-init
@@ -170,17 +264,43 @@
       --node-label=hardware=raspberry-pi-5
   
   tasks:
+    - name: Pre-flight connectivity check before K3s install
+      wait_for_connection:
+        timeout: 30
+
     - name: Check if K3s is already installed
       stat:
         path: /usr/local/bin/k3s
       register: k3s_installed
 
+    - name: Download K3s installer script
+      get_url:
+        url: https://get.k3s.io
+        dest: /tmp/k3s-install.sh
+        mode: '0755'
+        timeout: 60
+      register: k3s_download
+      retries: 3
+      delay: 10
+      until: k3s_download is success
+      when: not k3s_installed.stat.exists
+
     - name: Install K3s server
       shell: |
-        curl -sfL https://get.k3s.io | \
         INSTALL_K3S_VERSION={{ k3s_version }} \
-        sh -s - server {{ k3s_server_args }}
+        /tmp/k3s-install.sh server {{ k3s_server_args }}
       when: not k3s_installed.stat.exists
+      async: 600
+      poll: 15
+
+    - name: Wait for K3s service to start
+      systemd:
+        name: k3s
+        state: started
+      register: k3s_service
+      retries: 5
+      delay: 10
+      until: k3s_service is success
 
     - name: Wait for K3s to be ready
       command: kubectl get nodes
@@ -204,6 +324,13 @@
       delegate_facts: true
       delegate_to: localhost
 
+    - name: Create .kube directory
+      file:
+        path: "/home/{{ ansible_user }}/.kube"
+        state: directory
+        owner: "{{ ansible_user }}"
+        mode: '0755'
+
     - name: Copy kubeconfig to user home
       copy:
         src: /etc/rancher/k3s/k3s.yaml
@@ -216,6 +343,7 @@
 - name: Install K3s on worker nodes
   hosts: workers
   become: yes
+  gather_facts: no
   vars:
     k3s_agent_args: >-
       --node-label=node.kubernetes.io/role=worker
@@ -223,38 +351,78 @@
       --node-label=hardware=raspberry-pi
   
   tasks:
+    - name: Pre-flight connectivity check before K3s agent install
+      wait_for_connection:
+        timeout: 30
+
     - name: Check if K3s agent is already installed
       stat:
         path: /usr/local/bin/k3s
       register: k3s_installed
 
+    - name: Download K3s installer script
+      get_url:
+        url: https://get.k3s.io
+        dest: /tmp/k3s-install.sh
+        mode: '0755'
+        timeout: 60
+      register: k3s_download
+      retries: 3
+      delay: 10
+      until: k3s_download is success
+      when: not k3s_installed.stat.exists
+
     - name: Install K3s agent
       shell: |
-        curl -sfL https://get.k3s.io | \
         INSTALL_K3S_VERSION={{ k3s_version }} \
         K3S_URL=https://{{ hostvars['localhost']['k3s_master_ip'] }}:6443 \
         K3S_TOKEN={{ hostvars['localhost']['k3s_join_token'] }} \
-        sh -s - agent {{ k3s_agent_args }}
+        /tmp/k3s-install.sh agent {{ k3s_agent_args }}
       when: 
         - not k3s_installed.stat.exists
         - hostvars['localhost']['k3s_join_token'] is defined
+      async: 300
+      poll: 15
+
+    - name: Wait for K3s agent service to start
+      systemd:
+        name: k3s-agent
+        state: started
+      register: k3s_agent_service
+      retries: 5
+      delay: 10
+      until: k3s_agent_service is success
+      when: not k3s_installed.stat.exists
 
 - name: Post-installation configuration
   hosts: masters[0]
   become: yes
+  gather_facts: no
   environment:
     KUBECONFIG: /etc/rancher/k3s/k3s.yaml
   
   tasks:
+    - name: Final connectivity check
+      wait_for_connection:
+        timeout: 30
+
     - name: Wait for all nodes to be ready
       command: kubectl wait --for=condition=Ready nodes --all --timeout=300s
       changed_when: false
+      register: nodes_ready
+      retries: 3
+      delay: 30
+      until: nodes_ready is success
 
     - name: Install Helm
       shell: |
         curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
       args:
         creates: /usr/local/bin/helm
+      register: helm_install
+      retries: 3
+      delay: 10
+      until: helm_install is success or helm_install is skipped
 
     - name: Create namespaces
       kubernetes.core.k8s:
@@ -268,6 +436,10 @@
         - home-assistant
         - monitoring
         - velero
+      register: ns_create
+      retries: 3
+      delay: 5
+      until: ns_create is success
 
     - name: Display cluster status
       command: kubectl get nodes -o wide
@@ -277,3 +449,13 @@
     - name: Show cluster status
       debug:
         var: cluster_status.stdout_lines
+
+    - name: Final health verification
+      debug:
+        msg: |
+          ============================================
+          K3s CLUSTER INSTALLATION COMPLETE
+          ============================================
+          All nodes are ready and namespaces created.
+          Kubeconfig available at: ~/.kube/config
+          ============================================

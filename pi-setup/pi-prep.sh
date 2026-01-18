@@ -391,24 +391,132 @@ fetch_kubeconfig() {
 }
 
 #===============================================================================
-# Run Ansible Playbook
+# Run Ansible Playbook (with pre-checks and retries)
 #===============================================================================
 run_ansible() {
     local pi_host="$1"
+    local max_retries="${2:-3}"
+    
     log "Running Ansible playbook for full configuration..."
     
-    # Update inventory with Pi IP
-    local inventory="${REPO_ROOT}/pi-setup/inventory.ini"
+    # Update inventory with Pi IP (use the ansible subdirectory inventory)
+    local inventory="${REPO_ROOT}/pi-setup/ansible/inventory.ini"
+    local playbook="${REPO_ROOT}/pi-setup/ansible/playbook.yml"
+    local ansible_cfg="${REPO_ROOT}/pi-setup/ansible/ansible.cfg"
     
-    if [[ -f "$inventory" ]]; then
-        # Run the playbook
-        ansible-playbook -i "$inventory" "${REPO_ROOT}/pi-setup/ansible/playbook.yml" \
-            --extra-vars "pi_ip=${pi_host}" \
-            --extra-vars "k3s_version=${K3S_VERSION}"
-    else
-        warn "Ansible inventory not found at $inventory"
+    if [[ ! -f "$playbook" ]]; then
+        warn "Ansible playbook not found at $playbook"
         warn "Skipping Ansible configuration"
+        return 0
     fi
+    
+    # Pre-flight: Ensure Pi is reachable before Ansible
+    log "Pre-flight: Verifying Pi connectivity before Ansible..."
+    local preflight_attempts=0
+    local preflight_max=5
+    while [[ $preflight_attempts -lt $preflight_max ]]; do
+        if ssh -o ConnectTimeout=10 -o BatchMode=yes "${PI_USER}@${pi_host}" "echo 'Pre-flight OK'" &>/dev/null; then
+            log "Pre-flight connectivity check passed ✓"
+            break
+        fi
+        preflight_attempts=$((preflight_attempts + 1))
+        if [[ $preflight_attempts -lt $preflight_max ]]; then
+            warn "Pre-flight attempt ${preflight_attempts}/${preflight_max} failed, waiting 10s..."
+            sleep 10
+        fi
+    done
+    
+    if [[ $preflight_attempts -ge $preflight_max ]]; then
+        error "Pi not reachable before Ansible. Cannot proceed."
+        error "Check Pi network connectivity and try again."
+        return 1
+    fi
+    
+    # Pre-flight: Disable WiFi power save on Pi for stability during Ansible
+    log "Disabling WiFi power save for Ansible stability..."
+    ssh -o ConnectTimeout=10 "${PI_USER}@${pi_host}" "sudo iw dev wlan0 set power_save off 2>/dev/null || true" || true
+    
+    # Pre-flight: Check Pi resources (warn if low)
+    log "Checking Pi resource availability..."
+    local mem_free
+    mem_free=$(ssh -o ConnectTimeout=10 "${PI_USER}@${pi_host}" "free -m | awk '/^Mem:/{print \$7}'" 2>/dev/null || echo "0")
+    if [[ -n "$mem_free" ]] && [[ "$mem_free" -lt 500 ]]; then
+        warn "Low memory on Pi: ${mem_free}MB available. Ansible may be slow or fail."
+    else
+        debug "Pi memory available: ${mem_free}MB ✓"
+    fi
+    
+    # Update inventory with current Pi IP
+    log "Updating inventory with Pi IP: ${pi_host}"
+    if [[ "$(uname)" == "Darwin" ]]; then
+        sed -i '' "s/ansible_host=.*/ansible_host=${pi_host}/" "$inventory"
+    else
+        sed -i "s/ansible_host=.*/ansible_host=${pi_host}/" "$inventory"
+    fi
+    
+    # Run Ansible with retries
+    local attempt=1
+    while [[ $attempt -le $max_retries ]]; do
+        log "Ansible attempt ${attempt}/${max_retries}..."
+        
+        # Set environment for ansible.cfg
+        export ANSIBLE_CONFIG="$ansible_cfg"
+        
+        # Run with verbose output on retry
+        local verbosity=""
+        if [[ $attempt -gt 1 ]]; then
+            verbosity="-vv"
+            warn "Retrying with increased verbosity..."
+        fi
+        
+        if ansible-playbook -i "$inventory" "$playbook" \
+            --extra-vars "pi_ip=${pi_host}" \
+            --extra-vars "k3s_version=${K3S_VERSION}" \
+            --extra-vars "ansible_host=${pi_host}" \
+            $verbosity; then
+            log "Ansible playbook completed successfully ✓"
+            return 0
+        fi
+        
+        local exit_code=$?
+        warn "Ansible attempt ${attempt} failed with exit code: ${exit_code}"
+        
+        if [[ $attempt -lt $max_retries ]]; then
+            # Check if Pi is still reachable
+            log "Checking if Pi is still reachable..."
+            local recovery_attempts=0
+            local recovery_max=12  # 12 * 10s = 2 minutes
+            while [[ $recovery_attempts -lt $recovery_max ]]; do
+                if ssh -o ConnectTimeout=5 -o BatchMode=yes "${PI_USER}@${pi_host}" "echo 'Recovery OK'" &>/dev/null; then
+                    log "Pi recovered and is reachable ✓"
+                    break
+                fi
+                recovery_attempts=$((recovery_attempts + 1))
+                if [[ $recovery_attempts -lt $recovery_max ]]; then
+                    warn "  Waiting for Pi to recover... (${recovery_attempts}/${recovery_max})"
+                    sleep 10
+                fi
+            done
+            
+            if [[ $recovery_attempts -ge $recovery_max ]]; then
+                error "Pi did not recover within 2 minutes. It may have crashed or rebooted."
+                error "Please check Pi manually (power cycle if needed) and retry."
+                return 1
+            fi
+            
+            # Re-disable WiFi power save after recovery
+            ssh -o ConnectTimeout=10 "${PI_USER}@${pi_host}" "sudo iw dev wlan0 set power_save off 2>/dev/null || true" || true
+            
+            warn "Waiting 30s before retry..."
+            sleep 30
+        fi
+        
+        attempt=$((attempt + 1))
+    done
+    
+    error "Ansible playbook failed after ${max_retries} attempts"
+    error "Check Pi logs: ssh ${PI_USER}@${pi_host} 'sudo journalctl -n 200'"
+    return 1
 }
 
 #===============================================================================

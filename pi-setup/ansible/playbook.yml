@@ -66,7 +66,7 @@
         upgrade: dist
       async: 600  # 10 minute timeout for upgrades
       poll: 30
-      when: upgrade_packages | default(false)
+      when: upgrade_packages | default(false) | bool
 
     - name: Install required packages (batch 1 - essentials)
       apt:

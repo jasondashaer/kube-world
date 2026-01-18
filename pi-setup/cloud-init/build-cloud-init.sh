@@ -445,6 +445,7 @@ package_reboot_if_required: true
 packages:
   # SSH server (ensure it's installed and enabled)
   - openssh-server
+  - ssh
   # mDNS/Bonjour - REQUIRED for .local hostname resolution
   - avahi-daemon
   - libnss-mdns
@@ -558,9 +559,11 @@ bootcmd:
 
 # Run commands - executed in order after cloud-init completes user setup
 runcmd:
-  # Ensure SSH service is enabled and started
-  - systemctl enable ssh
-  - systemctl start ssh
+  # Ensure SSH service is enabled and started (try both service names)
+  - systemctl enable ssh || systemctl enable sshd || true
+  - systemctl start ssh || systemctl start sshd || true
+  - systemctl enable ssh.service || true
+  - systemctl restart ssh.service || systemctl restart sshd.service || true
   # Ensure avahi-daemon (mDNS) is enabled for .local hostname resolution
   - systemctl enable avahi-daemon
   - systemctl start avahi-daemon
@@ -658,6 +661,11 @@ main() {
         cp "${OUTPUT_DIR}/meta-data" "${COPY_TO}/"
         cp "${OUTPUT_DIR}/network-config" "${COPY_TO}/"
         cp "${OUTPUT_DIR}/user-data" "${COPY_TO}/"
+        
+        # Create empty 'ssh' file to enable SSH on Raspberry Pi OS / Ubuntu
+        # This is a fallback mechanism - some Pi images check for this file
+        touch "${COPY_TO}/ssh"
+        log "Created 'ssh' file to enable SSH (Raspberry Pi compatibility)"
         
         log "Files copied successfully ✓"
     fi

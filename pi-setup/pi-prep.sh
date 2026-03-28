@@ -473,36 +473,55 @@ EOF
 configure_wifi() {
     local pi_host="$1"
     log "Configuring WiFi on Pi..."
-    
+
     # Read WiFi config from config.yaml if available
     local wifi_ssid=""
     local wifi_pass=""
-    
+
     if [[ -f "${REPO_ROOT}/config.yaml" ]]; then
         # Try to read from config (simplified - assumes unencrypted)
         wifi_ssid=$(grep -A1 "ssids:" "${REPO_ROOT}/config.yaml" | grep "name:" | head -1 | cut -d'"' -f2 || echo "")
     fi
-    
+
     if [[ -z "$wifi_ssid" ]]; then
         read -p "Enter WiFi SSID: " wifi_ssid
         read -sp "Enter WiFi password: " wifi_pass
         echo
     fi
-    
+
     if [[ -n "$wifi_ssid" && -n "$wifi_pass" ]]; then
-        ssh "${PI_USER}@${pi_host}" "sudo nmcli device wifi connect '${wifi_ssid}' password '${wifi_pass}'" || {
-            warn "nmcli failed, trying wpa_supplicant method..."
-            ssh "${PI_USER}@${pi_host}" "cat << EOF | sudo tee /etc/wpa_supplicant/wpa_supplicant.conf
+        # SECURITY: Escape special characters to prevent command injection
+        # Write credentials to a temp file and transfer securely
+        local temp_wifi_config
+        temp_wifi_config=$(mktemp)
+        chmod 600 "$temp_wifi_config"
+
+        # Create wpa_supplicant config file locally with proper escaping
+        cat > "$temp_wifi_config" << WIFI_EOF
 country=US
 ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
 update_config=1
 network={
-    ssid=\"${wifi_ssid}\"
-    psk=\"${wifi_pass}\"
+    ssid="${wifi_ssid//\"/\\\"}"
+    psk="${wifi_pass//\"/\\\"}"
 }
-EOF
-sudo systemctl restart wpa_supplicant"
+WIFI_EOF
+
+        # Transfer config file securely (avoids passing password on command line)
+        scp -o StrictHostKeyChecking=accept-new "$temp_wifi_config" "${PI_USER}@${pi_host}:/tmp/wifi_config.tmp" && \
+        ssh "${PI_USER}@${pi_host}" "sudo mv /tmp/wifi_config.tmp /etc/wpa_supplicant/wpa_supplicant.conf && sudo chmod 600 /etc/wpa_supplicant/wpa_supplicant.conf && sudo systemctl restart wpa_supplicant" || {
+            warn "wpa_supplicant method failed, trying nmcli..."
+            # Use printf to safely pass credentials via stdin
+            ssh "${PI_USER}@${pi_host}" "sudo nmcli device wifi rescan 2>/dev/null || true; sleep 2"
+            printf '%s\n' "$wifi_pass" | ssh "${PI_USER}@${pi_host}" "sudo nmcli device wifi connect \"${wifi_ssid//\"/\\\"}\" --ask" 2>/dev/null || {
+                error "Failed to configure WiFi"
+                rm -f "$temp_wifi_config"
+                return 1
+            }
         }
+
+        # Cleanup temp file
+        rm -f "$temp_wifi_config"
         log "WiFi configured ✓"
     fi
 }

@@ -2,15 +2,114 @@
 #===============================================================================
 # Rancher Installation Script
 # Installs Rancher with cert-manager on a Kubernetes cluster
+#
+# NETWORK ACCESSIBILITY:
+#   For RPi cluster import, Rancher must be accessible from LAN.
+#   This script auto-detects Mac's LAN IP and configures accordingly.
+#
+# USAGE:
+#   # Auto-detect LAN IP (recommended)
+#   ./install-rancher.sh
+#
+#   # Explicit hostname
+#   RANCHER_HOSTNAME=192.168.1.50 ./install-rancher.sh
+#
+#   # Use nip.io for DNS resolution
+#   RANCHER_HOSTNAME=rancher.192.168.1.50.nip.io ./install-rancher.sh
+#
 #===============================================================================
 set -euo pipefail
 
 # Configuration
 RANCHER_VERSION="${RANCHER_VERSION:-2.13.1}"
 CERT_MANAGER_VERSION="${CERT_MANAGER_VERSION:-v1.14.0}"
-RANCHER_HOSTNAME="${RANCHER_HOSTNAME:-localhost}"
-RANCHER_BOOTSTRAP_PASSWORD="${RANCHER_BOOTSTRAP_PASSWORD:-admin}"
 RANCHER_REPLICAS="${RANCHER_REPLICAS:-1}"
+
+#===============================================================================
+# Auto-detect Mac LAN IP for remote access
+#===============================================================================
+get_lan_ip() {
+    local lan_ip=""
+
+    # Try multiple methods to find LAN IP
+    # Method 1: Check for active interface with route
+    if command -v route &>/dev/null; then
+        local default_if
+        default_if=$(route -n get default 2>/dev/null | grep interface | awk '{print $2}' || true)
+        if [[ -n "$default_if" ]]; then
+            lan_ip=$(ipconfig getifaddr "$default_if" 2>/dev/null || true)
+        fi
+    fi
+
+    # Method 2: Try common interfaces
+    if [[ -z "$lan_ip" ]]; then
+        for iface in en0 en1 en8 en9; do
+            lan_ip=$(ipconfig getifaddr "$iface" 2>/dev/null || true)
+            if [[ -n "$lan_ip" && "$lan_ip" != "127.0.0.1" ]]; then
+                break
+            fi
+        done
+    fi
+
+    # Method 3: Parse ifconfig for non-localhost IPv4
+    if [[ -z "$lan_ip" ]]; then
+        lan_ip=$(ifconfig 2>/dev/null | grep "inet " | grep -v "127.0.0.1" | head -1 | awk '{print $2}' || true)
+    fi
+
+    # Fallback to localhost if nothing found
+    echo "${lan_ip:-127.0.0.1}"
+}
+
+# Determine Rancher hostname
+if [[ -z "${RANCHER_HOSTNAME:-}" ]]; then
+    DETECTED_LAN_IP=$(get_lan_ip)
+    if [[ "$DETECTED_LAN_IP" != "127.0.0.1" ]]; then
+        # Use nip.io for automatic DNS resolution to the LAN IP
+        RANCHER_HOSTNAME="rancher.${DETECTED_LAN_IP}.nip.io"
+        echo ""
+        echo "📡 Auto-detected Mac LAN IP: ${DETECTED_LAN_IP}"
+        echo "   Using hostname: ${RANCHER_HOSTNAME}"
+        echo "   (RPi will be able to reach Rancher at this address)"
+        echo ""
+    else
+        RANCHER_HOSTNAME="localhost"
+        echo ""
+        echo "⚠️  WARNING: Could not detect LAN IP, using localhost"
+        echo "   RPi will NOT be able to connect to Rancher!"
+        echo "   Set RANCHER_HOSTNAME to your Mac's LAN IP manually."
+        echo ""
+    fi
+fi
+
+# Store LAN IP for later use (import commands)
+RANCHER_LAN_IP="${RANCHER_LAN_IP:-$(get_lan_ip)}"
+
+# Bootstrap password handling - SECURITY WARNING for weak defaults
+if [[ -z "${RANCHER_BOOTSTRAP_PASSWORD:-}" ]]; then
+    # Generate a secure random password if not provided
+    if command -v openssl &>/dev/null; then
+        RANCHER_BOOTSTRAP_PASSWORD=$(openssl rand -base64 16 | tr -d '/+=' | head -c 16)
+        GENERATED_PASSWORD=true
+    else
+        # Fallback - warn user about weak default
+        RANCHER_BOOTSTRAP_PASSWORD="admin"
+        GENERATED_PASSWORD=false
+        echo ""
+        echo "⚠️  WARNING: Using weak default Rancher password 'admin'"
+        echo "   Set RANCHER_BOOTSTRAP_PASSWORD environment variable for production use:"
+        echo "   export RANCHER_BOOTSTRAP_PASSWORD=\"\$(openssl rand -base64 16)\""
+        echo ""
+    fi
+else
+    GENERATED_PASSWORD=false
+    # Warn if user explicitly set weak password
+    if [[ "$RANCHER_BOOTSTRAP_PASSWORD" == "admin" || "$RANCHER_BOOTSTRAP_PASSWORD" == "password" || ${#RANCHER_BOOTSTRAP_PASSWORD} -lt 8 ]]; then
+        echo ""
+        echo "⚠️  WARNING: Weak Rancher bootstrap password detected"
+        echo "   Consider using a stronger password for production deployments"
+        echo ""
+    fi
+fi
 
 # Colors
 GREEN='\033[0;32m'
@@ -229,9 +328,17 @@ post_install() {
     echo "=============================================="
     echo ""
     echo "  URL: ${rancher_url}"
-    echo "  Initial Password: ${RANCHER_BOOTSTRAP_PASSWORD}"
+    if [[ "${GENERATED_PASSWORD:-false}" == "true" ]]; then
+        echo ""
+        echo "  🔐 AUTO-GENERATED Bootstrap Password:"
+        echo "     ${RANCHER_BOOTSTRAP_PASSWORD}"
+        echo ""
+        echo "  ⚠️  SAVE THIS PASSWORD NOW - it won't be shown again!"
+    else
+        echo "  Initial Password: ${RANCHER_BOOTSTRAP_PASSWORD}"
+    fi
     echo ""
-    echo "  IMPORTANT: Change the admin password immediately!"
+    echo "  IMPORTANT: Change the admin password immediately after login!"
     echo ""
     
     # For local development, provide port-forward instructions
@@ -248,7 +355,49 @@ post_install() {
     else
         warn "Fleet namespace not found - Rancher may still be initializing"
     fi
+
+    # Save configuration for import script
+    local rancher_info_file="${SCRIPT_DIR}/.rancher-info"
+    cat > "$rancher_info_file" << EOF
+# Rancher installation info - generated $(date)
+RANCHER_URL=https://${RANCHER_HOSTNAME}
+RANCHER_LAN_IP=${RANCHER_LAN_IP}
+RANCHER_HOSTNAME=${RANCHER_HOSTNAME}
+# Note: Password was displayed at install time
+EOF
+    chmod 600 "$rancher_info_file"
+    log "Saved Rancher info to ${rancher_info_file}"
+
+    # Print RPi import instructions
+    echo ""
+    echo "=============================================="
+    echo "  Importing RPi Cluster into Rancher"
+    echo "=============================================="
+    echo ""
+    echo "  1. Open Rancher UI: https://${RANCHER_HOSTNAME}"
+    echo ""
+    echo "  2. Navigate to: Cluster Management > Import Existing"
+    echo ""
+    echo "  3. Choose 'Generic' and give it a name (e.g., 'pi-cluster')"
+    echo ""
+    echo "  4. Copy the registration command shown in Rancher UI"
+    echo ""
+    echo "  5. On the RPi, run the command with --insecure flag:"
+    echo ""
+    echo "     # If using self-signed certs (development):"
+    echo "     curl --insecure -sfL https://${RANCHER_HOSTNAME}/v3/import/XXXXX.yaml | kubectl apply -f -"
+    echo ""
+    echo "  Or use the helper script:"
+    echo "     ./rancher/import-cluster.sh <registration-url>"
+    echo ""
+    echo "  TROUBLESHOOTING:"
+    echo "  - Verify connectivity: ping ${RANCHER_LAN_IP}"
+    echo "  - Test HTTPS: curl -k https://${RANCHER_HOSTNAME}/ping"
+    echo "  - Check firewall: Ensure ports 80,443 are open on Mac"
+    echo ""
 }
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 #===============================================================================
 # Main

@@ -1,5 +1,20 @@
 # Kyverno Policies for kube-world
 # Enforces security best practices across all clusters
+#
+# ENFORCEMENT MODES:
+#   - Audit: Log violations but allow (default for development)
+#   - Enforce: Block violations (use in production)
+#
+# To enable enforcement in production:
+#   1. Test thoroughly in Audit mode first
+#   2. Review policy report: kubectl get polr -A
+#   3. Fix any existing violations
+#   4. Update validationFailureAction to "Enforce" below
+#   5. Or use Kyverno Policy Lifecycle: start with Audit, escalate to Enforce
+#
+# Alternatively, override via Kyverno ConfigMap:
+#   kubectl -n kyverno create configmap kyverno --from-literal=validationFailureAction=Enforce
+#
 ---
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy

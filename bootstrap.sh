@@ -25,6 +25,23 @@ NC='\033[0m' # No Color
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_FILE="${SCRIPT_DIR}/.bootstrap.log"
 KUBECONFIG_DIR="${HOME}/.kube"
+CONFIG_FILE="${SCRIPT_DIR}/config.yaml"
+
+# Load versions from config.yaml if available, otherwise use defaults
+load_config_versions() {
+    if [[ -f "$CONFIG_FILE" ]] && command -v yq &>/dev/null; then
+        K3S_VERSION="${K3S_VERSION:-$(yq eval '.deployment.versions.k3s // "v1.29.0+k3s1"' "$CONFIG_FILE")}"
+        RANCHER_VERSION="${RANCHER_VERSION:-$(yq eval '.deployment.versions.rancher // "2.13.1"' "$CONFIG_FILE")}"
+        HELM_VERSION="${HELM_VERSION:-$(yq eval '.deployment.versions.helm // "3.14.0"' "$CONFIG_FILE")}"
+    else
+        # Fallback to hardcoded defaults if config.yaml not available
+        K3S_VERSION="${K3S_VERSION:-v1.29.0+k3s1}"
+        RANCHER_VERSION="${RANCHER_VERSION:-2.13.1}"
+        HELM_VERSION="${HELM_VERSION:-3.14.0}"
+    fi
+}
+
+# Initialize with defaults - will be overwritten by load_config_versions() after yq is installed
 K3S_VERSION="${K3S_VERSION:-v1.29.0+k3s1}"
 RANCHER_VERSION="${RANCHER_VERSION:-2.13.1}"
 HELM_VERSION="${HELM_VERSION:-3.14.0}"
@@ -76,55 +93,95 @@ wait_for_crd() {
 # Wait for Fleet CRDs specifically (installed by Rancher)
 wait_for_fleet_crds() {
     log "Waiting for Fleet CRDs to be installed by Rancher..."
-    
+
     # First, ensure Rancher is FULLY ready (not just deployed)
     log "Verifying Rancher internal components are running..."
     local rancher_ready_timeout=300
     local rancher_elapsed=0
     while [[ $rancher_elapsed -lt $rancher_ready_timeout ]]; do
-        # Check if rancher pods are all running (not just deployment ready)
-        local not_ready
-        not_ready=$(kubectl -n cattle-system get pods -o jsonpath='{.items[*].status.phase}' 2>/dev/null | tr ' ' '\n' | grep -v "Running" | grep -v "Succeeded" | wc -l | tr -d ' ')
-        if [[ "$not_ready" == "0" ]]; then
+        # Count running pods more reliably using jsonpath with proper filtering
+        local total_pods running_pods
+        total_pods=$(kubectl -n cattle-system get pods --no-headers 2>/dev/null | wc -l | tr -d ' ' || echo "0")
+        running_pods=$(kubectl -n cattle-system get pods -o jsonpath='{.items[?(@.status.phase=="Running")].metadata.name}' 2>/dev/null | wc -w || echo "0")
+
+        if [[ "$total_pods" -gt 0 && "$running_pods" -ge "$total_pods" ]]; then
             # Also check that fleet-controller namespace exists (created by Rancher)
             if kubectl get namespace cattle-fleet-system &>/dev/null || kubectl get namespace fleet-system &>/dev/null; then
-                log "Rancher internal components ready ✓"
+                log "Rancher internal components ready (${running_pods}/${total_pods} pods running) ✓"
                 break
             fi
         fi
-        debug "Rancher internal components not fully ready, waiting... (${rancher_elapsed}/${rancher_ready_timeout}s)"
+
+        # Show progress with pod status
+        if [[ $((rancher_elapsed % 30)) -eq 0 && $rancher_elapsed -gt 0 ]]; then
+            log "  Progress: ${running_pods}/${total_pods} pods running (${rancher_elapsed}/${rancher_ready_timeout}s)"
+            # Show any pods that are not running
+            local problem_pods
+            problem_pods=$(kubectl -n cattle-system get pods --no-headers 2>/dev/null | grep -v "Running\|Completed\|Succeeded" | head -3 || true)
+            if [[ -n "$problem_pods" ]]; then
+                debug "  Pods not ready yet:"
+                echo "$problem_pods" | while read -r line; do debug "    $line"; done
+            fi
+        fi
+
         sleep 10
         rancher_elapsed=$((rancher_elapsed + 10))
     done
-    
+
     if [[ $rancher_elapsed -ge $rancher_ready_timeout ]]; then
-        warn "Rancher internal components may not be fully ready, continuing anyway..."
+        warn "Rancher internal components may not be fully ready after ${rancher_ready_timeout}s"
+        warn "Current pod status:"
         kubectl -n cattle-system get pods
+        warn "Continuing anyway - Fleet CRDs may still become available..."
     fi
-    
+
     local fleet_crds=(
         "gitrepos.fleet.cattle.io"
         "bundles.fleet.cattle.io"
         "clustergroups.fleet.cattle.io"
         "clusters.fleet.cattle.io"
     )
-    
+
+    local failed_crds=()
     for crd in "${fleet_crds[@]}"; do
         if ! wait_for_crd "$crd" 300; then
-            error "Fleet CRD '$crd' not available. Is Rancher fully installed?"
-            error "Debug: kubectl -n cattle-system get pods"
-            error "Debug: kubectl get crd | grep fleet"
-            return 1
+            failed_crds+=("$crd")
         fi
     done
-    
+
+    if [[ ${#failed_crds[@]} -gt 0 ]]; then
+        error "Fleet CRDs not available: ${failed_crds[*]}"
+        error ""
+        error "Troubleshooting steps:"
+        error "  1. Check Rancher pods: kubectl -n cattle-system get pods"
+        error "  2. Check Rancher logs: kubectl -n cattle-system logs -l app=rancher --tail=50"
+        error "  3. Check available CRDs: kubectl get crd | grep fleet"
+        error "  4. Check cluster resources: kubectl top nodes (if metrics-server installed)"
+        error ""
+        error "Common causes:"
+        error "  - Insufficient cluster memory (Rancher needs ~2GB)"
+        error "  - Network issues preventing image pulls"
+        error "  - Previous incomplete installation (try --cleanup first)"
+        return 1
+    fi
+
     # Also wait for fleet-controller to be ready
     log "Waiting for Fleet controller to be ready..."
-    kubectl wait --for=condition=Available deployment/fleet-controller \
-        -n cattle-fleet-system --timeout=300s 2>/dev/null || \
-    kubectl wait --for=condition=Available deployment/fleet-controller \
-        -n fleet-system --timeout=300s 2>/dev/null || true
-    
+    local fleet_ns=""
+    if kubectl get namespace cattle-fleet-system &>/dev/null; then
+        fleet_ns="cattle-fleet-system"
+    elif kubectl get namespace fleet-system &>/dev/null; then
+        fleet_ns="fleet-system"
+    fi
+
+    if [[ -n "$fleet_ns" ]]; then
+        if ! kubectl wait --for=condition=Available deployment/fleet-controller \
+            -n "$fleet_ns" --timeout=180s 2>/dev/null; then
+            warn "Fleet controller not fully ready, but CRDs are available"
+            kubectl -n "$fleet_ns" get pods
+        fi
+    fi
+
     log "Fleet CRDs and controller ready ✓"
     return 0
 }
@@ -291,7 +348,61 @@ install_prereqs_linux() {
 preflight_checks() {
     log "Running preflight checks..."
     local checks_passed=true
-    
+
+    # Check for required tools based on platform
+    log "Checking required tools..."
+    local required_tools=()
+    local optional_tools=()
+
+    case "$PLATFORM" in
+        mac|mac-*)
+            required_tools=("docker" "kubectl" "helm" "kind")
+            optional_tools=("yq" "jq" "ansible")
+            ;;
+        pi|linux-*)
+            required_tools=("kubectl" "helm")
+            optional_tools=("yq" "jq" "ansible" "curl")
+            ;;
+        cloud)
+            required_tools=("kubectl" "helm" "terraform")
+            optional_tools=("yq" "jq" "aws" "gcloud" "az")
+            ;;
+    esac
+
+    local missing_required=()
+    local missing_optional=()
+
+    for tool in "${required_tools[@]}"; do
+        if ! command -v "$tool" &>/dev/null; then
+            missing_required+=("$tool")
+        else
+            debug "  ✓ $tool found"
+        fi
+    done
+
+    for tool in "${optional_tools[@]}"; do
+        if ! command -v "$tool" &>/dev/null; then
+            missing_optional+=("$tool")
+        else
+            debug "  ✓ $tool found (optional)"
+        fi
+    done
+
+    if [[ ${#missing_required[@]} -gt 0 ]]; then
+        if [[ "$SKIP_PREREQS" == "true" ]]; then
+            error "Required tools missing: ${missing_required[*]}"
+            error "Cannot continue with --skip-prereqs when required tools are missing"
+            checks_passed=false
+        else
+            warn "Required tools missing: ${missing_required[*]}"
+            log "These will be installed during prerequisite setup"
+        fi
+    fi
+
+    if [[ ${#missing_optional[@]} -gt 0 ]]; then
+        debug "Optional tools missing (will be installed): ${missing_optional[*]}"
+    fi
+
     # Check disk space (need at least 10GB)
     local free_space
     # macOS uses different df options than Linux
@@ -598,14 +709,56 @@ verify_installation() {
 #===============================================================================
 # Main Execution
 #===============================================================================
+# Valid platform and mode values
+VALID_PLATFORMS=("mac" "mac-arm64" "mac-amd64" "pi" "linux-arm64" "linux-amd64" "cloud" "auto")
+VALID_MODES=("dev" "prod")
+
+validate_platform() {
+    local platform="$1"
+    for valid in "${VALID_PLATFORMS[@]}"; do
+        if [[ "$platform" == "$valid" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+validate_mode() {
+    local mode="$1"
+    for valid in "${VALID_MODES[@]}"; do
+        if [[ "$mode" == "$valid" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 parse_args() {
     while [[ $# -gt 0 ]]; do
         case $1 in
             --platform)
+                if [[ -z "${2:-}" ]]; then
+                    error "--platform requires a value"
+                    exit 1
+                fi
+                if ! validate_platform "$2"; then
+                    error "Invalid platform: $2"
+                    error "Valid platforms: ${VALID_PLATFORMS[*]}"
+                    exit 1
+                fi
                 PLATFORM="$2"
                 shift 2
                 ;;
             --mode)
+                if [[ -z "${2:-}" ]]; then
+                    error "--mode requires a value"
+                    exit 1
+                fi
+                if ! validate_mode "$2"; then
+                    error "Invalid mode: $2"
+                    error "Valid modes: ${VALID_MODES[*]}"
+                    exit 1
+                fi
                 MODE="$2"
                 shift 2
                 ;;
@@ -629,6 +782,7 @@ parse_args() {
                 echo "Usage: $0 [options]"
                 echo "Options:"
                 echo "  --platform <mac|pi|cloud>  Target platform (default: auto-detect)"
+                echo "                             Valid: ${VALID_PLATFORMS[*]}"
                 echo "  --mode <dev|prod>          Deployment mode (default: dev)"
                 echo "  --skip-prereqs             Skip prerequisite installation"
                 echo "  --dry-run                  Show what would be done"
@@ -638,6 +792,7 @@ parse_args() {
                 ;;
             *)
                 error "Unknown option: $1"
+                echo "Use --help for usage information"
                 exit 1
                 ;;
         esac
@@ -703,7 +858,11 @@ main() {
                 ;;
         esac
     fi
-    
+
+    # Load versions from config.yaml (now that yq should be installed)
+    load_config_versions
+    log "Using versions - K3s: ${K3S_VERSION}, Rancher: ${RANCHER_VERSION}, Helm: ${HELM_VERSION}"
+
     # Run preflight checks
     preflight_checks
     

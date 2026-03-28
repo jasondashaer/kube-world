@@ -150,14 +150,28 @@
         regexp: '^([^#].*?\sswap\s+sw\s+.*)$'
         replace: '# \1'
 
-    - name: Configure cgroup memory (Raspberry Pi specific)
-      lineinfile:
-        path: /boot/firmware/cmdline.txt
-        regexp: '^(.*?)$'
-        line: '\1 cgroup_memory=1 cgroup_enable=memory'
-        backrefs: yes
-      register: cgroup_config
+    - name: Check if cgroup memory is already configured
+      shell: grep -q "cgroup_memory=1" /boot/firmware/cmdline.txt
+      register: cgroup_check
+      failed_when: false
+      changed_when: false
       when: ansible_architecture == "aarch64"
+
+    - name: Configure cgroup memory (Raspberry Pi specific)
+      shell: |
+        # cmdline.txt must be a single line - append cgroup params safely
+        if [ -f /boot/firmware/cmdline.txt ]; then
+          # Read existing content, strip trailing whitespace/newlines
+          existing=$(cat /boot/firmware/cmdline.txt | tr -d '\n' | sed 's/[[:space:]]*$//')
+          # Append cgroup parameters if not already present
+          echo "${existing} cgroup_memory=1 cgroup_enable=memory" > /boot/firmware/cmdline.txt
+        fi
+      become: yes
+      register: cgroup_config
+      changed_when: cgroup_config.rc == 0
+      when:
+        - ansible_architecture == "aarch64"
+        - cgroup_check.rc != 0
 
     - name: Notify about required reboot
       debug:
@@ -425,18 +439,13 @@
       until: helm_install is success or helm_install is skipped
 
     - name: Create namespaces
-      kubernetes.core.k8s:
-        state: present
-        definition:
-          apiVersion: v1
-          kind: Namespace
-          metadata:
-            name: "{{ item }}"
+      shell: kubectl create namespace {{ item }} --dry-run=client -o yaml | kubectl apply -f -
       loop:
         - home-assistant
         - monitoring
         - velero
       register: ns_create
+      changed_when: "'created' in ns_create.stdout or 'configured' in ns_create.stdout"
       retries: 3
       delay: 5
       until: ns_create is success

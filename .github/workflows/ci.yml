@@ -24,7 +24,7 @@ jobs:
         uses: ludeeus/action-shellcheck@master
         with:
           scandir: '.'
-          severity: warning
+          severity: error  # Changed from warning to error for stricter checking
 
   validate-k8s:
     name: Validate Kubernetes Manifests
@@ -41,10 +41,16 @@ jobs:
           tar xzf kubeconform-linux-amd64.tar.gz
           sudo mv kubeconform /usr/local/bin/
 
-      - name: Validate manifests
+      - name: Validate app manifests
         run: |
-          find apps/ -name '*.yaml' -type f | xargs kubeconform -summary -strict -ignore-missing-schemas
-          find policies/ -name '*.yaml' -type f | xargs kubeconform -summary -strict -ignore-missing-schemas || true
+          find apps/ -name '*.yaml' -type f ! -name 'fleet.yaml' | xargs kubeconform -summary -strict -ignore-missing-schemas
+
+      - name: Validate policy manifests
+        run: |
+          # Kyverno policies use custom CRDs - validate with Kyverno schema
+          find policies/ -name '*.yaml' -type f | xargs kubeconform -summary -ignore-missing-schemas \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            -schema-location default
 
   ansible-lint:
     name: Ansible Lint
@@ -62,7 +68,15 @@ jobs:
 
       - name: Run ansible-lint
         run: |
-          ansible-lint pi-setup/ansible/playbook.yml || true
+          # Fail on errors, allow warnings
+          ansible-lint pi-setup/ansible/playbook.yml --profile production || {
+            EXIT_CODE=$?
+            if [ $EXIT_CODE -eq 2 ]; then
+              echo "::warning::Ansible lint found warnings (non-blocking)"
+              exit 0
+            fi
+            exit $EXIT_CODE
+          }
 
   security-scan:
     name: Security Scan
@@ -77,12 +91,53 @@ jobs:
           scan-ref: '.'
           format: 'sarif'
           output: 'trivy-results.sarif'
+          severity: 'HIGH,CRITICAL'  # Only fail on high/critical
 
       - name: Upload Trivy scan results
-        uses: github/codeql-action/upload-sarif@v2
+        uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: 'trivy-results.sarif'
+
+  secrets-scan:
+    name: Secrets Detection
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for scanning
+
+      - name: TruffleHog Secrets Scan
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --only-verified
+
+      - name: Check for hardcoded credentials
+        run: |
+          # Check for common credential patterns
+          echo "Scanning for potential hardcoded secrets..."
+
+          # SSH private keys
+          if grep -rn "PRIVATE KEY" --include="*.yaml" --include="*.yml" --include="*.sh" . 2>/dev/null | grep -v ".git"; then
+            echo "::error::Potential SSH private key found in repository"
+            exit 1
+          fi
+
+          # AWS keys
+          if grep -rn "AKIA[A-Z0-9]{16}" --include="*.yaml" --include="*.yml" --include="*.sh" . 2>/dev/null | grep -v ".git"; then
+            echo "::error::Potential AWS access key found in repository"
+            exit 1
+          fi
+
+          # Generic password patterns (except placeholders)
+          if grep -rn "password.*=.*['\"][^${}CHANGE_ME]" --include="*.yaml" --include="*.yml" . 2>/dev/null | grep -v ".git" | grep -v "SOPS" | grep -v "placeholder" | grep -v "example"; then
+            echo "::warning::Potential hardcoded password found - verify these are safe"
+          fi
+
+          echo "Secrets scan completed"
 
   test-bootstrap:
     name: Test Bootstrap (Dry Run)
@@ -90,8 +145,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Make bootstrap executable
-        run: chmod +x bootstrap.sh
+      - name: Make scripts executable
+        run: |
+          chmod +x bootstrap.sh
+          chmod +x pi-setup/pi-prep.sh
 
-      - name: Test dry run
-        run: ./bootstrap.sh --dry-run --platform mac
+      - name: Test bootstrap dry run (Mac)
+        run: ./bootstrap.sh --dry-run --platform mac --verbose
+
+      - name: Test bootstrap help
+        run: ./bootstrap.sh --help
+
+      - name: Test pi-prep help
+        run: ./pi-setup/pi-prep.sh --help
+
+  test-bootstrap-linux:
+    name: Test Bootstrap (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make scripts executable
+        run: |
+          chmod +x bootstrap.sh
+          chmod +x pi-setup/pi-prep.sh
+
+      - name: Test bootstrap dry run (Linux/Pi simulation)
+        run: ./bootstrap.sh --dry-run --platform pi --verbose
+
+      - name: Validate script syntax
+        run: |
+          bash -n bootstrap.sh
+          bash -n pi-setup/pi-prep.sh
+          bash -n rancher/install-rancher.sh

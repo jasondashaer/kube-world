@@ -16,11 +16,15 @@ users:
     sudo: ALL=(ALL) NOPASSWD:ALL
     lock_passwd: false
     # Generate password hash with: mkpasswd -m sha-512
-    # Default password: 'changeme' - CHANGE THIS!
-    passwd: JsttodKsvldpm12!
+    # IMPORTANT: Replace with a SHA-512 hash of your password before flashing!
+    # Generate with: python3 -c "import crypt; print(crypt.crypt('yourpassword', crypt.mksalt(crypt.METHOD_SHA512)))"
+    # DO NOT commit plaintext passwords to the repository
+    passwd: ${PASSWORD_HASH}
     ssh_authorized_keys:
-      # Add your public SSH key here
-      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPwwEqm9UP4LND/8HmDhNoA3r4CNqxGXsgISE5Hi1O8y jacksonharris@Jacksons-MacBook-Pro-2.local
+      # IMPORTANT: Replace with YOUR SSH public key before flashing!
+      # Get your key with: cat ~/.ssh/id_ed25519.pub
+      # DO NOT commit your actual SSH key to the repository
+      - ${SSH_PUBLIC_KEY}
 
 # SSH configuration
 ssh_pwauth: false

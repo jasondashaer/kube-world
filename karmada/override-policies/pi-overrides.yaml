@@ -1,0 +1,55 @@
+# Karmada OverridePolicy for Raspberry Pi clusters
+# Adjusts resource limits and configuration for Pi hardware constraints
+#
+# Pi 5 (16GB RAM) has less resources than Mac/cloud, so we reduce:
+#   - Memory limits (Pi has shared memory with GPU)
+#   - CPU requests (4 ARM cores vs 14 M3 Max cores)
+#   - Replica counts (single-node cluster)
+---
+apiVersion: policy.karmada.io/v1alpha1
+kind: ClusterOverridePolicy
+metadata:
+  name: pi-resource-overrides
+spec:
+  targetCluster:
+    labelSelector:
+      matchLabels:
+        hardware: raspberry-pi
+
+  overriders:
+    # Reduce resource requests for Pi
+    plaintext:
+      - path: /spec/template/spec/containers/0/resources/requests/memory
+        operator: replace
+        value: "256Mi"
+      - path: /spec/template/spec/containers/0/resources/requests/cpu
+        operator: replace
+        value: "100m"
+      - path: /spec/template/spec/containers/0/resources/limits/memory
+        operator: replace
+        value: "1Gi"
+
+---
+# Override for Home Assistant on Pi - needs higher limits for IoT processing
+apiVersion: policy.karmada.io/v1alpha1
+kind: OverridePolicy
+metadata:
+  name: home-assistant-pi-override
+  namespace: home-assistant
+spec:
+  targetCluster:
+    labelSelector:
+      matchLabels:
+        hardware: raspberry-pi
+
+  overriders:
+    plaintext:
+      - path: /spec/template/spec/containers/0/resources/requests/memory
+        operator: replace
+        value: "512Mi"
+      - path: /spec/template/spec/containers/0/resources/requests/cpu
+        operator: replace
+        value: "250m"
+      - path: /spec/template/spec/containers/0/resources/limits/memory
+        operator: replace
+        value: "2Gi"

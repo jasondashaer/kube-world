@@ -38,15 +38,84 @@ deployment:
     k3s: "v1.29.0+k3s1"
     rancher: "2.13.1"
     helm: "3.14.0"
-    
+    karmada: "1.12.0"
+    flux: "2.4.0"
+
   # Feature flags
   features:
     rancher: true
-    fleet_gitops: true
+    karmada: true         # Multi-cluster scheduling
+    flux_gitops: true     # Flux GitOps (replaces Fleet)
+    fleet_gitops: false   # Deprecated: migrating to Flux
     velero_backups: true
     kyverno_policies: true
     home_assistant: true
-    monitoring: false  # Future: Prometheus/Grafana stack
+    monitoring: false     # Future: Prometheus/Grafana stack
+    gitlab: false         # Future: Self-hosted GitLab on central node
+
+#===============================================================================
+# Karmada Configuration
+#===============================================================================
+karmada:
+  # Karmada control plane settings
+  control_plane:
+    # Where to install: central-pi | kind-dev
+    target: kind-dev  # Start with KIND, migrate to central Pi later
+    apiserver_replicas: 1
+    etcd_replicas: 1
+    data_dir: "~/.karmada"
+
+  # Cluster registration
+  clusters:
+    - name: "kube-world-kind"
+      type: management
+      labels:
+        topology.kubernetes.io/zone: local
+        workload-type: development
+    - name: "pi-cluster"
+      type: edge
+      labels:
+        topology.kubernetes.io/zone: edge
+        hardware: raspberry-pi
+        workload-type: iot
+
+#===============================================================================
+# Flux GitOps Configuration
+#===============================================================================
+flux:
+  # Git source (GitHub now, GitLab later)
+  source:
+    url: "https://github.com/jasondashaer/kube-world.git"
+    branch: "main"
+    interval: "30s"  # Polling interval (webhook when on GitLab)
+
+  # Paths to sync
+  paths:
+    karmada_policies: "karmada/"
+    apps: "apps/"
+    policies: "policies/"
+
+#===============================================================================
+# Central Management Node (Future: Dedicated Pi 5 16GB)
+#===============================================================================
+central_node:
+  enabled: false  # Enable when dedicated Pi is provisioned
+  hardware:
+    model: "Raspberry Pi 5"
+    memory: "16GB"
+  services:
+    - k3s
+    - karmada
+    - rancher
+    - flux
+    - gitlab  # Future: self-hosted GitLab
+  network:
+    # Tailscale for cluster mesh
+    tailscale:
+      enabled: true
+    # Cloudflare Tunnel for public access (optional)
+    cloudflare_tunnel:
+      enabled: false
 
 #===============================================================================
 # Network Configuration

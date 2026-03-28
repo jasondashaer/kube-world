@@ -1,0 +1,40 @@
+# Karmada PropagationPolicy for Home Assistant
+# Ensures Home Assistant is scheduled on edge/IoT clusters with USB device access
+#
+# This policy targets clusters labeled with:
+#   - workload-type=iot (primary)
+#   - hardware=raspberry-pi (secondary)
+# Home Assistant requires USB passthrough for Zigbee/Z-Wave/Thread controllers,
+# which is only available on physical Pi hardware.
+---
+apiVersion: policy.karmada.io/v1alpha1
+kind: PropagationPolicy
+metadata:
+  name: home-assistant
+  namespace: home-assistant
+spec:
+  resourceSelectors:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: home-assistant
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      name: home-assistant-config
+    - apiVersion: v1
+      kind: Service
+      name: home-assistant
+
+  placement:
+    clusterAffinity:
+      labelSelector:
+        matchExpressions:
+          - key: workload-type
+            operator: In
+            values:
+              - iot
+    # Spread across edge clusters if multiple exist
+    # For single-cluster, this is a no-op
+    spreadConstraints:
+      - spreadByField: cluster
+        maxGroups: 1
+        minGroups: 1

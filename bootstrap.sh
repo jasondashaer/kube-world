@@ -6,6 +6,7 @@
 # Options:
 #   --platform <mac|pi|cloud>  Target platform (default: auto-detect)
 #   --mode <dev|prod>          Deployment mode (default: dev)
+#   --stack <karmada|fleet>    Orchestration stack (default: karmada)
 #   --skip-prereqs             Skip prerequisite installation
 #   --dry-run                  Show what would be done without executing
 #   --cleanup                  Tear down existing setup before rebuilding
@@ -33,11 +34,15 @@ load_config_versions() {
         K3S_VERSION="${K3S_VERSION:-$(yq eval '.deployment.versions.k3s // "v1.29.0+k3s1"' "$CONFIG_FILE")}"
         RANCHER_VERSION="${RANCHER_VERSION:-$(yq eval '.deployment.versions.rancher // "2.13.1"' "$CONFIG_FILE")}"
         HELM_VERSION="${HELM_VERSION:-$(yq eval '.deployment.versions.helm // "3.14.0"' "$CONFIG_FILE")}"
+        KARMADA_VERSION="${KARMADA_VERSION:-$(yq eval '.deployment.versions.karmada // "1.12.0"' "$CONFIG_FILE")}"
+        FLUX_VERSION="${FLUX_VERSION:-$(yq eval '.deployment.versions.flux // "2.4.0"' "$CONFIG_FILE")}"
     else
         # Fallback to hardcoded defaults if config.yaml not available
         K3S_VERSION="${K3S_VERSION:-v1.29.0+k3s1}"
         RANCHER_VERSION="${RANCHER_VERSION:-2.13.1}"
         HELM_VERSION="${HELM_VERSION:-3.14.0}"
+        KARMADA_VERSION="${KARMADA_VERSION:-1.12.0}"
+        FLUX_VERSION="${FLUX_VERSION:-2.4.0}"
     fi
 }
 
@@ -45,10 +50,13 @@ load_config_versions() {
 K3S_VERSION="${K3S_VERSION:-v1.29.0+k3s1}"
 RANCHER_VERSION="${RANCHER_VERSION:-2.13.1}"
 HELM_VERSION="${HELM_VERSION:-3.14.0}"
+KARMADA_VERSION="${KARMADA_VERSION:-1.12.0}"
+FLUX_VERSION="${FLUX_VERSION:-2.4.0}"
 
 # Default options
 PLATFORM=""
 MODE="dev"
+STACK="karmada"  # karmada (Karmada+Flux) or fleet (legacy Fleet)
 SKIP_PREREQS=false
 DRY_RUN=false
 CLEANUP=false
@@ -296,11 +304,28 @@ install_prereqs_mac() {
             debug "$pkg already installed"
         fi
     done
-    
+
     # Install k3sup for remote K3s installation
     if ! check_command k3sup; then
         log "Installing k3sup..."
         brew install k3sup
+    fi
+
+    # Install Karmada + Flux tools if using the karmada stack
+    if [[ "$STACK" == "karmada" ]]; then
+        if ! check_command karmadactl; then
+            log "Installing karmadactl..."
+            brew install karmadactl
+        else
+            debug "karmadactl already installed"
+        fi
+
+        if ! check_command flux; then
+            log "Installing flux CLI..."
+            brew install fluxcd/tap/flux
+        else
+            debug "flux CLI already installed"
+        fi
     fi
 }
 
@@ -486,35 +511,48 @@ preflight_checks() {
 }
 
 cleanup_existing() {
-    log "Cleaning up existing installation..."
-    
+    log "Cleaning up existing installation (stack: ${STACK})..."
+
+    # Stack-specific cleanup
+    if [[ "$STACK" == "karmada" ]]; then
+        cleanup_karmada
+    fi
+
     case "$PLATFORM" in
         mac-*)
             # Check if KIND cluster exists and clean up Helm releases first
             if kind get clusters 2>/dev/null | grep -q "kube-world"; then
                 log "Cleaning up Helm releases..."
                 kubectl config use-context kind-kube-world 2>/dev/null || true
-                
+
                 # Uninstall Helm releases in reverse dependency order
                 helm uninstall rancher -n cattle-system 2>/dev/null || true
                 helm uninstall cert-manager -n cert-manager 2>/dev/null || true
-                
-                # Delete Rancher/Fleet namespaces (can take time due to finalizers)
-                log "Deleting Rancher namespaces (may take a minute)..."
-                for ns in cattle-system cattle-fleet-system cattle-fleet-local-system fleet-system fleet-local cert-manager; do
-                    kubectl delete namespace "$ns" --timeout=60s 2>/dev/null || true
-                done
-                
-                # Remove Fleet CRDs that might have finalizers
-                log "Removing Fleet CRDs..."
-                kubectl get crd -o name 2>/dev/null | grep -E 'fleet|cattle|rancher' | xargs -r kubectl delete --timeout=30s 2>/dev/null || true
+
+                if [[ "$STACK" == "fleet" ]]; then
+                    # Delete Rancher/Fleet namespaces (can take time due to finalizers)
+                    log "Deleting Rancher/Fleet namespaces (may take a minute)..."
+                    for ns in cattle-system cattle-fleet-system cattle-fleet-local-system fleet-system fleet-local cert-manager; do
+                        kubectl delete namespace "$ns" --timeout=60s 2>/dev/null || true
+                    done
+
+                    # Remove Fleet CRDs that might have finalizers
+                    log "Removing Fleet CRDs..."
+                    kubectl get crd -o name 2>/dev/null | grep -E 'fleet|cattle|rancher' | xargs -r kubectl delete --timeout=30s 2>/dev/null || true
+                else
+                    # Clean up Rancher namespaces (no Fleet)
+                    log "Deleting Rancher namespaces (may take a minute)..."
+                    for ns in cattle-system cert-manager; do
+                        kubectl delete namespace "$ns" --timeout=60s 2>/dev/null || true
+                    done
+                fi
             fi
-            
+
             # Delete KIND clusters
             log "Deleting KIND clusters..."
             kind delete cluster --name management 2>/dev/null || true
             kind delete cluster --name kube-world 2>/dev/null || true
-            
+
             # Clean up any orphaned Docker containers from KIND
             docker ps -a --filter "name=kube-world" -q 2>/dev/null | xargs -r docker rm -f 2>/dev/null || true
             docker ps -a --filter "name=management" -q 2>/dev/null | xargs -r docker rm -f 2>/dev/null || true
@@ -531,7 +569,7 @@ cleanup_existing() {
             fi
             ;;
     esac
-    
+
     log "Cleanup complete ✓"
 }
 
@@ -645,6 +683,116 @@ setup_gitops() {
 }
 
 #===============================================================================
+# Karmada Installation (--stack karmada)
+#===============================================================================
+install_karmada() {
+    log "Installing Karmada control plane..."
+
+    # Source and run the Karmada install script
+    if [[ -f "${SCRIPT_DIR}/karmada/install-karmada.sh" ]]; then
+        local karmada_args=()
+        [[ "$DRY_RUN" == "true" ]] && karmada_args+=("--dry-run")
+        [[ "$VERBOSE" == "true" ]] && karmada_args+=("--verbose")
+        bash "${SCRIPT_DIR}/karmada/install-karmada.sh" "${karmada_args[@]}"
+    else
+        error "karmada/install-karmada.sh not found"
+        return 1
+    fi
+
+    log "Karmada control plane installed ✓"
+}
+
+#===============================================================================
+# Flux GitOps Setup (--stack karmada)
+#===============================================================================
+setup_flux() {
+    log "Setting up Flux GitOps..."
+
+    # Check flux CLI is available
+    if ! command -v flux &>/dev/null; then
+        error "flux CLI not found. Install with: brew install fluxcd/tap/flux"
+        return 1
+    fi
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "[DRY RUN] Would install Flux and apply kustomizations"
+        return 0
+    fi
+
+    # Check if Flux is already installed
+    if kubectl get namespace flux-system &>/dev/null && \
+       kubectl -n flux-system get deployment source-controller &>/dev/null; then
+        log "Flux is already installed"
+    else
+        # Install Flux components into the host cluster
+        log "Installing Flux components..."
+        flux install --namespace=flux-system
+    fi
+
+    # Wait for Flux controllers to be ready
+    log "Waiting for Flux controllers..."
+    kubectl -n flux-system wait --for=condition=Available deployment --all --timeout=120s
+
+    # Apply GitRepository source
+    log "Applying Flux GitRepository source..."
+    kubectl apply -f "${SCRIPT_DIR}/flux/sources/git-repository.yaml"
+
+    # Create the Karmada kubeconfig secret so Flux can target the Karmada API
+    local karmada_config="${HOME}/.karmada/karmada-apiserver.config"
+    if [[ -f "$karmada_config" ]]; then
+        log "Creating Karmada kubeconfig secret for Flux..."
+        kubectl -n flux-system create secret generic karmada-kubeconfig \
+            --from-file=value="${karmada_config}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+    else
+        warn "Karmada kubeconfig not found at ${karmada_config}"
+        warn "Flux kustomizations targeting Karmada will fail until this is created."
+        warn "Run karmada/install-karmada.sh first, then re-run bootstrap."
+    fi
+
+    # Apply Flux kustomizations in dependency order
+    log "Applying Flux kustomizations..."
+    kubectl apply -f "${SCRIPT_DIR}/flux/kustomizations/karmada-policies.yaml"
+    kubectl apply -f "${SCRIPT_DIR}/flux/kustomizations/policies.yaml"
+    kubectl apply -f "${SCRIPT_DIR}/flux/kustomizations/apps.yaml"
+
+    # Verify Flux sources and kustomizations
+    log "Flux sources:"
+    flux get sources git -A 2>/dev/null || true
+    log "Flux kustomizations:"
+    flux get kustomizations -A 2>/dev/null || true
+
+    log "Flux GitOps setup complete ✓"
+}
+
+#===============================================================================
+# Karmada Stack Cleanup
+#===============================================================================
+cleanup_karmada() {
+    log "Cleaning up Karmada + Flux installation..."
+
+    # Remove Flux kustomizations and sources
+    if kubectl get namespace flux-system &>/dev/null; then
+        log "Uninstalling Flux..."
+        flux uninstall --silent 2>/dev/null || true
+    fi
+
+    # Remove Karmada
+    if kubectl get namespace karmada-system &>/dev/null; then
+        log "Removing Karmada control plane..."
+        karmadactl deinit 2>/dev/null || true
+    fi
+
+    # Clean Karmada data directory
+    if [[ -d "${HOME}/.karmada" ]]; then
+        log "Removing Karmada data directory..."
+        rm -rf "${HOME}/.karmada"
+    fi
+
+    log "Karmada + Flux cleanup complete ✓"
+}
+
+#===============================================================================
 # Application Deployment
 #===============================================================================
 deploy_core_apps() {
@@ -677,41 +825,69 @@ deploy_core_apps() {
 # Verification
 #===============================================================================
 verify_installation() {
-    log "Verifying installation..."
-    
+    log "Verifying installation (stack: ${STACK})..."
+
     echo ""
     echo "=============================================="
     echo "CLUSTER STATUS"
     echo "=============================================="
     kubectl get nodes -o wide
-    
+
     echo ""
     echo "=============================================="
     echo "NAMESPACES"
     echo "=============================================="
     kubectl get namespaces
-    
+
     echo ""
     echo "=============================================="
     echo "RANCHER STATUS"
     echo "=============================================="
-    kubectl -n cattle-system get pods
-    
-    echo ""
-    echo "=============================================="
-    echo "FLEET STATUS"
-    echo "=============================================="
-    kubectl -n fleet-local get gitrepo 2>/dev/null || echo "Fleet not yet configured"
-    
+    kubectl -n cattle-system get pods 2>/dev/null || echo "Rancher not installed"
+
+    if [[ "$STACK" == "karmada" ]]; then
+        echo ""
+        echo "=============================================="
+        echo "KARMADA STATUS"
+        echo "=============================================="
+        kubectl -n karmada-system get pods 2>/dev/null || echo "Karmada not installed"
+
+        echo ""
+        echo "=============================================="
+        echo "KARMADA CLUSTERS"
+        echo "=============================================="
+        local karmada_config="${HOME}/.karmada/karmada-apiserver.config"
+        if [[ -f "$karmada_config" ]]; then
+            karmadactl get clusters --kubeconfig="${karmada_config}" 2>/dev/null || echo "No clusters registered"
+        else
+            echo "Karmada kubeconfig not found"
+        fi
+
+        echo ""
+        echo "=============================================="
+        echo "FLUX STATUS"
+        echo "=============================================="
+        flux get sources git -A 2>/dev/null || echo "Flux not configured"
+        echo ""
+        flux get kustomizations -A 2>/dev/null || echo "No kustomizations"
+    else
+        echo ""
+        echo "=============================================="
+        echo "FLEET STATUS"
+        echo "=============================================="
+        kubectl -n fleet-local get gitrepo 2>/dev/null || echo "Fleet not yet configured"
+    fi
+
     log "Verification complete ✓"
 }
 
 #===============================================================================
 # Main Execution
 #===============================================================================
-# Valid platform and mode values
+# Valid platform, mode, and stack values
 VALID_PLATFORMS=("mac" "mac-arm64" "mac-amd64" "pi" "linux-arm64" "linux-amd64" "cloud" "auto")
 VALID_MODES=("dev" "prod")
+VALID_STACKS=("karmada" "fleet")
 
 validate_platform() {
     local platform="$1"
@@ -727,6 +903,16 @@ validate_mode() {
     local mode="$1"
     for valid in "${VALID_MODES[@]}"; do
         if [[ "$mode" == "$valid" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+validate_stack() {
+    local stack="$1"
+    for valid in "${VALID_STACKS[@]}"; do
+        if [[ "$stack" == "$valid" ]]; then
             return 0
         fi
     done
@@ -762,6 +948,19 @@ parse_args() {
                 MODE="$2"
                 shift 2
                 ;;
+            --stack)
+                if [[ -z "${2:-}" ]]; then
+                    error "--stack requires a value"
+                    exit 1
+                fi
+                if ! validate_stack "$2"; then
+                    error "Invalid stack: $2"
+                    error "Valid stacks: ${VALID_STACKS[*]}"
+                    exit 1
+                fi
+                STACK="$2"
+                shift 2
+                ;;
             --skip-prereqs)
                 SKIP_PREREQS=true
                 shift
@@ -784,6 +983,9 @@ parse_args() {
                 echo "  --platform <mac|pi|cloud>  Target platform (default: auto-detect)"
                 echo "                             Valid: ${VALID_PLATFORMS[*]}"
                 echo "  --mode <dev|prod>          Deployment mode (default: dev)"
+                echo "  --stack <karmada|fleet>     Orchestration stack (default: karmada)"
+                echo "                             karmada: Karmada + Flux + Rancher (recommended)"
+                echo "                             fleet:   Legacy Fleet + Rancher"
                 echo "  --skip-prereqs             Skip prerequisite installation"
                 echo "  --dry-run                  Show what would be done"
                 echo "  --cleanup                  Tear down existing setup"
@@ -826,7 +1028,8 @@ main() {
     
     log "Platform: $PLATFORM"
     log "Mode: $MODE"
-    
+    log "Stack: $STACK"
+
     # Dry run mode
     if [[ "$DRY_RUN" == "true" ]]; then
         log "DRY RUN MODE - no changes will be made"
@@ -835,10 +1038,17 @@ main() {
         echo "  2. Run preflight checks"
         [[ "$CLEANUP" == "true" ]] && echo "  3. Cleanup existing installation"
         echo "  4. Setup ${PLATFORM} cluster"
-        echo "  5. Install Rancher"
-        echo "  6. Setup GitOps"
-        echo "  7. Deploy core apps"
-        echo "  8. Verify installation"
+        if [[ "$STACK" == "karmada" ]]; then
+            echo "  5. Install Karmada control plane"
+            echo "  6. Install Rancher"
+            echo "  7. Setup Flux GitOps"
+            echo "  8. Deploy core apps (via Flux -> Karmada)"
+        else
+            echo "  5. Install Rancher"
+            echo "  6. Setup Fleet GitOps"
+            echo "  7. Deploy core apps"
+        fi
+        echo "  9. Verify installation"
         exit 0
     fi
     
@@ -861,7 +1071,11 @@ main() {
 
     # Load versions from config.yaml (now that yq should be installed)
     load_config_versions
-    log "Using versions - K3s: ${K3S_VERSION}, Rancher: ${RANCHER_VERSION}, Helm: ${HELM_VERSION}"
+    if [[ "$STACK" == "karmada" ]]; then
+        log "Using versions - K3s: ${K3S_VERSION}, Rancher: ${RANCHER_VERSION}, Karmada: ${KARMADA_VERSION}, Flux: ${FLUX_VERSION}, Helm: ${HELM_VERSION}"
+    else
+        log "Using versions - K3s: ${K3S_VERSION}, Rancher: ${RANCHER_VERSION}, Helm: ${HELM_VERSION}"
+    fi
 
     # Run preflight checks
     preflight_checks
@@ -880,28 +1094,42 @@ main() {
             ;;
     esac
     
-    # Install Rancher
-    install_rancher
-    
-    # Setup GitOps
-    setup_gitops
-    
-    # Deploy core applications
-    deploy_core_apps
-    
+    # Stack-specific orchestration
+    if [[ "$STACK" == "karmada" ]]; then
+        # Karmada stack: Karmada -> Rancher -> Flux -> Apps (via Karmada propagation)
+        install_karmada
+        install_rancher
+        setup_flux
+    else
+        # Legacy Fleet stack: Rancher -> Fleet -> Apps
+        install_rancher
+        setup_gitops
+        deploy_core_apps
+    fi
+
     # Verify installation
     verify_installation
-    
+
     echo ""
     echo "=============================================="
-    echo "  Bootstrap Complete! 🎉"
+    echo "  Bootstrap Complete!"
+    echo "  Stack: ${STACK}"
     echo "=============================================="
     echo ""
-    echo "Next steps:"
-    echo "  1. Change Rancher admin password"
-    echo "  2. Register additional clusters via Rancher UI"
-    echo "  3. Configure secrets in /secrets/ directory"
-    echo "  4. Deploy applications via GitOps"
+    if [[ "$STACK" == "karmada" ]]; then
+        echo "Next steps:"
+        echo "  1. Change Rancher admin password"
+        echo "  2. Register Pi clusters: ./karmada/cluster-registration/register-pi.sh"
+        echo "  3. Configure secrets in /secrets/ directory"
+        echo "  4. Monitor Flux sync: flux get kustomizations -A"
+        echo "  5. Check Karmada clusters: karmadactl get clusters"
+    else
+        echo "Next steps:"
+        echo "  1. Change Rancher admin password"
+        echo "  2. Register additional clusters via Rancher UI"
+        echo "  3. Configure secrets in /secrets/ directory"
+        echo "  4. Deploy applications via GitOps"
+    fi
     echo ""
     echo "Logs saved to: $LOG_FILE"
 }

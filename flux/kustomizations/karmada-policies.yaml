@@ -1,0 +1,43 @@
+# Flux Kustomization for Karmada policies
+# Syncs PropagationPolicies and OverridePolicies to the Karmada API server
+#
+# NOTE: This kustomization targets the Karmada API server, not the host cluster.
+# Flux must be configured with the Karmada kubeconfig for this to work.
+# See: https://karmada.io/docs/userguide/cicd/working-with-flux
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: karmada-propagation-policies
+  namespace: flux-system
+spec:
+  interval: 5m
+  path: ./karmada/propagation-policies
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: kube-world
+  # Use Karmada API server kubeconfig
+  # This requires a Secret with the Karmada kubeconfig
+  kubeConfig:
+    secretRef:
+      name: karmada-kubeconfig
+      key: value
+
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: karmada-override-policies
+  namespace: flux-system
+spec:
+  interval: 5m
+  path: ./karmada/override-policies
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: kube-world
+  kubeConfig:
+    secretRef:
+      name: karmada-kubeconfig
+      key: value

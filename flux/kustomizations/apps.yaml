@@ -1,0 +1,64 @@
+# Flux Kustomization for application manifests
+# Syncs app deployments to the Karmada API server, which then
+# propagates them to target clusters based on PropagationPolicies
+#
+# Flow: Git -> Flux -> Karmada API -> PropagationPolicy -> Target Cluster
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: apps-base
+  namespace: flux-system
+spec:
+  interval: 5m
+  path: ./apps/base
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: kube-world
+  # Apply to Karmada API so PropagationPolicies distribute to clusters
+  kubeConfig:
+    secretRef:
+      name: karmada-kubeconfig
+      key: value
+
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: apps-home-assistant
+  namespace: flux-system
+spec:
+  interval: 5m
+  path: ./apps/home-assistant
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: kube-world
+  kubeConfig:
+    secretRef:
+      name: karmada-kubeconfig
+      key: value
+  dependsOn:
+    - name: apps-base
+    - name: karmada-propagation-policies
+
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: apps-velero
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./apps/velero
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: kube-world
+  kubeConfig:
+    secretRef:
+      name: karmada-kubeconfig
+      key: value
+  dependsOn:
+    - name: apps-base

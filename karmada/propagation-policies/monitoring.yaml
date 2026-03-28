@@ -1,0 +1,30 @@
+# Karmada PropagationPolicy for monitoring stack
+# Deploys Prometheus/Grafana to all clusters (when implemented)
+#
+# NOTE: This is a placeholder for Phase 4. The monitoring stack is not yet
+# implemented. When it is, this policy will distribute it across all clusters
+# with cluster-specific resource overrides via OverridePolicy.
+---
+apiVersion: policy.karmada.io/v1alpha1
+kind: PropagationPolicy
+metadata:
+  name: monitoring-stack
+  namespace: monitoring
+spec:
+  resourceSelectors:
+    - apiVersion: apps/v1
+      kind: Deployment
+    - apiVersion: v1
+      kind: Service
+    - apiVersion: v1
+      kind: ConfigMap
+
+  placement:
+    clusterAffinity:
+      labelSelector:
+        matchLabels: {}  # All clusters
+
+    # Replicate monitoring to every cluster (not just one)
+    replicaScheduling:
+      replicaDivisionPreference: Weighted
+      replicaSchedulingType: Duplicated

@@ -1,0 +1,55 @@
+# Karmada PropagationPolicy for base resources
+# Deploys shared resources (namespaces, quotas, limit ranges) to ALL clusters
+---
+apiVersion: policy.karmada.io/v1alpha1
+kind: ClusterPropagationPolicy
+metadata:
+  name: base-namespaces
+spec:
+  resourceSelectors:
+    - apiVersion: v1
+      kind: Namespace
+      name: monitoring
+    - apiVersion: v1
+      kind: Namespace
+      name: velero
+    - apiVersion: v1
+      kind: Namespace
+      name: home-assistant
+
+  placement:
+    clusterAffinity:
+      labelSelector:
+        matchLabels: {}  # All clusters
+
+---
+# Propagate Kyverno policies to all clusters
+apiVersion: policy.karmada.io/v1alpha1
+kind: ClusterPropagationPolicy
+metadata:
+  name: kyverno-policies
+spec:
+  resourceSelectors:
+    - apiVersion: kyverno.io/v1
+      kind: ClusterPolicy
+
+  placement:
+    clusterAffinity:
+      labelSelector:
+        matchLabels: {}  # All clusters
+
+---
+# Propagate PriorityClasses to all clusters
+apiVersion: policy.karmada.io/v1alpha1
+kind: ClusterPropagationPolicy
+metadata:
+  name: scheduling-priorities
+spec:
+  resourceSelectors:
+    - apiVersion: scheduling.k8s.io/v1
+      kind: PriorityClass
+
+  placement:
+    clusterAffinity:
+      labelSelector:
+        matchLabels: {}  # All clusters

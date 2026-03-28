@@ -1,0 +1,23 @@
+# Flux GitRepository source
+# Points to the kube-world repository for GitOps synchronization
+#
+# Currently uses GitHub (public). When GitLab is self-hosted on the central
+# node, update the URL and add authentication via secretRef.
+#
+# Migration path:
+#   Phase 1-3: GitHub (polling, 30s interval)
+#   Phase 4+:  Self-hosted GitLab (webhook, instant)
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: kube-world
+  namespace: flux-system
+spec:
+  interval: 30s
+  url: https://github.com/jasondashaer/kube-world.git
+  ref:
+    branch: main
+  # For private repos or GitLab, uncomment:
+  # secretRef:
+  #   name: git-credentials

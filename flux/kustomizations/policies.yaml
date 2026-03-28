@@ -1,0 +1,22 @@
+# Flux Kustomization for Kyverno policies and scheduling priorities
+# These are applied to Karmada, which propagates them to all clusters
+# via the ClusterPropagationPolicies in karmada/propagation-policies/base.yaml
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: cluster-policies
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./policies
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: kube-world
+  kubeConfig:
+    secretRef:
+      name: karmada-kubeconfig
+      key: value
+  dependsOn:
+    - name: karmada-propagation-policies

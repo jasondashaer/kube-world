@@ -28,11 +28,11 @@ metadata:
 deployment:
   # Target mode: dev | prod
   mode: dev
-  
+
   # Primary platform: mac-arm64 | mac-amd64 | pi | cloud
   # Set to 'auto' for auto-detection
   platform: auto
-  
+
   # Kubernetes distribution versions
   versions:
     k3s: "v1.29.0+k3s1"
@@ -130,7 +130,7 @@ network:
       - "8.8.4.4"
     # DNS search domain
     search_domain: "local"
-  
+
   # Primary interface: ethernet (more reliable for server workloads)
   # WiFi is available as a fallback but not the default
   primary_interface: ethernet
@@ -200,14 +200,14 @@ iot_devices:
     vendor_id: "XXXX"                     # [UPDATE] from lsusb
     product_id: "XXXX"                    # [UPDATE] from lsusb
     integration: "zha"                    # zha | zigbee2mqtt
-    
+
   zwave:
     enabled: false                        # [UPDATE] Set true when purchased
     controller: "Home Assistant Connect ZWA-2"
     vendor_id: "10c4"
     product_id: "ea60"
     integration: "zwave_js"
-    
+
   thread:
     enabled: false                        # [UPDATE] Set true when purchased
     controller: "Home Assistant Connect ZBT-2"
@@ -221,21 +221,21 @@ iot_devices:
 cloud:
   # Primary provider: aws | gcp | azure | none
   primary_provider: none
-  
+
   # AWS Configuration
   aws:
     enabled: false
     region: "us-east-1"
     # Credentials should be in ~/.aws/credentials or environment variables
     # DO NOT store credentials in this file
-    
-  # GCP Configuration  
+
+  # GCP Configuration
   gcp:
     enabled: false
     project_id: ""                        # [UPDATE] Your GCP project ID
     region: "us-central1"
     # Credentials via GOOGLE_APPLICATION_CREDENTIALS env var
-    
+
   # Azure Configuration
   azure:
     enabled: false
@@ -249,17 +249,17 @@ cloud:
 dns:
   # Domain for your services
   domain: ""                              # [UPDATE] e.g., "home.yourdomain.com"
-  
+
   # DNS provider: route53 | clouddns | azure_dns | cloudflare | none
   provider: none
-  
+
   # Provider-specific settings
   route53:
     zone_id: ""                           # [UPDATE] If using Route53
-    
+
   clouddns:
     zone_name: ""                         # [UPDATE] If using Cloud DNS
-    
+
   # Local DNS (for Pi/home network)
   local:
     # Use mDNS for local discovery
@@ -275,23 +275,23 @@ dns:
 backup:
   # Backup provider: s3 | gcs | azure_blob | minio | none
   provider: minio  # Default to local MinIO for self-hosted
-  
+
   # Schedule (cron format)
   schedule: "0 2 * * *"  # Daily at 2 AM
-  
+
   # Retention
   retention:
     daily: 7
     weekly: 4
     monthly: 3
-  
+
   # S3/MinIO settings
   s3:
     bucket: "kube-world-backups"
     region: "us-east-1"
     # For MinIO, use local endpoint
     endpoint: "http://minio.minio-system.svc:9000"
-    
+
   # GCS settings
   gcs:
     bucket: "kube-world-backups"
@@ -306,12 +306,12 @@ security:
     # Age public key for encryption
     # Generate with: age-keygen -o secrets/age.key
     age_public_key: ""                    # [UPDATE] Your age public key
-    
+
   # SSH key for Pi access
   ssh:
     # Path to public key (will be added to Pi authorized_keys)
     public_key_path: "~/.ssh/id_ed25519.pub"
-    
+
   # TLS certificates
   tls:
     # cert-manager issuer: letsencrypt-staging | letsencrypt-prod | selfsigned
@@ -326,7 +326,7 @@ repository:
   # Git repository URL (for Fleet GitOps)
   url: "https://github.com/jasondashaer/kube-world.git"
   branch: "main"
-  
+
   # Paths to watch for GitOps
   paths:
     - "apps/"

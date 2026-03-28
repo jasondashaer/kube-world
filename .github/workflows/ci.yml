@@ -81,6 +81,8 @@ jobs:
   security-scan:
     name: Security Scan
     runs-on: ubuntu-latest
+    permissions:
+      security-events: write
     steps:
       - uses: actions/checkout@v4
 
@@ -94,7 +96,7 @@ jobs:
           severity: 'HIGH,CRITICAL'  # Only fail on high/critical
 
       - name: Upload Trivy scan results
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: 'trivy-results.sarif'
@@ -108,12 +110,9 @@ jobs:
           fetch-depth: 0  # Full history for scanning
 
       - name: TruffleHog Secrets Scan
-        uses: trufflesecurity/trufflehog@main
-        with:
-          path: ./
-          base: ${{ github.event.repository.default_branch }}
-          head: HEAD
-          extra_args: --only-verified
+        run: |
+          docker run --rm -v "$PWD:/workdir" trufflesecurity/trufflehog:latest \
+            filesystem /workdir --only-verified --fail
 
       - name: Check for hardcoded credentials
         run: |

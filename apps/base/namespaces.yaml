@@ -3,6 +3,15 @@
 apiVersion: v1
 kind: Namespace
 metadata:
+  name: home-assistant
+  labels:
+    app.kubernetes.io/name: home-assistant
+    app.kubernetes.io/part-of: kube-world
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
   name: monitoring
   labels:
     app.kubernetes.io/name: monitoring

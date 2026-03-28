@@ -1,0 +1,19 @@
+# Flux Notification Provider for ntfy
+# Sends GitOps event notifications to the self-hosted ntfy instance
+#
+# ntfy runs natively on the Pi at port 8090
+# Subscribe to the "kube-world" topic in the ntfy app to receive alerts
+#
+# ntfy topic URL: http://pi-central:8090/kube-world
+# Or via Tailscale: http://100.124.136.58:8090/kube-world
+---
+apiVersion: notification.toolkit.fluxcd.io/v1beta3
+kind: Provider
+metadata:
+  name: ntfy
+  namespace: flux-system
+spec:
+  type: generic
+  # Points to flux-ntfy-relay (port 8091) which formats messages
+  # and forwards to ntfy (port 8090) with proper titles and priority
+  address: http://10.5.5.249:8091

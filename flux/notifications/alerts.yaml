@@ -1,0 +1,25 @@
+# Flux Alerts for kube-world GitOps pipeline
+# Sends notifications to ntfy on reconciliation events
+#
+# Events notified:
+#   - GitRepository sync success/failure (code pulled from GitLab)
+#   - Kustomization apply success/failure (manifests applied to Karmada)
+#   - HelmRelease install/upgrade success/failure
+---
+apiVersion: notification.toolkit.fluxcd.io/v1beta3
+kind: Alert
+metadata:
+  name: kube-world-alerts
+  namespace: flux-system
+spec:
+  providerRef:
+    name: ntfy
+  eventSeverity: info
+  eventSources:
+    - kind: GitRepository
+      name: '*'
+    - kind: Kustomization
+      name: '*'
+    - kind: HelmRelease
+      name: '*'
+      namespace: '*'

@@ -87,7 +87,7 @@ data:
                   operator: In
                   values:
                     - raspberry-pi-5
-  
+
   # Example: Schedule compute-intensive on Mac/Cloud
   compute-affinity.yaml: |
     affinity:
@@ -108,7 +108,7 @@ data:
                   operator: In
                   values:
                     - amd64
-  
+
   # Example: Anti-affinity for HA
   anti-affinity.yaml: |
     affinity:

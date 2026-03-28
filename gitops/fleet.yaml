@@ -9,10 +9,10 @@ metadata:
 spec:
   # Repository URL
   repo: https://github.com/jasondashaer/kube-world
-  
+
   # Branch to track
   branch: main
-  
+
   # Paths to scan for bundles
   paths:
     - apps/base
@@ -20,13 +20,13 @@ spec:
     - apps/velero
     - apps/monitoring
     - policies
-  
+
   # Poll interval (how often to check for changes)
   pollingInterval: 15s
-  
+
   # Client secret for private repos (if needed)
   # clientSecretName: git-credentials
-  
+
   # Target clusters - local cluster
   targets:
     - name: local
@@ -44,15 +44,15 @@ metadata:
 spec:
   repo: https://github.com/jasondashaer/kube-world
   branch: main
-  
+
   paths:
     - apps/base
     - apps/home-assistant
     - apps/velero
     - apps/edge
-  
+
   pollingInterval: 30s
-  
+
   # Target edge clusters
   targets:
     - name: edge-devices

@@ -32,7 +32,7 @@ data:
           provider: aws
           config:
             region: ${AWS_REGION}
-    
+
     credentials:
       useSecret: true
       secretContents:
@@ -40,14 +40,14 @@ data:
           [default]
           aws_access_key_id=${AWS_ACCESS_KEY_ID}
           aws_secret_access_key=${AWS_SECRET_ACCESS_KEY}
-    
+
     initContainers:
       - name: velero-plugin-for-aws
         image: velero/velero-plugin-for-aws:v1.9.0
         volumeMounts:
           - mountPath: /target
             name: plugins
-    
+
     schedules:
       daily-backup:
         disabled: false
@@ -61,7 +61,7 @@ data:
           excludedResources:
             - events
             - events.events.k8s.io
-    
+
     resources:
       requests:
         cpu: 100m
@@ -89,20 +89,20 @@ data:
       volumeSnapshotLocation:
         - name: default
           provider: gcp
-    
+
     credentials:
       useSecret: true
       secretContents:
         cloud: |
           ${GCP_CREDENTIALS_JSON}
-    
+
     initContainers:
       - name: velero-plugin-for-gcp
         image: velero/velero-plugin-for-gcp:v1.9.0
         volumeMounts:
           - mountPath: /target
             name: plugins
-    
+
     schedules:
       daily-backup:
         disabled: false
@@ -133,7 +133,7 @@ data:
             s3ForcePathStyle: "true"
             s3Url: http://minio.minio-system.svc:9000
             publicUrl: http://minio.local:9000
-    
+
     credentials:
       useSecret: true
       secretContents:
@@ -141,14 +141,14 @@ data:
           [default]
           aws_access_key_id=minioadmin
           aws_secret_access_key=minioadmin
-    
+
     initContainers:
       - name: velero-plugin-for-aws
         image: velero/velero-plugin-for-aws:v1.9.0
         volumeMounts:
           - mountPath: /target
             name: plugins
-    
+
     schedules:
       daily-backup:
         disabled: false
@@ -158,7 +158,7 @@ data:
           includedNamespaces:
             - home-assistant
           snapshotVolumes: false  # Disable for local path provisioner
-    
+
     resources:
       requests:
         cpu: 50m

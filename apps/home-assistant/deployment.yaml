@@ -70,11 +70,11 @@ spec:
                     values:
                       - raspberry-pi
                       - raspberry-pi-5
-      
+
       # Required for USB device access (Z-Wave, Zigbee, Thread)
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
-      
+
       containers:
         - name: home-assistant
           image: ghcr.io/home-assistant/home-assistant:stable
@@ -121,7 +121,7 @@ spec:
               port: 8123
             initialDelaySeconds: 30
             periodSeconds: 10
-      
+
       volumes:
         - name: config
           persistentVolumeClaim:
@@ -140,7 +140,7 @@ spec:
           hostPath:
             path: /dev/ttyACM0
             type: CharDevice
-      
+
       tolerations:
         - key: "iot-only"
           operator: "Equal"

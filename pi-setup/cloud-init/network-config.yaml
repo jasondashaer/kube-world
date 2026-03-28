@@ -14,12 +14,12 @@
 network:
   version: 2
   renderer: networkd
-  
+
   ethernets:
     eth0:
       # Option 1: DHCP (default, recommended for most setups)
       dhcp4: true
-      
+
       # Option 2: Static IP (uncomment below, comment out dhcp4: true above)
       # Configure IP reservation in your router for better reliability
       # dhcp4: false
@@ -34,10 +34,10 @@ network:
       #     - 8.8.4.4
       #   search:
       #     - local
-      
+
       # Optional: Wake-on-LAN for remote power management
       # wakeonlan: true
-  
+
   # WiFi Configuration (for headless/portable setup)
   # SECURITY: Credentials are templated from encrypted config at deploy time
   # Manual setup: Uncomment and fill before copying to Pi (don't commit!)

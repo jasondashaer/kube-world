@@ -15,16 +15,16 @@ data:
   99-zigbee.rules: |
     # Sonoff Zigbee 3.0 USB Dongle Plus (CC2652P)
     SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", SYMLINK+="zigbee", MODE="0666", GROUP="dialout"
-    
+
     # ConBee II (Dresden Elektronik)
     SUBSYSTEM=="tty", ATTRS{idVendor}=="1cf1", ATTRS{idProduct}=="0030", SYMLINK+="zigbee", MODE="0666", GROUP="dialout"
-    
+
     # Sonoff Zigbee 3.0 USB Dongle Plus-E (EFR32MG21)
     SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="55d4", SYMLINK+="zigbee", MODE="0666", GROUP="dialout"
-    
+
     # SMLIGHT SLZB-06 Series
     SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="zigbee", MODE="0666", GROUP="dialout"
-    
+
     # Generic Zigbee placeholder - update with your device
     # SUBSYSTEM=="tty", ATTRS{idVendor}=="XXXX", ATTRS{idProduct}=="XXXX", SYMLINK+="zigbee", MODE="0666", GROUP="dialout"
 
@@ -32,13 +32,13 @@ data:
   99-zwave.rules: |
     # Zooz ZST39 800LR Z-Wave Stick
     SUBSYSTEM=="tty", ATTRS{idVendor}=="0658", ATTRS{idProduct}=="0200", SYMLINK+="zwave", MODE="0666", GROUP="dialout"
-    
+
     # Aeotec Z-Stick Gen5+
     SUBSYSTEM=="tty", ATTRS{idVendor}=="0658", ATTRS{idProduct}=="0200", SYMLINK+="zwave", MODE="0666", GROUP="dialout"
-    
+
     # Silicon Labs UZB-7 (used in many Z-Wave sticks)
     SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="8a2a", SYMLINK+="zwave", MODE="0666", GROUP="dialout"
-    
+
     # Home Assistant Connect ZWA-2 (Nabu Casa)
     SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", ATTRS{product}=="ZWA-2*", SYMLINK+="zwave", MODE="0666", GROUP="dialout"
 
@@ -46,9 +46,9 @@ data:
   99-thread.rules: |
     # Home Assistant Connect ZBT-2 (Nabu Casa) - Thread Border Router
     SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", ATTRS{product}=="ZBT-2*", SYMLINK+="thread", MODE="0666", GROUP="dialout"
-    
+
     # Apple HomePod Mini / Apple TV (Thread border router via mDNS, no USB rule needed)
-    
+
     # Generic Thread device placeholder
     # SUBSYSTEM=="tty", ATTRS{idVendor}=="XXXX", ATTRS{idProduct}=="XXXX", SYMLINK+="thread", MODE="0666", GROUP="dialout"
 
@@ -78,16 +78,16 @@ spec:
       # Only run on edge/IoT nodes
       nodeSelector:
         workload-type: iot
-      
+
       tolerations:
         - key: "iot-only"
           operator: "Equal"
           value: "true"
           effect: "NoSchedule"
-      
+
       hostPID: true
       hostNetwork: true
-      
+
       initContainers:
         - name: deploy-rules
           image: busybox:latest
@@ -108,7 +108,7 @@ spec:
               mountPath: /rules
             - name: host-udev
               mountPath: /host-udev
-      
+
       containers:
         - name: pause
           image: gcr.io/google-containers/pause:3.9
@@ -119,7 +119,7 @@ spec:
             limits:
               cpu: 10m
               memory: 10Mi
-      
+
       volumes:
         - name: rules
           configMap:

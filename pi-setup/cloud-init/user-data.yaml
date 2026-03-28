@@ -71,34 +71,34 @@ write_files:
     content: |
       #!/bin/bash
       set -e
-      
+
       LOG_FILE="/var/log/kube-world-setup.log"
       exec > >(tee -a "$LOG_FILE") 2>&1
-      
+
       echo "=== kube-world first-boot setup started at $(date) ==="
-      
+
       # Wait for network
       until ping -c1 github.com &>/dev/null; do
         echo "Waiting for network..."
         sleep 5
       done
-      
+
       # Load kernel modules
       modprobe br_netfilter
       modprobe overlay
-      
+
       # Apply sysctl settings
       sysctl --system
-      
+
       # Disable swap
       swapoff -a
       sed -i '/swap/d' /etc/fstab
-      
+
       # Clone kube-world repository
       if [ ! -d /opt/kube-world/repo ]; then
         git clone https://github.com/jasondashaer/kube-world.git /opt/kube-world/repo
       fi
-      
+
       echo "=== First-boot setup complete at $(date) ==="
       echo "Run Ansible playbook from management machine to complete K3s installation."
 
@@ -109,24 +109,24 @@ runcmd:
     if ! grep -q "cgroup_memory=1" /boot/firmware/cmdline.txt; then
       sed -i 's/$/ cgroup_memory=1 cgroup_enable=memory/' /boot/firmware/cmdline.txt
     fi
-  
+
   # Load kernel modules
   - modprobe br_netfilter || true
   - modprobe overlay || true
-  
+
   # Apply sysctl
   - sysctl --system
-  
+
   # Disable swap
   - swapoff -a
   - sed -i '/swap/d' /etc/fstab
-  
+
   # Create kube-world directory
   - mkdir -p /opt/kube-world
-  
+
   # Run first-boot script
   - /opt/kube-world/first-boot.sh
-  
+
   # Reboot to apply cgroup changes
   - 'if ! grep -q "cgroup_memory=1" /proc/cmdline; then reboot; fi'
 
@@ -135,13 +135,13 @@ final_message: |
   ===========================================
   kube-world Pi Node Setup Complete!
   ===========================================
-  
+
   Cloud-init finished at $TIMESTAMP
   System uptime: $UPTIME
-  
+
   Next steps:
   1. SSH to this node: ssh admin@<ip-address>
   2. Run Ansible from management machine to install K3s
-  
+
   Logs: /var/log/cloud-init-output.log
   ===========================================

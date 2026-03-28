@@ -214,18 +214,18 @@ cloud_resources: []
 #   ...
 
 #===============================================================================
-# Metadata
+# Inventory Settings
 #===============================================================================
-metadata:
+inventory_settings:
   # Inventory generation settings
   auto_discover: false  # Future: Enable auto-discovery
-  
+
   # Validation settings
   validation:
     required_fields:
       nodes: [id, name, type, hardware.cpu.architecture]
       iot_devices: [id, name, type, assignedNode]
-  
+
   # Sync settings for GitOps
   gitops:
     sync_interval: 5m

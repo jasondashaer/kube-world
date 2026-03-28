@@ -46,7 +46,7 @@
       - open-iscsi  # For Longhorn storage
       - nfs-common
       - util-linux  # For NVMe utilities
-  
+
   tasks:
     - name: Re-verify connectivity before base configuration
       wait_for_connection:
@@ -276,7 +276,7 @@
       --node-label=topology.kubernetes.io/zone=edge
       --node-label=workload-type=iot
       --node-label=hardware=raspberry-pi-5
-  
+
   tasks:
     - name: Pre-flight connectivity check before K3s install
       wait_for_connection:
@@ -363,7 +363,7 @@
       --node-label=node.kubernetes.io/role=worker
       --node-label=topology.kubernetes.io/zone=edge
       --node-label=hardware=raspberry-pi
-  
+
   tasks:
     - name: Pre-flight connectivity check before K3s agent install
       wait_for_connection:
@@ -392,7 +392,7 @@
         K3S_URL=https://{{ hostvars['localhost']['k3s_master_ip'] }}:6443 \
         K3S_TOKEN={{ hostvars['localhost']['k3s_join_token'] }} \
         /tmp/k3s-install.sh agent {{ k3s_agent_args }}
-      when: 
+      when:
         - not k3s_installed.stat.exists
         - hostvars['localhost']['k3s_join_token'] is defined
       async: 300
@@ -414,7 +414,7 @@
   gather_facts: no
   environment:
     KUBECONFIG: /etc/rancher/k3s/k3s.yaml
-  
+
   tasks:
     - name: Final connectivity check
       wait_for_connection:

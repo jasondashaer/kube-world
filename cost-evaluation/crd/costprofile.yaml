@@ -29,7 +29,7 @@ spec:
                     type:
                       type: string
                       enum: [deployment, statefulset, daemonset]
-                
+
                 # Requirements for the workload
                 requirements:
                   type: object
@@ -72,7 +72,7 @@ spec:
                           type: array
                           items:
                             type: string
-                
+
                 # Cost constraints
                 budget:
                   type: object
@@ -83,7 +83,7 @@ spec:
                       type: number
                     preferSpotInstances:
                       type: boolean
-                
+
                 # Provider preferences
                 providers:
                   type: object
@@ -99,13 +99,13 @@ spec:
                       type: array
                       items:
                         type: string
-                
+
                 # Optimization strategy
                 strategy:
                   type: string
                   enum: [cost, performance, balanced, reliability]
                   default: balanced
-            
+
             status:
               type: object
               properties:
@@ -171,7 +171,7 @@ spec:
     name: home-assistant
     namespace: home-assistant
     type: deployment
-  
+
   requirements:
     compute:
       minCPU: "500m"
@@ -185,16 +185,16 @@ spec:
     compliance:
       dataResidency:
         - US
-  
+
   budget:
     maxMonthlyUSD: 25
     preferSpotInstances: false  # Needs stability
-  
+
   providers:
     allowed:
       - local  # Pi
       - aws
       - gcp
     preferred: local  # Prefer edge for IoT
-  
+
   strategy: balanced

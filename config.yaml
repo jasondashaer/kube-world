@@ -60,7 +60,7 @@ karmada:
   # Karmada control plane settings
   control_plane:
     # Where to install: central-pi | kind-dev
-    target: kind-dev  # Start with KIND, migrate to central Pi later
+    target: central-pi  # Pi 5 16GB is the central management node
     apiserver_replicas: 1
     etcd_replicas: 1
     data_dir: "~/.karmada"
@@ -99,7 +99,7 @@ flux:
 # Central Management Node (Future: Dedicated Pi 5 16GB)
 #===============================================================================
 central_node:
-  enabled: false  # Enable when dedicated Pi is provisioned
+  enabled: true  # Current Pi 5 (16GB) serves as the central management node
   hardware:
     model: "Raspberry Pi 5"
     memory: "16GB"

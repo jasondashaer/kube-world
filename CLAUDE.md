@@ -119,10 +119,11 @@ kube-world/
 
 ### Bootstrap (full cluster setup)
 ```bash
-./bootstrap.sh --platform mac --mode dev --verbose   # Mac KIND dev
-./bootstrap.sh --platform pi --mode dev --verbose     # Raspberry Pi
-./bootstrap.sh --dry-run --platform mac               # Preview only
-./bootstrap.sh --cleanup && ./bootstrap.sh            # Clean rebuild
+./bootstrap.sh --platform pi --mode dev --verbose     # Central Pi (primary)
+./bootstrap.sh --platform pi --stack karmada --verbose # Pi with Karmada+Flux+Rancher
+./bootstrap.sh --platform mac --mode dev --verbose    # Mac KIND dev (optional)
+./bootstrap.sh --dry-run --platform pi                # Preview only
+./bootstrap.sh --cleanup --platform pi && ./bootstrap.sh --platform pi  # Clean rebuild
 ```
 
 ### Karmada
@@ -289,15 +290,15 @@ Full troubleshooting guide: `docs/troubleshooting.md`
 
 | Device | Role | RAM | Status |
 |--------|------|-----|--------|
-| MacBook Pro M3 Max | Development only | 32GB | Active |
-| Raspberry Pi 5 | Edge cluster (Home Assistant + IoT) | 16GB + 1TB NVMe | Active |
-| Raspberry Pi 5 (TBD) | Central management node | 16GB (planned) | Planned |
+| MacBook Pro M3 Max | Development workstation only (CLI tools, SSH) | 32GB | Active |
+| Raspberry Pi 5 | Central management (K3s + Karmada + Rancher + Flux) | 16GB + 1TB NVMe | Active |
+| Raspberry Pi 5 (TBD) | Edge cluster (Home Assistant + IoT) | TBD | Planned |
 
 ## Project Phases
 
 - [x] Phase 0: Foundation (bootstrap, Pi provisioning, operational tooling)
-- [ ] Phase 1: Control plane on Mac KIND (Karmada + Rancher + Flux)
-- [ ] Phase 2: Pi edge cluster registered to Karmada + Rancher
-- [ ] Phase 3: Home Assistant deployed via Flux -> Karmada -> Pi
-- [ ] Phase 4: Observability, GitLab self-hosting, dedicated central Pi
+- [ ] Phase 1: Bootstrap current Pi as central management node (Karmada + Rancher + Flux)
+- [ ] Phase 2: Purchase + provision second Pi as edge cluster, register with Karmada
+- [ ] Phase 3: Home Assistant deployed via Flux -> Karmada -> edge Pi
+- [ ] Phase 4: Observability, GitLab self-hosting on central Pi
 - [ ] Phase 5: Multi-cluster expansion, advanced scheduling

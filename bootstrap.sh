@@ -53,10 +53,14 @@ HELM_VERSION="${HELM_VERSION:-3.14.0}"
 KARMADA_VERSION="${KARMADA_VERSION:-1.12.0}"
 FLUX_VERSION="${FLUX_VERSION:-2.4.0}"
 
+# Host OS detection (where the script is running, not the target)
+HOST_OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+
 # Default options
 PLATFORM=""
 MODE="dev"
 STACK="karmada"  # karmada (Karmada+Flux) or fleet (legacy Fleet)
+PI_IP=""          # Set during setup_pi_cluster, used in completion messages
 SKIP_PREREQS=false
 DRY_RUN=false
 CLEANUP=false
@@ -232,70 +236,83 @@ check_command() {
 
 install_prereqs_mac() {
     log "Installing prerequisites for macOS..."
-    
+
     # Install Homebrew if not present
     if ! check_command brew; then
         log "Installing Homebrew..."
         /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
     fi
-    
-    # Docker Desktop is required for KIND - cannot be installed via Homebrew easily
-    if ! check_command docker; then
-        echo ""
-        error "Docker Desktop is required but not installed."
-        echo ""
-        echo "============================================="
-        echo "  Docker Desktop Installation Required"
-        echo "============================================="
-        echo ""
-        echo "KIND (Kubernetes in Docker) requires Docker Desktop on macOS."
-        echo ""
-        echo "Install Docker Desktop:"
-        echo "  1. Download from: https://www.docker.com/products/docker-desktop/"
-        echo "     (Choose 'Mac with Apple Chip' for M1/M2/M3 Macs)"
-        echo ""
-        echo "  2. Or install via Homebrew Cask:"
-        echo "     brew install --cask docker"
-        echo ""
-        echo "  3. After installation, launch Docker Desktop from Applications"
-        echo "     and wait for it to fully start (whale icon in menu bar)"
-        echo ""
-        echo "  4. Re-run this bootstrap script"
-        echo ""
-        echo "Alternative: For Pi deployment, use --platform pi instead."
-        echo ""
-        
-        # Offer to install via Homebrew
-        read -p "Would you like to install Docker Desktop via Homebrew now? [y/N] " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            log "Installing Docker Desktop via Homebrew..."
-            brew install --cask docker
+
+    # Docker Desktop is only required for Mac platform (KIND clusters)
+    # When targeting Pi, Docker is not needed on the Mac
+    if [[ "$PLATFORM" == mac-* || "$PLATFORM" == mac ]]; then
+        if ! check_command docker; then
             echo ""
-            warn "Docker Desktop installed. Please launch it from Applications."
-            warn "Wait for Docker to fully start, then re-run this script."
-            exit 0
-        else
+            error "Docker Desktop is required for KIND clusters."
+            echo ""
+            echo "============================================="
+            echo "  Docker Desktop Installation Required"
+            echo "============================================="
+            echo ""
+            echo "KIND (Kubernetes in Docker) requires Docker Desktop on macOS."
+            echo ""
+            echo "Install Docker Desktop:"
+            echo "  1. Download from: https://www.docker.com/products/docker-desktop/"
+            echo "     (Choose 'Mac with Apple Chip' for M1/M2/M3 Macs)"
+            echo ""
+            echo "  2. Or install via Homebrew Cask:"
+            echo "     brew install --cask docker"
+            echo ""
+            echo "  3. After installation, launch Docker Desktop from Applications"
+            echo "     and wait for it to fully start (whale icon in menu bar)"
+            echo ""
+            echo "  4. Re-run this bootstrap script"
+            echo ""
+            echo "Alternative: For Pi deployment, use --platform pi instead."
+            echo ""
+
+            # Offer to install via Homebrew
+            read -p "Would you like to install Docker Desktop via Homebrew now? [y/N] " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                log "Installing Docker Desktop via Homebrew..."
+                brew install --cask docker
+                echo ""
+                warn "Docker Desktop installed. Please launch it from Applications."
+                warn "Wait for Docker to fully start, then re-run this script."
+                exit 0
+            else
+                exit 1
+            fi
+        fi
+
+        # Verify Docker daemon is running
+        if ! docker info &>/dev/null; then
+            echo ""
+            error "Docker Desktop is installed but not running."
+            echo ""
+            echo "Please:"
+            echo "  1. Launch Docker Desktop from Applications"
+            echo "  2. Wait for it to fully start (whale icon in menu bar stops animating)"
+            echo "  3. Re-run this bootstrap script"
+            echo ""
             exit 1
         fi
+
+        log "Docker Desktop detected and running ✓"
     fi
-    
-    # Verify Docker daemon is running
-    if ! docker info &>/dev/null; then
-        echo ""
-        error "Docker Desktop is installed but not running."
-        echo ""
-        echo "Please:"
-        echo "  1. Launch Docker Desktop from Applications"
-        echo "  2. Wait for it to fully start (whale icon in menu bar stops animating)"
-        echo "  3. Re-run this bootstrap script"
-        echo ""
-        exit 1
+
+    # Base packages needed regardless of target platform
+    local packages=("kubectl" "helm" "sops" "age" "jq" "yq")
+
+    # Add platform-specific tools
+    if [[ "$PLATFORM" == mac-* || "$PLATFORM" == mac ]]; then
+        packages+=("kind")
     fi
-    
-    log "Docker Desktop detected and running ✓"
-    
-    local packages=("kubectl" "helm" "kind" "ansible" "sops" "age" "jq" "yq")
+    if [[ "$PLATFORM" == "pi" ]]; then
+        packages+=("ansible")
+    fi
+
     for pkg in "${packages[@]}"; do
         if ! check_command "$pkg"; then
             log "Installing $pkg..."
@@ -305,10 +322,12 @@ install_prereqs_mac() {
         fi
     done
 
-    # Install k3sup for remote K3s installation
-    if ! check_command k3sup; then
-        log "Installing k3sup..."
-        brew install k3sup
+    # Install k3sup for remote K3s installation (useful for Pi)
+    if [[ "$PLATFORM" == "pi" ]]; then
+        if ! check_command k3sup; then
+            log "Installing k3sup..."
+            brew install k3sup
+        fi
     fi
 
     # Install Karmada + Flux tools if using the karmada stack
@@ -368,13 +387,30 @@ install_prereqs_linux() {
         sudo mv "sops-v${sops_version}.linux.${arch}" /usr/local/bin/sops
         sudo chmod +x /usr/local/bin/sops
     fi
+
+    # Install Karmada + Flux tools if using the karmada stack
+    if [[ "$STACK" == "karmada" ]]; then
+        if ! check_command karmadactl; then
+            log "Installing karmadactl..."
+            local karmada_arch
+            karmada_arch="$(dpkg --print-architecture)"
+            curl -sL "https://github.com/karmada-io/karmada/releases/download/v${KARMADA_VERSION}/karmadactl-linux-${karmada_arch}" -o /tmp/karmadactl
+            sudo install -o root -g root -m 0755 /tmp/karmadactl /usr/local/bin/karmadactl
+            rm -f /tmp/karmadactl
+        fi
+
+        if ! check_command flux; then
+            log "Installing flux CLI..."
+            curl -s https://fluxcd.io/install.sh | bash
+        fi
+    fi
 }
 
 preflight_checks() {
     log "Running preflight checks..."
     local checks_passed=true
 
-    # Check for required tools based on platform
+    # Check for required tools based on platform + stack
     log "Checking required tools..."
     local required_tools=()
     local optional_tools=()
@@ -385,14 +421,24 @@ preflight_checks() {
             optional_tools=("yq" "jq" "ansible")
             ;;
         pi|linux-*)
-            required_tools=("kubectl" "helm")
-            optional_tools=("yq" "jq" "ansible" "curl")
+            # When running from Mac targeting Pi, we need SSH + ansible
+            if [[ "$HOST_OS" == "darwin" ]]; then
+                required_tools=("kubectl" "helm" "ssh" "ansible")
+            else
+                required_tools=("kubectl" "helm")
+            fi
+            optional_tools=("yq" "jq" "curl")
             ;;
         cloud)
             required_tools=("kubectl" "helm" "terraform")
             optional_tools=("yq" "jq" "aws" "gcloud" "az")
             ;;
     esac
+
+    # Add stack-specific tools
+    if [[ "$STACK" == "karmada" ]]; then
+        required_tools+=("karmadactl" "flux")
+    fi
 
     local missing_required=()
     local missing_optional=()
@@ -430,25 +476,21 @@ preflight_checks() {
 
     # Check disk space (need at least 10GB)
     local free_space
-    # macOS uses different df options than Linux
-    if [[ "$(uname -s)" == "Darwin" ]]; then
-        # macOS: df -g shows in GB
+    if [[ "$HOST_OS" == "darwin" ]]; then
         free_space=$(df -g / | awk 'NR==2 {print $4}')
     else
-        # Linux: df -BG shows in GB (some systems may not support -B, fallback to -k)
         if df -BG / &>/dev/null; then
             free_space=$(df -BG / | awk 'NR==2 {print $4}' | tr -d 'G')
         else
-            # Fallback: convert from KB to GB
             free_space=$(df -k / | awk 'NR==2 {print int($4/1024/1024)}')
         fi
     fi
-    
+
     if [[ -n "$free_space" ]] && [[ "$free_space" -lt 10 ]]; then
         warn "Low disk space: ${free_space}GB available (10GB recommended)"
     fi
-    
-    # Check Docker Desktop memory allocation for Mac
+
+    # Check Docker Desktop memory allocation (only for Mac platform with KIND)
     if [[ "$PLATFORM" == mac-* ]] && check_command docker; then
         local docker_memory_gb
         docker_memory_gb=$(docker system info 2>/dev/null | grep "Total Memory" | awk '{print int($3)}')
@@ -474,39 +516,59 @@ preflight_checks() {
             debug "Docker memory: ${docker_memory_gb}GB ✓"
         fi
     fi
-    
+
     # Check network connectivity
     if ! curl -s --connect-timeout 5 https://github.com > /dev/null; then
         error "Cannot reach GitHub. Check network connectivity."
         checks_passed=false
     fi
-    
+
     # Check for existing clusters (if not cleanup mode)
     if [[ "$CLEANUP" != "true" ]]; then
         if kubectl cluster-info &>/dev/null; then
             warn "Existing Kubernetes cluster detected. Use --cleanup to remove first."
         fi
     fi
-    
-    # Platform-specific checks
-    case "$PLATFORM" in
-        pi)
-            # Check cgroup memory
-            if ! grep -q "cgroup_memory=1" /proc/cmdline 2>/dev/null; then
-                warn "cgroup memory not enabled. Required for K3s."
+
+    # Pi-specific checks (only when running ON the Pi, not remotely from Mac)
+    if [[ "$PLATFORM" == "pi" && "$HOST_OS" == "linux" ]]; then
+        if ! grep -q "cgroup_memory=1" /proc/cmdline 2>/dev/null; then
+            warn "cgroup memory not enabled. Required for K3s."
+        fi
+        if [[ $(swapon --show | wc -l) -gt 0 ]]; then
+            warn "Swap is enabled. Should be disabled for Kubernetes."
+        fi
+    fi
+
+    # When targeting Pi remotely, check SSH connectivity
+    if [[ "$PLATFORM" == "pi" && "$HOST_OS" == "darwin" ]]; then
+        local inventory="${SCRIPT_DIR}/pi-setup/inventory.ini"
+        if [[ -f "$inventory" ]]; then
+            local pi_ip
+            pi_ip=$(grep -A1 '^\[masters\]' "$inventory" | tail -1 | awk '{print $NF}' | sed 's/.*ansible_host=//' | awk '{print $1}')
+            if [[ -n "$pi_ip" ]]; then
+                log "Checking SSH connectivity to Pi at ${pi_ip}..."
+                if ssh -o ConnectTimeout=5 -o BatchMode=yes "admin@${pi_ip}" true 2>/dev/null; then
+                    log "SSH to Pi ✓"
+                else
+                    warn "Cannot SSH to Pi at ${pi_ip}. Ensure:"
+                    warn "  1. Pi is powered on and connected to network"
+                    warn "  2. SSH key is in ~/.ssh/id_ed25519"
+                    warn "  3. Pi is configured with user 'admin'"
+                    warn "  4. IP address ${pi_ip} is correct in pi-setup/inventory.ini"
+                fi
             fi
-            # Check swap
-            if [[ $(swapon --show | wc -l) -gt 0 ]]; then
-                warn "Swap is enabled. Should be disabled for Kubernetes."
-            fi
-            ;;
-    esac
-    
+        else
+            warn "Inventory file not found at ${inventory}"
+            warn "Update pi-setup/inventory.ini with your Pi's IP address"
+        fi
+    fi
+
     if [[ "$checks_passed" != "true" ]]; then
         error "Preflight checks failed"
         exit 1
     fi
-    
+
     log "Preflight checks passed ✓"
 }
 
@@ -599,31 +661,108 @@ setup_mac_cluster() {
 
 setup_pi_cluster() {
     log "Setting up K3s cluster on Raspberry Pi..."
-    
+
     local inventory="${SCRIPT_DIR}/pi-setup/inventory.ini"
     local playbook="${SCRIPT_DIR}/pi-setup/ansible/playbook.yml"
-    
-    # Run Ansible playbook for Pi setup
-    if [[ -f "$playbook" ]]; then
+
+    # Extract Pi IP from inventory (set global PI_IP for use in completion messages)
+    PI_IP=$(grep -A1 '^\[masters\]' "$inventory" | tail -1 | awk '{print $NF}' | sed 's/.*ansible_host=//' | awk '{print $1}')
+
+    if [[ -z "$PI_IP" ]]; then
+        error "Could not determine Pi IP from inventory: $inventory"
+        error "Ensure [masters] section has an entry with ansible_host=<ip>"
+        exit 1
+    fi
+
+    log "Target Pi: ${PI_IP}"
+
+    if [[ "$HOST_OS" == "darwin" ]]; then
+        # Running from Mac — provision Pi remotely via Ansible
+        log "Provisioning Pi remotely from Mac via Ansible..."
+
+        if [[ ! -f "$playbook" ]]; then
+            error "Ansible playbook not found at $playbook"
+            exit 1
+        fi
+
         ansible-playbook -i "$inventory" "$playbook" \
             -e "k3s_version=${K3S_VERSION}" \
             -e "mode=${MODE}"
+
+        # Copy kubeconfig from Pi to Mac
+        log "Fetching kubeconfig from Pi..."
+        mkdir -p "$KUBECONFIG_DIR"
+
+        local retries=5
+        local count=0
+        while [[ $count -lt $retries ]]; do
+            if scp "admin@${PI_IP}:/etc/rancher/k3s/k3s.yaml" "${KUBECONFIG_DIR}/pi-config" 2>/dev/null; then
+                break
+            fi
+            count=$((count + 1))
+            log "Waiting for K3s kubeconfig to be available... (${count}/${retries})"
+            sleep 10
+        done
+
+        if [[ $count -ge $retries ]]; then
+            error "Failed to fetch kubeconfig from Pi after ${retries} attempts"
+            error "Check: ssh admin@${PI_IP} 'ls -la /etc/rancher/k3s/k3s.yaml'"
+            exit 1
+        fi
+
+        # Rewrite kubeconfig to point at Pi's IP instead of localhost
+        if [[ "$HOST_OS" == "darwin" ]]; then
+            sed -i '' "s/127.0.0.1/${PI_IP}/g" "${KUBECONFIG_DIR}/pi-config"
+        else
+            sed -i "s/127.0.0.1/${PI_IP}/g" "${KUBECONFIG_DIR}/pi-config"
+        fi
+
     else
-        error "Ansible playbook not found at $playbook"
+        # Running directly on the Pi
+        log "Provisioning Pi locally..."
+
+        if [[ -f "$playbook" ]]; then
+            ansible-playbook -i "$inventory" "$playbook" \
+                -e "k3s_version=${K3S_VERSION}" \
+                -e "mode=${MODE}" \
+                --connection=local
+        fi
+
+        # K3s kubeconfig is local
+        mkdir -p "$KUBECONFIG_DIR"
+        if [[ -f /etc/rancher/k3s/k3s.yaml ]]; then
+            cp /etc/rancher/k3s/k3s.yaml "${KUBECONFIG_DIR}/pi-config"
+        else
+            error "K3s kubeconfig not found at /etc/rancher/k3s/k3s.yaml"
+            error "Is K3s installed? Try: curl -sfL https://get.k3s.io | sh -"
+            exit 1
+        fi
+    fi
+
+    export KUBECONFIG="${KUBECONFIG_DIR}/pi-config"
+
+    # Wait for cluster to be ready
+    log "Waiting for Pi K3s cluster to be ready..."
+    local ready_timeout=120
+    local ready_elapsed=0
+    while [[ $ready_elapsed -lt $ready_timeout ]]; do
+        if kubectl get nodes --no-headers 2>/dev/null | grep -q "Ready"; then
+            break
+        fi
+        debug "Waiting for K3s node to be Ready... (${ready_elapsed}/${ready_timeout}s)"
+        sleep 5
+        ready_elapsed=$((ready_elapsed + 5))
+    done
+
+    if [[ $ready_elapsed -ge $ready_timeout ]]; then
+        error "K3s node not ready after ${ready_timeout}s"
+        kubectl get nodes 2>/dev/null || true
         exit 1
     fi
-    
-    # Copy kubeconfig from Pi
-    local pi_ip
-    pi_ip=$(grep -E "^\[masters\]" -A1 "$inventory" | tail -1 | awk '{print $1}')
-    
-    mkdir -p "$KUBECONFIG_DIR"
-    scp "admin@${pi_ip}:/etc/rancher/k3s/k3s.yaml" "${KUBECONFIG_DIR}/pi-config"
-    sed -i.bak "s/127.0.0.1/${pi_ip}/g" "${KUBECONFIG_DIR}/pi-config"
-    
-    export KUBECONFIG="${KUBECONFIG_DIR}/pi-config"
-    
+
+    kubectl get nodes -o wide
     log "Pi cluster setup complete ✓"
+    log "KUBECONFIG set to: ${KUBECONFIG}"
 }
 
 #===============================================================================
@@ -688,16 +827,20 @@ setup_gitops() {
 install_karmada() {
     log "Installing Karmada control plane..."
 
-    # Source and run the Karmada install script
-    if [[ -f "${SCRIPT_DIR}/karmada/install-karmada.sh" ]]; then
-        local karmada_args=()
-        [[ "$DRY_RUN" == "true" ]] && karmada_args+=("--dry-run")
-        [[ "$VERBOSE" == "true" ]] && karmada_args+=("--verbose")
-        bash "${SCRIPT_DIR}/karmada/install-karmada.sh" "${karmada_args[@]}"
-    else
+    if [[ ! -f "${SCRIPT_DIR}/karmada/install-karmada.sh" ]]; then
         error "karmada/install-karmada.sh not found"
         return 1
     fi
+
+    local karmada_args=()
+    # Pass the active KUBECONFIG so the script targets the right cluster
+    if [[ -n "${KUBECONFIG:-}" ]]; then
+        karmada_args+=("--kubeconfig" "${KUBECONFIG}")
+    fi
+    [[ "$DRY_RUN" == "true" ]] && karmada_args+=("--dry-run")
+    [[ "$VERBOSE" == "true" ]] && karmada_args+=("--verbose")
+
+    bash "${SCRIPT_DIR}/karmada/install-karmada.sh" "${karmada_args[@]}"
 
     log "Karmada control plane installed ✓"
 }
@@ -771,14 +914,20 @@ setup_flux() {
 cleanup_karmada() {
     log "Cleaning up Karmada + Flux installation..."
 
+    # For Pi platform, load the Pi kubeconfig if it exists
+    if [[ "$PLATFORM" == "pi" && -f "${KUBECONFIG_DIR}/pi-config" ]]; then
+        export KUBECONFIG="${KUBECONFIG_DIR}/pi-config"
+        log "Using Pi kubeconfig for cleanup: ${KUBECONFIG}"
+    fi
+
     # Remove Flux kustomizations and sources
-    if kubectl get namespace flux-system &>/dev/null; then
+    if kubectl get namespace flux-system &>/dev/null 2>&1; then
         log "Uninstalling Flux..."
         flux uninstall --silent 2>/dev/null || true
     fi
 
     # Remove Karmada
-    if kubectl get namespace karmada-system &>/dev/null; then
+    if kubectl get namespace karmada-system &>/dev/null 2>&1; then
         log "Removing Karmada control plane..."
         karmadactl deinit 2>/dev/null || true
     fi
@@ -1034,15 +1183,21 @@ main() {
     if [[ "$DRY_RUN" == "true" ]]; then
         log "DRY RUN MODE - no changes will be made"
         echo "Would execute:"
-        echo "  1. Install prerequisites"
+        echo "  1. Install prerequisites (on ${HOST_OS})"
         echo "  2. Run preflight checks"
         [[ "$CLEANUP" == "true" ]] && echo "  3. Cleanup existing installation"
-        echo "  4. Setup ${PLATFORM} cluster"
+        if [[ "$PLATFORM" == "pi" && "$HOST_OS" == "darwin" ]]; then
+            echo "  4. Provision Pi via Ansible (remote from Mac)"
+            echo "     - Install K3s on Pi"
+            echo "     - Fetch kubeconfig to Mac"
+        else
+            echo "  4. Setup ${PLATFORM} cluster"
+        fi
         if [[ "$STACK" == "karmada" ]]; then
             echo "  5. Install Karmada control plane"
             echo "  6. Install Rancher"
             echo "  7. Setup Flux GitOps"
-            echo "  8. Deploy core apps (via Flux -> Karmada)"
+            echo "  8. Apps deployed via Flux -> Karmada pipeline"
         else
             echo "  5. Install Rancher"
             echo "  6. Setup Fleet GitOps"
@@ -1057,13 +1212,14 @@ main() {
         cleanup_existing
     fi
     
-    # Install prerequisites
+    # Install prerequisites based on HOST OS (where this script runs)
+    # not the target platform. E.g., Mac targeting Pi still needs Mac prereqs.
     if [[ "$SKIP_PREREQS" != "true" ]]; then
-        case "$PLATFORM" in
-            mac|mac-*)
+        case "$HOST_OS" in
+            darwin)
                 install_prereqs_mac
                 ;;
-            pi|linux-*)
+            linux)
                 install_prereqs_linux
                 ;;
         esac
@@ -1119,10 +1275,16 @@ main() {
     if [[ "$STACK" == "karmada" ]]; then
         echo "Next steps:"
         echo "  1. Change Rancher admin password"
-        echo "  2. Register Pi clusters: ./karmada/cluster-registration/register-pi.sh"
-        echo "  3. Configure secrets in /secrets/ directory"
-        echo "  4. Monitor Flux sync: flux get kustomizations -A"
-        echo "  5. Check Karmada clusters: karmadactl get clusters"
+        if [[ "$PLATFORM" == "pi" ]]; then
+            echo "  2. Access Rancher UI: https://${PI_IP:-<pi-ip>}:8443"
+            echo "  3. Purchase + provision edge Pi, then register:"
+            echo "     ./karmada/cluster-registration/register-pi.sh --pi-ip <edge-pi-ip>"
+        else
+            echo "  2. Register Pi clusters: ./karmada/cluster-registration/register-pi.sh"
+        fi
+        echo "  4. Configure secrets in /secrets/ directory"
+        echo "  5. Monitor Flux sync: flux get kustomizations -A"
+        echo "  6. Check Karmada clusters: karmadactl get clusters"
     else
         echo "Next steps:"
         echo "  1. Change Rancher admin password"

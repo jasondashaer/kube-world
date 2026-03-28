@@ -131,18 +131,22 @@ network:
     # DNS search domain
     search_domain: "local"
   
+  # Primary interface: ethernet (more reliable for server workloads)
+  # WiFi is available as a fallback but not the default
+  primary_interface: ethernet
+
   # Static IP assignments for nodes
-  # These should also be reserved in your router's DHCP settings
+  # Reserve these in your router's DHCP settings for stability
+  # [UPDATE] Set IPs after discovering your network's subnet
   static_ips:
-    pi5-master-1: "192.168.1.100"
-    pi5-worker-1: "192.168.1.101"
-    pi5-worker-2: "192.168.1.102"
-  
-  # WiFi configuration for Pi headless setup
+    pi-central: ""                        # [UPDATE] Central management node
+    # pi-edge-1: ""                       # [UPDATE] First edge cluster
+
+  # WiFi configuration (fallback / headless setup only)
   # NOTE: Passwords are sensitive - consider using SOPS encryption
   # See: secrets/README.md for encryption instructions
   wifi:
-    enabled: true
+    enabled: false                        # Ethernet is primary; enable WiFi as needed
     # Priority order - first available will be used
     ssids:
       - name: "YourNetworkName"           # [UPDATE] Your primary WiFi
@@ -157,31 +161,33 @@ network:
 #===============================================================================
 # Primary compute nodes - sync with inventory/hardware.yaml
 nodes:
-  # Development machine
+  # Development workstation (CLI tools, SSH only — no clusters)
   macbook:
     id: "macbook-pro-m3"
     enabled: true
-    role: management
-    # Network interfaces - useful for identification but not critical
-    # Dongle MACs are transient; built-in interfaces are stable
-    network:
-      # Built-in interfaces (stable)
-      wifi_mac: "XX:XX:XX:XX:XX:XX"       # [UPDATE] en0 MAC address
-      # Thunderbolt/USB adapters (transient - for reference only)
-      # These may change with different dongles
-      thunderbolt_macs:
-        - "XX:XX:XX:XX:XX:XX"             # [UPDATE] en8/en9 if using
-  
+    role: development
+
   # Raspberry Pi nodes
   pi_nodes:
-    - id: "pi5-master-1"
+    - id: "pi-central"
       enabled: true
-      role: master
-      # MAC address for DHCP reservation
+      role: central                         # K3s + Karmada + Rancher + Flux
+      hardware: "Raspberry Pi 5 16GB"
+      interface: ethernet                   # Primary network interface
+      # MAC address for DHCP reservation (ethernet)
       mac: "XX:XX:XX:XX:XX:XX"            # [UPDATE] eth0 MAC from Pi
-      ip: "192.168.1.100"
-      # WiFi MAC (if using WiFi instead of ethernet)
+      ip: ""                               # [UPDATE] After discovering on your network
+      # WiFi MAC (fallback only)
       wifi_mac: "XX:XX:XX:XX:XX:XX"       # [UPDATE] wlan0 MAC from Pi
+
+    # Future: edge cluster Pi
+    # - id: "pi-edge-1"
+    #   enabled: false
+    #   role: edge                          # K3s + Home Assistant + IoT
+    #   hardware: "Raspberry Pi 5"
+    #   interface: ethernet
+    #   mac: "XX:XX:XX:XX:XX:XX"
+    #   ip: ""
 
 #===============================================================================
 # IoT Device Inventory

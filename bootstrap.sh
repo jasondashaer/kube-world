@@ -524,8 +524,8 @@ preflight_checks() {
     fi
 
     # Check for existing clusters (if not cleanup mode)
-    if [[ "$CLEANUP" != "true" ]]; then
-        if kubectl cluster-info &>/dev/null; then
+    if [[ "$CLEANUP" != "true" ]] && check_command kubectl; then
+        if kubectl cluster-info --request-timeout=5s &>/dev/null; then
             warn "Existing Kubernetes cluster detected. Use --cleanup to remove first."
         fi
     fi
@@ -545,18 +545,21 @@ preflight_checks() {
         local inventory="${SCRIPT_DIR}/pi-setup/inventory.ini"
         if [[ -f "$inventory" ]]; then
             local pi_ip
-            pi_ip=$(grep -A1 '^\[masters\]' "$inventory" | tail -1 | awk '{print $NF}' | sed 's/.*ansible_host=//' | awk '{print $1}')
-            if [[ -n "$pi_ip" ]]; then
+            pi_ip=$(awk '/^\[masters\]/{found=1; next} found && /^[^#\[]/ && NF{print; exit}' "$inventory" | sed 's/.*ansible_host=//' | awk '{print $1}')
+            if [[ -n "$pi_ip" && "$pi_ip" != "CHANGE_ME" ]]; then
                 log "Checking SSH connectivity to Pi at ${pi_ip}..."
                 if ssh -o ConnectTimeout=5 -o BatchMode=yes "admin@${pi_ip}" true 2>/dev/null; then
                     log "SSH to Pi ✓"
                 else
                     warn "Cannot SSH to Pi at ${pi_ip}. Ensure:"
-                    warn "  1. Pi is powered on and connected to network"
+                    warn "  1. Pi is powered on and connected via ethernet"
                     warn "  2. SSH key is in ~/.ssh/id_ed25519"
                     warn "  3. Pi is configured with user 'admin'"
                     warn "  4. IP address ${pi_ip} is correct in pi-setup/inventory.ini"
                 fi
+            elif [[ "$pi_ip" == "CHANGE_ME" ]]; then
+                warn "Pi IP not configured in pi-setup/inventory.ini"
+                warn "Set ansible_host= to your Pi's ethernet IP before running"
             fi
         else
             warn "Inventory file not found at ${inventory}"
@@ -666,11 +669,19 @@ setup_pi_cluster() {
     local playbook="${SCRIPT_DIR}/pi-setup/ansible/playbook.yml"
 
     # Extract Pi IP from inventory (set global PI_IP for use in completion messages)
-    PI_IP=$(grep -A1 '^\[masters\]' "$inventory" | tail -1 | awk '{print $NF}' | sed 's/.*ansible_host=//' | awk '{print $1}')
+    PI_IP=$(awk '/^\[masters\]/{found=1; next} found && /^[^#\[]/ && NF{print; exit}' "$inventory" | sed 's/.*ansible_host=//' | awk '{print $1}')
 
-    if [[ -z "$PI_IP" ]]; then
-        error "Could not determine Pi IP from inventory: $inventory"
-        error "Ensure [masters] section has an entry with ansible_host=<ip>"
+    if [[ -z "$PI_IP" || "$PI_IP" == "CHANGE_ME" ]]; then
+        error "Pi IP address not configured in inventory: $inventory"
+        error ""
+        error "Before running bootstrap, update the ansible_host in pi-setup/inventory.ini:"
+        error "  1. Connect Pi via ethernet to your router"
+        error "  2. Find its IP:"
+        error "     - Router admin page: check DHCP leases"
+        error "     - mDNS:  ping raspberrypi.local"
+        error "     - nmap:  nmap -sn 192.168.1.0/24 | grep -B2 Raspberry"
+        error "     - arp:   arp -a | grep 'dc:a6:32\|d8:3a:dd\|2c:cf:67\|e4:5f:01'"
+        error "  3. Edit pi-setup/inventory.ini: set ansible_host=<your-pi-ip>"
         exit 1
     fi
 

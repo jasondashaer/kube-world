@@ -1,0 +1,233 @@
+# GitLab CE Omnibus Deployment for Central Pi Node
+# Self-hosted GitLab on Raspberry Pi 5 (16GB, arm64)
+#
+# Resource budget: ~3GB RAM, 2 CPU cores
+# Storage: NVMe-backed PersistentVolume at /mnt/nvme
+#
+# Access: http://gitlab.<PI_IP>.nip.io:30080 (NodePort)
+# Default root password: set on first visit or via gitlab-rails console
+#
+# Storage: Uses K3s local-path provisioner by default (SD card).
+# When NVMe is added, update the PVC storageClassName or migrate data.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gitlab-data
+  namespace: gitlab
+  labels:
+    app.kubernetes.io/name: gitlab
+    app.kubernetes.io/part-of: kube-world
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 20Gi
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gitlab-config
+  namespace: gitlab
+  labels:
+    app.kubernetes.io/name: gitlab
+    app.kubernetes.io/part-of: kube-world
+data:
+  # GitLab Omnibus configuration tuned for Pi 5 (16GB)
+  # Disables heavy services to keep memory usage ~3GB
+  gitlab.rb: |
+    # External URL - update PI_IP after deployment
+    # Uses nip.io for DNS resolution (same pattern as Rancher)
+    # Update the IP if it changes. Access via http://gitlab.10.5.5.249.nip.io:30080
+    external_url 'http://gitlab.10.5.5.249.nip.io:30080'
+
+    # --- Performance tuning for Raspberry Pi 5 ---
+
+    # Puma (web server) - reduce workers and threads
+    puma['worker_processes'] = 2
+    puma['min_threads'] = 1
+    puma['max_threads'] = 4
+    puma['per_worker_max_memory_mb'] = 650
+
+    # Sidekiq (background jobs) - single process, fewer threads
+    sidekiq['max_concurrency'] = 5
+    sidekiq['min_concurrency'] = 1
+
+    # PostgreSQL - tune for low memory
+    postgresql['shared_buffers'] = '128MB'
+    postgresql['work_mem'] = '8MB'
+    postgresql['maintenance_work_mem'] = '64MB'
+    postgresql['effective_cache_size'] = '256MB'
+    postgresql['max_worker_processes'] = 4
+
+    # Redis - limit memory
+    redis['maxmemory'] = '256mb'
+    redis['maxmemory_policy'] = 'allkeys-lru'
+
+    # Gitaly - Git storage backend
+    gitaly['configuration'] = {
+      concurrency: [
+        { rpc: '/gitaly.SmartHTTPService/PostReceivePack', max_per_repo: 3 },
+        { rpc: '/gitaly.SSHService/SSHUploadPack', max_per_repo: 3 },
+      ],
+      pack_objects_cache: { enabled: true, max_age: '5m' },
+    }
+
+    # --- Disable unnecessary services ---
+    prometheus_monitoring['enable'] = false
+    alertmanager['enable'] = false
+    node_exporter['enable'] = false
+    redis_exporter['enable'] = false
+    postgres_exporter['enable'] = false
+    pgbouncer_exporter['enable'] = false
+    gitlab_exporter['enable'] = false
+    grafana['enable'] = false
+
+    # Disable container registry (not needed yet)
+    registry['enable'] = false
+
+    # Disable GitLab Pages
+    pages_external_url nil
+    gitlab_pages['enable'] = false
+
+    # Disable Mattermost
+    mattermost['enable'] = false
+
+    # Disable Terraform state
+    gitlab_rails['terraform_state_enabled'] = false
+
+    # --- Git LFS (useful for large configs) ---
+    gitlab_rails['lfs_enabled'] = true
+
+    # --- Backup to local NVMe ---
+    gitlab_rails['backup_path'] = '/var/opt/gitlab/backups'
+    gitlab_rails['backup_keep_time'] = 604800
+
+    # --- Logging ---
+    logging['logrotate_frequency'] = 'weekly'
+    logging['logrotate_maxsize'] = nil
+    logging['logrotate_size'] = '10M'
+    logging['logrotate_rotate'] = 5
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gitlab
+  namespace: gitlab
+  labels:
+    app.kubernetes.io/name: gitlab
+    app.kubernetes.io/part-of: kube-world
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gitlab
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gitlab
+        app.kubernetes.io/part-of: kube-world
+    spec:
+      # GitLab needs time to initialize on first boot (~5-10 min on Pi)
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: gitlab
+          image: gitlab/gitlab-ce:17.7.0-ce.0
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+            - name: https
+              containerPort: 443
+              protocol: TCP
+            - name: ssh
+              containerPort: 22
+              protocol: TCP
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "2Gi"
+            limits:
+              cpu: "2000m"
+              memory: "4Gi"
+          volumeMounts:
+            - name: gitlab-data
+              mountPath: /var/opt/gitlab
+              subPath: data
+            - name: gitlab-data
+              mountPath: /var/log/gitlab
+              subPath: logs
+            - name: gitlab-data
+              mountPath: /etc/gitlab
+              subPath: config
+            - name: gitlab-config
+              mountPath: /assets/gitlab.rb
+              subPath: gitlab.rb
+              readOnly: true
+          # GitLab takes a while to start on Pi - generous probes
+          startupProbe:
+            httpGet:
+              path: /-/readiness
+              port: 80
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            failureThreshold: 20
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /-/liveness
+              port: 80
+            periodSeconds: 60
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /-/readiness
+              port: 80
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          env:
+            # Skip reconfigure during container start if config hasn't changed
+            - name: GITLAB_OMNIBUS_CONFIG
+              value: "from_file('/assets/gitlab.rb')"
+      volumes:
+        - name: gitlab-data
+          persistentVolumeClaim:
+            claimName: gitlab-data
+        - name: gitlab-config
+          configMap:
+            name: gitlab-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gitlab
+  namespace: gitlab
+  labels:
+    app.kubernetes.io/name: gitlab
+    app.kubernetes.io/part-of: kube-world
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: gitlab
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+      nodePort: 30080
+    - name: https
+      port: 443
+      targetPort: 443
+      nodePort: 30443
+    - name: ssh
+      port: 22
+      targetPort: 22
+      nodePort: 30022

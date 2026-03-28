@@ -1,12 +1,13 @@
 # Flux GitRepository source
-# Points to the kube-world repository for GitOps synchronization
+# Points to the self-hosted GitLab on the central Pi node
 #
-# Currently uses GitHub (public). When GitLab is self-hosted on the central
-# node, update the URL and add authentication via secretRef.
+# GitLab runs natively on the Pi (systemd, not K8s) at port 80.
+# Flux accesses it via the K8s Service endpoint in the gitlab namespace,
+# or directly via the host IP.
 #
-# Migration path:
-#   Phase 1-3: GitHub (polling, 30s interval)
-#   Phase 4+:  Self-hosted GitLab (webhook, instant)
+# GitHub remains as a mirror (push to both remotes).
+# To revert to GitHub: change url back to https://github.com/jasondashaer/kube-world.git
+# and remove secretRef.
 ---
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: GitRepository
@@ -15,9 +16,9 @@ metadata:
   namespace: flux-system
 spec:
   interval: 30s
-  url: https://github.com/jasondashaer/kube-world.git
+  url: http://gitlab.10.5.5.249.nip.io/root/kube-world.git
   ref:
     branch: main
-  # For private repos or GitLab, uncomment:
-  # secretRef:
-  #   name: git-credentials
+  # GitLab repo is private — authenticate with token
+  secretRef:
+    name: gitlab-credentials

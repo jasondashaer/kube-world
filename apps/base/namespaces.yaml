@@ -12,6 +12,15 @@ metadata:
 apiVersion: v1
 kind: Namespace
 metadata:
+  name: gitlab
+  labels:
+    app.kubernetes.io/name: gitlab
+    app.kubernetes.io/part-of: kube-world
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
   name: monitoring
   labels:
     app.kubernetes.io/name: monitoring

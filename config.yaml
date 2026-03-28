@@ -51,7 +51,7 @@ deployment:
     kyverno_policies: true
     home_assistant: true
     monitoring: false     # Future: Prometheus/Grafana stack
-    gitlab: false         # Future: Self-hosted GitLab on central node
+    gitlab: true          # Self-hosted GitLab CE on central Pi node
 
 #===============================================================================
 # Karmada Configuration

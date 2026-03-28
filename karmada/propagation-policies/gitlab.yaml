@@ -1,0 +1,42 @@
+# Karmada PropagationPolicy for GitLab
+# Ensures GitLab runs ONLY on the central management node
+#
+# GitLab is a control plane service, not an edge workload.
+# It must run on the central Pi with sufficient RAM and NVMe storage.
+---
+apiVersion: policy.karmada.io/v1alpha1
+kind: PropagationPolicy
+metadata:
+  name: gitlab
+  namespace: gitlab
+spec:
+  resourceSelectors:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: gitlab
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      name: gitlab-data
+    - apiVersion: v1
+      kind: Service
+      name: gitlab
+    - apiVersion: v1
+      kind: ConfigMap
+      name: gitlab-config
+
+  placement:
+    clusterAffinity:
+      labelSelector:
+        matchExpressions:
+          - key: node.kubernetes.io/role
+            operator: In
+            values:
+              - master
+          - key: topology.kubernetes.io/zone
+            operator: In
+            values:
+              - edge
+    spreadConstraints:
+      - spreadByField: cluster
+        maxGroups: 1
+        minGroups: 1

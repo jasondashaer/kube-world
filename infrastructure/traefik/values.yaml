@@ -1,0 +1,65 @@
+# Traefik Ingress Controller - Pi-optimized values
+# Deployed via Helm in the kube-system namespace
+#
+# Uses NodePort service (not hostNetwork) to avoid permission issues
+# with privileged ports on Pi. Access via:
+#   http://<pi-ip>:30080  (HTTP)
+#   https://<pi-ip>:30443 (HTTPS)
+#
+# When a proper domain + Tailscale is configured, these ports
+# can be made transparent via iptables or switched to hostNetwork
+# with root capabilities.
+
+# Resource constraints for Pi 5
+resources:
+  requests:
+    cpu: "50m"
+    memory: "64Mi"
+  limits:
+    cpu: "500m"
+    memory: "256Mi"
+
+# Single replica (single-node cluster)
+deployment:
+  replicas: 1
+
+# Ports configuration
+ports:
+  traefik:
+    port: 9000
+    expose:
+      default: false
+  web:
+    port: 8000
+    expose:
+      default: true
+    nodePort: 30080
+  websecure:
+    port: 8443
+    expose:
+      default: true
+    nodePort: 30443
+
+# NodePort service type
+service:
+  type: NodePort
+
+# Access logs (lightweight)
+logs:
+  access:
+    enabled: true
+    format: json
+
+# Dashboard (accessible via port-forward only)
+ingressRoute:
+  dashboard:
+    enabled: false
+
+# Providers
+providers:
+  kubernetesIngress:
+    enabled: true
+    publishedService:
+      enabled: false
+  kubernetesCRD:
+    enabled: true

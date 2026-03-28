@@ -1,0 +1,26 @@
+# GitLab Ingress via Traefik
+# Routes external traffic to native GitLab on port 8180
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gitlab
+  namespace: gitlab
+  labels:
+    app.kubernetes.io/name: gitlab
+    app.kubernetes.io/part-of: kube-world
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: gitlab.10.5.5.249.nip.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gitlab
+                port:
+                  number: 80

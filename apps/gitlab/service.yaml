@@ -8,7 +8,7 @@
 # with the full K8s deployment (see deployment.yaml.amd64-future).
 #
 # GitLab listens on the host at:
-#   - HTTP: port 80 (external_url: http://gitlab.<PI_IP>.nip.io)
+#   - HTTP: port 8180 (behind Traefik ingress on port 80)
 #   - SSH:  port 22
 ---
 apiVersion: v1
@@ -26,7 +26,7 @@ subsets:
       - ip: "10.5.5.249"
     ports:
       - name: http
-        port: 80
+        port: 8180
         protocol: TCP
       - name: ssh
         port: 22

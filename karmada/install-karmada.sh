@@ -149,9 +149,10 @@ install_karmada() {
     karmadactl init \
         --kubeconfig="${KUBECONFIG_PATH}" \
         --karmada-data="${KARMADA_DATA_DIR}" \
+        --karmada-pki="${KARMADA_DATA_DIR}/pki" \
         --karmada-apiserver-replicas="${KARMADA_APISERVER_REPLICAS}" \
         --etcd-replicas="${KARMADA_ETCD_REPLICAS}" \
-        ${extra_args}
+        --etcd-storage-mode=hostPath
 
     log "Karmada control plane installed"
 }

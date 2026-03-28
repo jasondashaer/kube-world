@@ -116,6 +116,17 @@
         line: "127.0.1.1 {{ node_name | default(inventory_hostname) }}"
         state: present
 
+    - name: Ensure br_netfilter module is loaded
+      modprobe:
+        name: br_netfilter
+        state: present
+
+    - name: Persist br_netfilter module
+      lineinfile:
+        path: /etc/modules-load.d/k8s.conf
+        line: br_netfilter
+        create: yes
+
     - name: Configure kernel parameters for Kubernetes
       sysctl:
         name: "{{ item.key }}"
@@ -128,17 +139,6 @@
         - { key: 'net.bridge.bridge-nf-call-ip6tables', value: '1' }
         - { key: 'net.ipv4.ip_forward', value: '1' }
         - { key: 'vm.swappiness', value: '0' }
-
-    - name: Ensure br_netfilter module is loaded
-      modprobe:
-        name: br_netfilter
-        state: present
-
-    - name: Persist br_netfilter module
-      lineinfile:
-        path: /etc/modules-load.d/k8s.conf
-        line: br_netfilter
-        create: yes
 
     - name: Disable swap
       command: swapoff -a

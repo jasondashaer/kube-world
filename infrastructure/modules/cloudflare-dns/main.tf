@@ -1,12 +1,12 @@
 # Cloudflare DNS Module for kube-world
 #
-# Manages the kbw.dev domain zone and DNS records on Cloudflare.
+# Manages the kubew.dev domain zone and DNS records on Cloudflare.
 # Domain registration is done via Cloudflare dashboard (not Terraform).
 # This module manages the zone and records after registration.
 #
 # Split DNS strategy:
-#   - Cloudflare manages public kbw.dev zone
-#   - Tailscale MagicDNS resolves *.kbw.dev to Tailscale IPs within tailnet
+#   - Cloudflare manages public kubew.dev zone
+#   - Tailscale MagicDNS resolves *.kubew.dev to Tailscale IPs within tailnet
 #   - Cloudflare Tunnels expose specific services publicly when needed
 
 terraform {
@@ -27,7 +27,7 @@ variable "cloudflare_api_token" {
 variable "domain" {
   description = "Primary domain name"
   type        = string
-  default     = "kbw.dev"
+  default     = "kubew.dev"
 }
 
 variable "cloudflare_account_id" {

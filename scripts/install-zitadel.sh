@@ -6,7 +6,7 @@
 #
 # Usage:
 #   ./scripts/install-zitadel.sh --pi-ip 10.5.5.249
-#   ./scripts/install-zitadel.sh --pi-ip 10.5.5.249 --domain auth.kbw.dev
+#   ./scripts/install-zitadel.sh --pi-ip 10.5.5.249 --domain auth.kubew.dev
 #   ./scripts/install-zitadel.sh --dry-run
 #
 # Prerequisites:
@@ -24,7 +24,7 @@ PI_IP="${PI_IP:-10.5.5.249}"
 PI_USER="${PI_USER:-admin}"
 ZITADEL_VERSION="${ZITADEL_VERSION:-2.67.1}"
 ZITADEL_PORT="${ZITADEL_PORT:-8080}"
-ZITADEL_DOMAIN="${ZITADEL_DOMAIN:-auth.kbw.dev}"
+ZITADEL_DOMAIN="${ZITADEL_DOMAIN:-auth.kubew.dev}"
 ZITADEL_DB_NAME="${ZITADEL_DB_NAME:-zitadel}"
 ZITADEL_DB_USER="${ZITADEL_DB_USER:-zitadel}"
 DRY_RUN="${DRY_RUN:-false}"
@@ -394,7 +394,7 @@ main() {
   log ""
   log "Next steps:"
   log "  1. Access Zitadel UI and change admin password"
-  log "  2. Configure Traefik HTTPRoute for auth.kbw.dev"
+  log "  2. Configure Traefik HTTPRoute for auth.kubew.dev"
   log "  3. Set up OIDC client for K3s API server"
   log "  4. Set up OIDC client for Rancher"
   log "  5. Set up OIDC client for GitLab"

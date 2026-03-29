@@ -19,7 +19,7 @@ spec:
     - name: kube-world-gateway
       namespace: kube-system
   hostnames:
-    - "rancher.kbw.dev"
+    - "rancher.kubew.dev"
     - "rancher.10.5.5.249.nip.io"
   rules:
     - matches:

@@ -17,7 +17,7 @@ spec:
     - name: kube-world-gateway
       namespace: kube-system
   hostnames:
-    - "ha.kbw.dev"
+    - "ha.kubew.dev"
   rules:
     - matches:
         - path:

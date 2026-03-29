@@ -1,0 +1,31 @@
+# Rancher HTTPRoute via Gateway API
+# Routes external HTTPS traffic to Rancher management UI
+#
+# Rancher runs in cattle-system namespace on the central Pi.
+# TLS is terminated by Rancher itself (self-signed cert), so
+# this route uses HTTP backendRef on port 80, letting Rancher
+# handle its own TLS internally.
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: rancher
+  namespace: cattle-system
+  labels:
+    app.kubernetes.io/name: rancher
+    app.kubernetes.io/part-of: kube-world
+spec:
+  parentRefs:
+    - name: kube-world-gateway
+      namespace: kube-system
+  hostnames:
+    - "rancher.kbw.dev"
+    - "rancher.10.5.5.249.nip.io"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: rancher
+          port: 80

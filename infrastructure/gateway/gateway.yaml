@@ -1,0 +1,37 @@
+# Shared Gateway resource for kube-world
+#
+# All HTTPRoutes reference this Gateway. To switch ingress
+# implementations (e.g., Traefik → Istio), change gatewayClassName
+# here — no changes needed on individual HTTPRoutes.
+#
+# Gateway API is the Kubernetes-native standard (GA v1.1.0+)
+# supported by Traefik, Istio, Cilium, Nginx, and others.
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: kube-world-gateway
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/part-of: kube-world
+spec:
+  # Change to "istio" when migrating to Istio
+  gatewayClassName: traefik
+  listeners:
+    - name: http
+      port: 8000
+      protocol: HTTP
+      allowedRoutes:
+        namespaces:
+          from: All
+    - name: https
+      port: 8443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: kube-world-tls
+            kind: Secret
+      allowedRoutes:
+        namespaces:
+          from: All

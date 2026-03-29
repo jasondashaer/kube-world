@@ -40,6 +40,12 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.6"
     }
+
+    # Cloudflare (DNS, Tunnels)
+    cloudflare = {
+      source  = "cloudflare/cloudflare"
+      version = "~> 4.0"
+    }
   }
   
   # Backend configuration - override in environments

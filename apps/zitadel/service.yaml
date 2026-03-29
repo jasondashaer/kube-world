@@ -1,0 +1,41 @@
+# Zitadel Identity Provider Service Endpoint for Kubernetes
+#
+# Zitadel runs natively on the Pi host (systemd) because we want
+# it lightweight (~512MB) without container overhead on the central node.
+# This Service + Endpoints pair makes Zitadel reachable from within K8s.
+#
+# Zitadel listens on the host at:
+#   - HTTP: port 8080 (behind Traefik ingress)
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: zitadel
+  namespace: zitadel
+  labels:
+    app.kubernetes.io/name: zitadel
+    app.kubernetes.io/part-of: kube-world
+subsets:
+  - addresses:
+      - ip: "10.5.5.249"
+    ports:
+      - name: http
+        port: 8080
+        protocol: TCP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zitadel
+  namespace: zitadel
+  labels:
+    app.kubernetes.io/name: zitadel
+    app.kubernetes.io/part-of: kube-world
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+      protocol: TCP

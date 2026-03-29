@@ -1,0 +1,159 @@
+# GitLab CI/CD Pipeline for kube-world
+#
+# Runs on the self-hosted Pi runner (shell executor).
+# Sends pass/fail notifications to ntfy on every pipeline.
+#
+# Stages: lint → validate → security → test → notify
+
+stages:
+  - lint
+  - validate
+  - security
+  - test
+  - notify
+
+variables:
+  NTFY_URL: "http://localhost:8090/kube-world"
+
+# ─────────────────────────────────────────────────────────────
+# Lint Stage
+# ─────────────────────────────────────────────────────────────
+yamllint:
+  stage: lint
+  tags: [shell]
+  script:
+    - yamllint -c .yamllint.yml .
+
+shellcheck:
+  stage: lint
+  tags: [shell]
+  script:
+    - |
+      find . -name '*.sh' -type f -not -path './.git/*' | while read -r f; do
+        echo "Checking: $f"
+        shellcheck --severity=error "$f"
+      done
+
+# ─────────────────────────────────────────────────────────────
+# Validate Stage
+# ─────────────────────────────────────────────────────────────
+validate-k8s:
+  stage: validate
+  tags: [shell]
+  script:
+    - >-
+      find apps/ -name '*.yaml' -type f
+      ! -name 'fleet.yaml' ! -name '*.amd64-future'
+      | xargs kubeconform -summary -strict
+      -ignore-missing-schemas
+    - >-
+      find policies/ -name '*.yaml' -type f
+      | xargs kubeconform -summary -ignore-missing-schemas
+      -schema-location default
+
+ansible-lint:
+  stage: validate
+  tags: [shell]
+  script:
+    - |
+      ansible-lint pi-setup/ansible/playbook.yml --profile production || {
+        EXIT_CODE=$?
+        if [ $EXIT_CODE -eq 2 ]; then
+          echo "Ansible lint found warnings (non-blocking)"
+          exit 0
+        fi
+        exit $EXIT_CODE
+      }
+
+# ─────────────────────────────────────────────────────────────
+# Security Stage
+# ─────────────────────────────────────────────────────────────
+secrets-scan:
+  stage: security
+  tags: [shell]
+  script:
+    - echo "Scanning for potential hardcoded secrets..."
+    # SSH private keys
+    - |
+      if grep -rn "PRIVATE KEY" \
+        --include="*.yaml" --include="*.yml" --include="*.sh" \
+        . 2>/dev/null | grep -v ".git"; then
+        echo "ERROR: Potential SSH private key found"
+        exit 1
+      fi
+    # AWS keys
+    - |
+      if grep -rn "AKIA[A-Z0-9]\{16\}" \
+        --include="*.yaml" --include="*.yml" --include="*.sh" \
+        . 2>/dev/null | grep -v ".git"; then
+        echo "ERROR: Potential AWS access key found"
+        exit 1
+      fi
+    # Generic password patterns
+    - |
+      if grep -rn "password.*=.*['\"][^${}]" \
+        --include="*.yaml" --include="*.yml" \
+        . 2>/dev/null | grep -v ".git" \
+        | grep -v "SOPS" | grep -v "placeholder" \
+        | grep -v "example" | grep -v "CHANGE"; then
+        echo "WARNING: Potential hardcoded password"
+      fi
+    - echo "Secrets scan completed"
+
+# ─────────────────────────────────────────────────────────────
+# Test Stage
+# ─────────────────────────────────────────────────────────────
+test-scripts:
+  stage: test
+  tags: [shell]
+  script:
+    - bash -n bootstrap.sh
+    - bash -n pi-setup/pi-prep.sh
+    - bash -n rancher/install-rancher.sh
+    - bash -n scripts/install-zitadel.sh
+    - |
+      find scripts/ -name '*.sh' -type f | while read -r f; do
+        echo "Syntax check: $f"
+        bash -n "$f"
+      done
+    - echo "All script syntax checks passed"
+
+test-bootstrap-dryrun:
+  stage: test
+  tags: [shell]
+  script:
+    - chmod +x bootstrap.sh
+    - ./bootstrap.sh --help
+    - ./bootstrap.sh --dry-run --platform pi --verbose
+
+# ─────────────────────────────────────────────────────────────
+# Notify Stage — sends results to ntfy
+# ─────────────────────────────────────────────────────────────
+notify-success:
+  stage: notify
+  tags: [shell]
+  when: on_success
+  script:
+    - |
+      curl -sf -d "Pipeline #${CI_PIPELINE_IID} passed
+      Branch: ${CI_COMMIT_REF_NAME}
+      Commit: ${CI_COMMIT_SHORT_SHA} - ${CI_COMMIT_TITLE}" \
+        -H "Title: CI Passed" \
+        -H "Priority: default" \
+        -H "Tags: white_check_mark" \
+        "${NTFY_URL}" || true
+
+notify-failure:
+  stage: notify
+  tags: [shell]
+  when: on_failure
+  script:
+    - |
+      curl -sf -d "Pipeline #${CI_PIPELINE_IID} FAILED
+      Branch: ${CI_COMMIT_REF_NAME}
+      Commit: ${CI_COMMIT_SHORT_SHA} - ${CI_COMMIT_TITLE}
+      See: ${CI_PIPELINE_URL}" \
+        -H "Title: CI FAILED" \
+        -H "Priority: high" \
+        -H "Tags: x" \
+        "${NTFY_URL}" || true

@@ -1,222 +1,353 @@
 #!/usr/bin/env bash
 #===============================================================================
-# Rancher Cluster Import Helper
-# Imports a downstream cluster (e.g., RPi K3s) into Rancher management
-#
-# USAGE:
-#   # From RPi or any downstream cluster:
-#   ./import-cluster.sh <rancher-import-url>
-#
-#   # Or specify Rancher host directly:
-#   RANCHER_HOST=rancher.192.168.1.50.nip.io ./import-cluster.sh
+# Rancher Cluster Import (Programmatic)
+# Creates an imported cluster in Rancher via API and applies the agent manifest
+# to the target cluster. Runs from the operator's workstation (not on the Pi).
 #
 # PREREQUISITES:
-#   - kubectl configured with access to the cluster being imported
-#   - Network connectivity to Rancher server
+#   - Rancher running with ingress.tls.source=secret, privateCA=false
+#   - agent-tls-mode=system-store in Rancher settings
+#   - RANCHER_TOKEN env var (Rancher API token, e.g., token-xxxxx:yyyyyyy)
+#   - Target cluster kubeconfig accessible locally
+#   - Target cluster can reach Rancher via Tailscale or direct network
 #
+# USAGE:
+#   ./import-cluster.sh --name pi-edge-1 --kubeconfig ~/.kube/pi-edge-1-config
+#   ./import-cluster.sh --name pi-edge-1 --pi-ip 10.5.5.136
+#
+# ENVIRONMENT:
+#   RANCHER_URL       Rancher server URL (default: https://rancher.kubew.dev)
+#   RANCHER_TOKEN     Rancher API bearer token (required)
 #===============================================================================
 set -euo pipefail
 
-# Colors
-RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+RED='\033[0;31m'
 NC='\033[0m'
 
-log() { echo -e "${GREEN}[IMPORT]${NC} $*"; }
-warn() { echo -e "${YELLOW}[IMPORT]${NC} $*"; }
+log()   { echo -e "${GREEN}[IMPORT]${NC} $*"; }
+warn()  { echo -e "${YELLOW}[IMPORT]${NC} $*"; }
 error() { echo -e "${RED}[IMPORT]${NC} $*" >&2; }
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Defaults
+RANCHER_URL="${RANCHER_URL:-https://rancher.kubew.dev}"
+RANCHER_TOKEN="${RANCHER_TOKEN:-}"
+CLUSTER_NAME=""
+CLUSTER_KUBECONFIG=""
+PI_IP=""
+CLUSTER_LABELS="topology.kubernetes.io/zone=edge,hardware=raspberry-pi-5,workload-type=iot"
+CLUSTER_DESCRIPTION=""
 
 #===============================================================================
-# Load Rancher info if available
+# Parse Arguments
 #===============================================================================
-load_rancher_info() {
-    local info_file="${SCRIPT_DIR}/.rancher-info"
-    if [[ -f "$info_file" ]]; then
-        log "Loading Rancher configuration from ${info_file}"
-        # shellcheck source=/dev/null
-        source "$info_file"
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --name)           CLUSTER_NAME="$2"; shift 2 ;;
+            --kubeconfig)     CLUSTER_KUBECONFIG="$2"; shift 2 ;;
+            --pi-ip)          PI_IP="$2"; shift 2 ;;
+            --labels)         CLUSTER_LABELS="$2"; shift 2 ;;
+            --description)    CLUSTER_DESCRIPTION="$2"; shift 2 ;;
+            --rancher-url)    RANCHER_URL="$2"; shift 2 ;;
+            --rancher-token)  RANCHER_TOKEN="$2"; shift 2 ;;
+            -h|--help)
+                echo "Usage: $0 --name <cluster-name> [options]"
+                echo ""
+                echo "Options:"
+                echo "  --name <name>           Cluster name in Rancher (required)"
+                echo "  --kubeconfig <path>     Path to target cluster kubeconfig"
+                echo "  --pi-ip <ip>            Pi IP (fetches kubeconfig via SSH)"
+                echo "  --labels <k=v,k=v>      Cluster labels (default: edge/pi-5/iot)"
+                echo "  --description <text>    Cluster description"
+                echo "  --rancher-url <url>     Rancher URL (default: \$RANCHER_URL)"
+                echo "  --rancher-token <token> Rancher API token (default: \$RANCHER_TOKEN)"
+                echo ""
+                echo "Environment:"
+                echo "  RANCHER_URL    Rancher server URL"
+                echo "  RANCHER_TOKEN  Rancher API bearer token"
+                exit 0
+                ;;
+            *) error "Unknown option: $1"; exit 1 ;;
+        esac
+    done
+
+    if [[ -z "$CLUSTER_NAME" ]]; then
+        error "--name is required"
+        exit 1
+    fi
+
+    if [[ -z "$RANCHER_TOKEN" ]]; then
+        error "RANCHER_TOKEN env var or --rancher-token is required"
+        error "Create one at: ${RANCHER_URL}/dashboard/account"
+        exit 1
     fi
 }
 
 #===============================================================================
-# Test connectivity to Rancher
+# Fetch kubeconfig from Pi via SSH
 #===============================================================================
-test_rancher_connectivity() {
-    local rancher_host="$1"
-
-    log "Testing connectivity to ${rancher_host}..."
-
-    # Extract IP from hostname for ping test
-    local ip_addr
-    if [[ "$rancher_host" =~ ([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+) ]]; then
-        ip_addr="${BASH_REMATCH[1]}"
-        log "  Pinging ${ip_addr}..."
-        if ping -c 1 -W 2 "$ip_addr" &>/dev/null; then
-            log "  ✓ Host is reachable"
+fetch_kubeconfig() {
+    if [[ -n "$PI_IP" && -z "$CLUSTER_KUBECONFIG" ]]; then
+        CLUSTER_KUBECONFIG="${HOME}/.kube/${CLUSTER_NAME}-config"
+        log "Fetching kubeconfig from ${PI_IP}..."
+        if scp -o ConnectTimeout=10 "admin@${PI_IP}:/etc/rancher/k3s/k3s.yaml" "${CLUSTER_KUBECONFIG}" 2>/dev/null; then
+            if [[ "$(uname -s)" == "Darwin" ]]; then
+                sed -i '' "s/127.0.0.1/${PI_IP}/g" "${CLUSTER_KUBECONFIG}"
+            else
+                sed -i "s/127.0.0.1/${PI_IP}/g" "${CLUSTER_KUBECONFIG}"
+            fi
+            log "Kubeconfig saved to ${CLUSTER_KUBECONFIG}"
         else
-            warn "  ✗ Ping failed - host may be blocking ICMP or unreachable"
+            error "Failed to fetch kubeconfig from ${PI_IP}"
+            exit 1
         fi
     fi
+}
 
-    # Test HTTPS connectivity
-    log "  Testing HTTPS connectivity..."
-    local http_code
-    http_code=$(curl -k -s -o /dev/null -w "%{http_code}" "https://${rancher_host}/ping" 2>/dev/null || echo "000")
+#===============================================================================
+# Verify Rancher API access
+#===============================================================================
+verify_rancher() {
+    log "Verifying Rancher API access..."
+    local ping_result
+    ping_result=$(curl -sk --connect-timeout 5 "${RANCHER_URL}/ping" 2>/dev/null)
+    if [[ "$ping_result" != "pong" ]]; then
+        error "Cannot reach Rancher at ${RANCHER_URL}"
+        exit 1
+    fi
 
-    if [[ "$http_code" == "200" ]]; then
-        log "  ✓ Rancher is responding (HTTP ${http_code})"
-        return 0
-    elif [[ "$http_code" == "000" ]]; then
-        error "  ✗ Cannot connect to Rancher (connection refused or timeout)"
-        error ""
-        error "  Troubleshooting:"
-        error "    1. Verify Rancher is running: kubectl -n cattle-system get pods"
-        error "    2. Check Mac firewall allows ports 80, 443"
-        error "    3. Verify RPi can reach Mac: ping <mac-ip>"
-        error "    4. Check KIND ports: docker port kube-world-control-plane"
-        return 1
-    else
-        warn "  ⚠ Rancher responded with HTTP ${http_code}"
-        return 0
+    # Verify token
+    local user
+    user=$(curl -sk "${RANCHER_URL}/v3/users?me=true" \
+        -H "Authorization: Bearer ${RANCHER_TOKEN}" 2>/dev/null \
+        | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data'][0]['username'])" 2>/dev/null)
+    if [[ -z "$user" ]]; then
+        error "Rancher API token is invalid"
+        exit 1
+    fi
+    log "Authenticated as: ${user}"
+}
+
+#===============================================================================
+# Check if cluster already exists
+#===============================================================================
+check_existing() {
+    local existing
+    existing=$(curl -sk "${RANCHER_URL}/v3/clusters?name=${CLUSTER_NAME}" \
+        -H "Authorization: Bearer ${RANCHER_TOKEN}" 2>/dev/null \
+        | python3 -c "
+import sys,json
+d = json.load(sys.stdin)
+for c in d.get('data', []):
+    if c.get('state') != 'removing':
+        print(c['id'])
+        break
+" 2>/dev/null)
+
+    if [[ -n "$existing" ]]; then
+        log "Cluster '${CLUSTER_NAME}' already exists (${existing})"
+        # Check state
+        local state
+        state=$(curl -sk "${RANCHER_URL}/v3/clusters/${existing}" \
+            -H "Authorization: Bearer ${RANCHER_TOKEN}" 2>/dev/null \
+            | python3 -c "import sys,json; print(json.load(sys.stdin)['state'])" 2>/dev/null)
+        if [[ "$state" == "active" ]]; then
+            log "Cluster is already active. Nothing to do."
+            exit 0
+        fi
+        warn "Cluster state: ${state}. Re-importing..."
+        # Delete and recreate
+        curl -sk -X DELETE "${RANCHER_URL}/v3/clusters/${existing}" \
+            -H "Authorization: Bearer ${RANCHER_TOKEN}" 2>/dev/null > /dev/null
+        # Clean up agent on target
+        if [[ -n "$CLUSTER_KUBECONFIG" ]]; then
+            kubectl --kubeconfig="${CLUSTER_KUBECONFIG}" delete namespace cattle-system --ignore-not-found --wait=false 2>/dev/null || true
+            kubectl --kubeconfig="${CLUSTER_KUBECONFIG}" delete clusterrole cattle-admin proxy-clusterrole-kubeapiserver --ignore-not-found 2>/dev/null || true
+            kubectl --kubeconfig="${CLUSTER_KUBECONFIG}" delete clusterrolebinding cattle-admin-binding proxy-role-binding-kubernetes-master --ignore-not-found 2>/dev/null || true
+        fi
+        sleep 10
     fi
 }
 
 #===============================================================================
-# Fetch and apply import manifest
+# Create imported cluster in Rancher
 #===============================================================================
-import_cluster() {
-    local import_url="$1"
+create_cluster() {
+    log "Creating cluster '${CLUSTER_NAME}' in Rancher..."
 
-    log "Importing cluster from: ${import_url}"
-
-    # Determine if we need --insecure flag
-    local curl_opts="-sfL"
-    if [[ "${RANCHER_INSECURE:-true}" == "true" ]]; then
-        curl_opts="-k -sfL"
-        log "Using insecure mode (self-signed certificates)"
+    # Build labels JSON
+    local labels_json="{}"
+    if [[ -n "$CLUSTER_LABELS" ]]; then
+        labels_json=$(python3 -c "
+import json
+labels = {}
+for pair in '${CLUSTER_LABELS}'.split(','):
+    k, v = pair.split('=', 1)
+    labels[k] = v
+print(json.dumps(labels))
+")
     fi
 
-    # Fetch the import manifest
-    log "Fetching import manifest..."
-    local manifest
-    if ! manifest=$(curl $curl_opts "$import_url" 2>&1); then
-        error "Failed to fetch import manifest from Rancher"
-        error "Response: ${manifest}"
-        error ""
-        error "Common causes:"
-        error "  - Import URL has expired (regenerate in Rancher UI)"
-        error "  - Rancher hostname not resolvable from this machine"
-        error "  - Certificate issues (try RANCHER_INSECURE=true)"
-        return 1
+    local response
+    response=$(curl -sk -X POST "${RANCHER_URL}/v3/clusters" \
+        -H "Authorization: Bearer ${RANCHER_TOKEN}" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"type\": \"cluster\",
+            \"name\": \"${CLUSTER_NAME}\",
+            \"description\": \"${CLUSTER_DESCRIPTION:-${CLUSTER_NAME} edge cluster}\",
+            \"labels\": ${labels_json}
+        }" 2>/dev/null)
+
+    CLUSTER_ID=$(echo "$response" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])" 2>/dev/null)
+    if [[ -z "$CLUSTER_ID" ]]; then
+        error "Failed to create cluster"
+        echo "$response" >&2
+        exit 1
     fi
-
-    # Verify we got valid YAML
-    if ! echo "$manifest" | head -1 | grep -q "^apiVersion\|^---\|^kind"; then
-        error "Received invalid manifest (not YAML)"
-        error "Content preview: $(echo "$manifest" | head -5)"
-        return 1
-    fi
-
-    log "Manifest fetched successfully ($(echo "$manifest" | wc -l | tr -d ' ') lines)"
-
-    # Apply to cluster
-    log "Applying import manifest to cluster..."
-    if echo "$manifest" | kubectl apply -f -; then
-        log "✓ Import manifest applied successfully!"
-    else
-        error "Failed to apply import manifest"
-        return 1
-    fi
-
-    # Wait for cattle-cluster-agent
-    log "Waiting for Rancher agent to start..."
-    sleep 5
-
-    local agent_ns="cattle-system"
-    if kubectl get namespace cattle-system &>/dev/null; then
-        log "Checking cattle-system namespace..."
-        kubectl -n cattle-system get pods 2>/dev/null || true
-    fi
-
-    echo ""
-    log "=============================================="
-    log "  Cluster Import Initiated!"
-    log "=============================================="
-    log ""
-    log "  The cluster agent is being deployed."
-    log "  Check Rancher UI for cluster status."
-    log ""
-    log "  Monitor agent status:"
-    log "    kubectl -n cattle-system get pods -w"
-    log ""
-    log "  View agent logs:"
-    log "    kubectl -n cattle-system logs -l app=cattle-cluster-agent -f"
-    log ""
+    log "Created cluster: ${CLUSTER_ID}"
 }
 
 #===============================================================================
-# Interactive mode - get import URL from Rancher API
+# Get registration manifest
 #===============================================================================
-interactive_import() {
-    local rancher_host="${RANCHER_HOST:-${RANCHER_HOSTNAME:-}}"
+get_manifest() {
+    log "Waiting for registration token..."
 
-    if [[ -z "$rancher_host" ]]; then
-        error "RANCHER_HOST not set. Please provide the Rancher hostname."
-        error ""
-        error "Usage:"
-        error "  RANCHER_HOST=rancher.192.168.1.50.nip.io $0"
-        error ""
-        error "Or provide the full import URL:"
-        error "  $0 https://rancher.example.com/v3/import/xxxx.yaml"
-        return 1
+    # Create registration token
+    curl -sk -X POST "${RANCHER_URL}/v3/clusterregistrationtokens" \
+        -H "Authorization: Bearer ${RANCHER_TOKEN}" \
+        -H "Content-Type: application/json" \
+        -d "{\"type\":\"clusterRegistrationToken\",\"clusterId\":\"${CLUSTER_ID}\"}" 2>/dev/null > /dev/null
+
+    # Wait for token to be populated
+    local attempts=0
+    local max_attempts=12
+    while [[ $attempts -lt $max_attempts ]]; do
+        REG_TOKEN=$(curl -sk "${RANCHER_URL}/v3/clusterregistrationtokens?clusterId=${CLUSTER_ID}" \
+            -H "Authorization: Bearer ${RANCHER_TOKEN}" 2>/dev/null \
+            | python3 -c "
+import sys,json
+d = json.load(sys.stdin)
+for item in d.get('data', []):
+    t = item.get('token', '')
+    if t: print(t); break
+" 2>/dev/null)
+
+        if [[ -n "$REG_TOKEN" ]]; then
+            break
+        fi
+        attempts=$((attempts + 1))
+        sleep 5
+    done
+
+    if [[ -z "$REG_TOKEN" ]]; then
+        error "Failed to get registration token after ${max_attempts} attempts"
+        exit 1
     fi
 
-    if ! test_rancher_connectivity "$rancher_host"; then
-        return 1
-    fi
+    MANIFEST_URL="${RANCHER_URL}/v3/import/${REG_TOKEN}_${CLUSTER_ID}.yaml"
+    log "Manifest URL: ${MANIFEST_URL}"
 
-    echo ""
-    log "To import this cluster:"
-    log ""
-    log "  1. Open Rancher: https://${rancher_host}"
-    log "  2. Go to: Cluster Management > Import Existing"
-    log "  3. Choose 'Generic', name your cluster"
-    log "  4. Copy the import URL and run:"
-    log ""
-    log "     $0 <paste-import-url-here>"
-    log ""
+    # Download manifest
+    MANIFEST_FILE="/tmp/rancher-import-${CLUSTER_NAME}.yaml"
+    curl -sk "$MANIFEST_URL" > "$MANIFEST_FILE"
+
+    if [[ ! -s "$MANIFEST_FILE" ]] || [[ $(wc -c < "$MANIFEST_FILE") -lt 500 ]]; then
+        error "Failed to download manifest (file too small)"
+        exit 1
+    fi
+    log "Manifest downloaded: ${MANIFEST_FILE}"
+}
+
+#===============================================================================
+# Apply manifest to target cluster
+#===============================================================================
+apply_manifest() {
+    log "Applying import manifest to ${CLUSTER_NAME}..."
+
+    # Wait for cattle-system namespace to be fully gone (if it was being deleted)
+    local ns_attempts=0
+    while kubectl --kubeconfig="${CLUSTER_KUBECONFIG}" get namespace cattle-system &>/dev/null 2>&1; do
+        if [[ $ns_attempts -gt 12 ]]; then
+            warn "cattle-system namespace still terminating, forcing..."
+            break
+        fi
+        ns_attempts=$((ns_attempts + 1))
+        sleep 5
+    done
+
+    kubectl --kubeconfig="${CLUSTER_KUBECONFIG}" apply -f "$MANIFEST_FILE"
+    log "Import manifest applied"
+}
+
+#===============================================================================
+# Wait for cluster to become active
+#===============================================================================
+wait_for_active() {
+    log "Waiting for cluster to become active..."
+
+    local timeout=300
+    local elapsed=0
+    while [[ $elapsed -lt $timeout ]]; do
+        local state
+        state=$(curl -sk "${RANCHER_URL}/v3/clusters/${CLUSTER_ID}" \
+            -H "Authorization: Bearer ${RANCHER_TOKEN}" 2>/dev/null \
+            | python3 -c "import sys,json; print(json.load(sys.stdin)['state'])" 2>/dev/null)
+
+        case "$state" in
+            active)
+                log "Cluster '${CLUSTER_NAME}' is ACTIVE in Rancher"
+                return 0
+                ;;
+            waiting|pending|provisioning)
+                ;;
+            *)
+                warn "Unexpected state: ${state}"
+                ;;
+        esac
+
+        elapsed=$((elapsed + 10))
+        if (( elapsed % 30 == 0 )); then
+            log "  State: ${state} (${elapsed}/${timeout}s)"
+        fi
+        sleep 10
+    done
+
+    warn "Cluster did not become active after ${timeout}s"
+    warn "Current state: ${state}. Check Rancher UI for details."
+    return 1
 }
 
 #===============================================================================
 # Main
 #===============================================================================
 main() {
-    load_rancher_info
+    parse_args "$@"
 
-    if [[ $# -ge 1 ]]; then
-        local import_url="$1"
+    log "Importing '${CLUSTER_NAME}' into Rancher"
+    log "  Rancher: ${RANCHER_URL}"
+    log "  Labels:  ${CLUSTER_LABELS}"
 
-        # Validate URL format
-        if [[ ! "$import_url" =~ ^https?:// ]]; then
-            error "Invalid import URL. Must start with https://"
-            exit 1
-        fi
+    fetch_kubeconfig
+    verify_rancher
+    check_existing
+    create_cluster
+    get_manifest
+    apply_manifest
+    wait_for_active
 
-        # Extract hostname for connectivity test
-        local rancher_host
-        rancher_host=$(echo "$import_url" | sed -E 's|https?://([^/]+).*|\1|')
-
-        if test_rancher_connectivity "$rancher_host"; then
-            import_cluster "$import_url"
-        else
-            exit 1
-        fi
-    else
-        interactive_import
-    fi
+    echo ""
+    log "=============================================="
+    log "  Cluster Import Complete: ${CLUSTER_NAME}"
+    log "=============================================="
+    log "  Rancher UI: ${RANCHER_URL}/dashboard/c/${CLUSTER_ID}/explorer"
+    log "  Cluster ID: ${CLUSTER_ID}"
+    log "=============================================="
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

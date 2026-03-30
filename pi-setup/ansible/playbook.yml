@@ -260,6 +260,73 @@
             state: directory
             mode: '0755'
 
+- name: Install and configure Tailscale
+  hosts: k3s_cluster
+  become: yes
+  gather_facts: no
+  vars:
+    # Set TAILSCALE_AUTH_KEY env var or pass via --extra-vars
+    tailscale_auth_key: "{{ lookup('env', 'TAILSCALE_AUTH_KEY') }}"
+    # Central node's Tailscale IP for DNS resolution
+    central_tailscale_ip: "{{ lookup('env', 'CENTRAL_TAILSCALE_IP') | default('', true) }}"
+
+  tasks:
+    - name: Re-verify connectivity before Tailscale installation
+      wait_for_connection:
+        timeout: 30
+
+    - name: Check if Tailscale is already installed
+      command: which tailscale
+      register: tailscale_installed
+      failed_when: false
+      changed_when: false
+
+    - name: Install Tailscale
+      shell: curl -fsSL https://tailscale.com/install.sh | sh
+      when: tailscale_installed.rc != 0
+      retries: 3
+      delay: 10
+      register: ts_install
+      until: ts_install is success
+
+    - name: Authenticate Tailscale (headless)
+      shell: >
+        tailscale up
+        --authkey={{ tailscale_auth_key }}
+        --hostname={{ node_name }}
+        --accept-routes
+        --ssh
+        --timeout=30s
+      when:
+        - tailscale_auth_key | length > 0
+        - tailscale_installed.rc != 0
+      register: ts_auth
+
+    - name: Wait for Tailscale to connect
+      command: tailscale status --json
+      register: ts_status
+      until: ts_status.rc == 0
+      retries: 10
+      delay: 5
+      changed_when: false
+
+    - name: Get Tailscale IP
+      command: tailscale ip -4
+      register: tailscale_ip
+      changed_when: false
+
+    - name: Display Tailscale status
+      debug:
+        msg: "{{ node_name }} Tailscale IP: {{ tailscale_ip.stdout }}"
+
+    - name: Add kubew.dev DNS entries to /etc/hosts (central node resolution)
+      lineinfile:
+        path: /etc/hosts
+        regexp: '.*kubew\.dev'
+        line: "{{ central_tailscale_ip }} rancher.kubew.dev gitlab.kubew.dev"
+        state: present
+      when: central_tailscale_ip | length > 0
+
 - name: Install K3s on master nodes
   hosts: masters
   become: yes
@@ -510,6 +577,29 @@
       debug:
         var: edge_status.stdout_lines
 
+    - name: Add kubew.dev to CoreDNS NodeHosts (for Rancher agent)
+      shell: |
+        CENTRAL_TS_IP="{{ lookup('env', 'CENTRAL_TAILSCALE_IP') }}"
+        if [ -n "$CENTRAL_TS_IP" ]; then
+          HOSTS=$(kubectl -n kube-system get configmap coredns -o jsonpath='{.data.NodeHosts}')
+          if ! echo "$HOSTS" | grep -q "kubew.dev"; then
+            kubectl -n kube-system get configmap coredns -o json | \
+              python3 -c "
+import sys,json
+d = json.load(sys.stdin)
+hosts = d['data']['NodeHosts'].rstrip()
+hosts += '\n${CENTRAL_TS_IP} rancher.kubew.dev gitlab.kubew.dev\n'
+d['data']['NodeHosts'] = hosts
+json.dump(d, sys.stdout)
+" | kubectl apply -f -
+            kubectl -n kube-system rollout restart deploy/coredns
+          fi
+        fi
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      changed_when: false
+      ignore_errors: yes
+
     - name: Edge cluster ready
       debug:
         msg: |
@@ -517,7 +607,8 @@
           EDGE K3s CLUSTER READY: {{ node_name }}
           ============================================
           Independent K3s server installed.
-          Next: Register with Karmada on central node.
+          Tailscale connected. CoreDNS configured.
+          Next: Register with Karmada + Rancher.
           ============================================
 
 - name: Post-installation configuration

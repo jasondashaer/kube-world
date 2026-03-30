@@ -126,11 +126,19 @@ debug() { echo -e "${GRAY}[RANCHER]${NC} $*"; }
 #===============================================================================
 add_helm_repos() {
     log "Adding Helm repositories..."
-    
-    helm repo add rancher-stable https://releases.rancher.com/server-charts/stable 2>/dev/null || true
-    helm repo add jetstack https://charts.jetstack.io 2>/dev/null || true
-    helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx 2>/dev/null || true
-    helm repo update
+
+    # helm repo add returns non-zero if repo already exists — that's fine
+    helm repo add rancher-stable https://releases.rancher.com/server-charts/stable 2>/dev/null \
+        || debug "rancher-stable repo may already exist"
+    helm repo add jetstack https://charts.jetstack.io 2>/dev/null \
+        || debug "jetstack repo may already exist"
+    helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx 2>/dev/null \
+        || debug "ingress-nginx repo may already exist"
+
+    if ! helm repo update; then
+        error "Failed to update Helm repositories — check network connectivity"
+        return 1
+    fi
 }
 
 #===============================================================================
@@ -301,16 +309,20 @@ post_install() {
             # Wait for fleet-controller deployment
             if kubectl -n cattle-fleet-system get deployment fleet-controller &>/dev/null; then
                 log "Fleet controller deployment found, waiting for readiness..."
-                kubectl -n cattle-fleet-system rollout status deploy/fleet-controller --timeout=180s || true
+                if ! kubectl -n cattle-fleet-system rollout status deploy/fleet-controller --timeout=180s; then
+                    warn "Fleet controller rollout timed out — may still be starting"
+                fi
                 break
             fi
         fi
-        
+
         # Check for fleet-system as alternative namespace
         if kubectl get namespace fleet-system &>/dev/null; then
             if kubectl -n fleet-system get deployment fleet-controller &>/dev/null; then
                 log "Fleet controller deployment found in fleet-system, waiting..."
-                kubectl -n fleet-system rollout status deploy/fleet-controller --timeout=180s || true
+                if ! kubectl -n fleet-system rollout status deploy/fleet-controller --timeout=180s; then
+                    warn "Fleet controller rollout timed out — may still be starting"
+                fi
                 break
             fi
         fi

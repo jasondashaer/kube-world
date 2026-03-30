@@ -558,13 +558,15 @@
 
     - name: Install Helm on edge node
       shell: |
-        curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+        set -euo pipefail
+        curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
       args:
         creates: /usr/local/bin/helm
+        executable: /bin/bash
       register: helm_install
       retries: 3
       delay: 10
-      until: helm_install is success or helm_install is skipped
+      until: helm_install is success
 
     - name: Display edge cluster status
       command: kubectl get nodes -o wide
@@ -579,13 +581,20 @@
 
     - name: Add domain to CoreDNS NodeHosts (for Rancher agent)
       shell: |
+        set -euo pipefail
         CENTRAL_TS_IP="{{ lookup('env', 'CENTRAL_TAILSCALE_IP') }}"
         DOMAIN="{{ domain | default('kubew.dev') }}"
-        if [ -n "$CENTRAL_TS_IP" ]; then
-          HOSTS=$(kubectl -n kube-system get configmap coredns -o jsonpath='{.data.NodeHosts}')
-          if ! echo "$HOSTS" | grep -q "$DOMAIN"; then
-            kubectl -n kube-system get configmap coredns -o json | \
-              python3 -c "
+        if [ -z "$CENTRAL_TS_IP" ]; then
+          echo "CENTRAL_TAILSCALE_IP not set — skipping CoreDNS config"
+          exit 0
+        fi
+        HOSTS=$(kubectl -n kube-system get configmap coredns -o jsonpath='{.data.NodeHosts}')
+        if echo "$HOSTS" | grep -q "$DOMAIN"; then
+          echo "Domain entries already present in CoreDNS"
+          exit 0
+        fi
+        kubectl -n kube-system get configmap coredns -o json | \
+          python3 -c "
 import sys,json
 d = json.load(sys.stdin)
 hosts = d['data']['NodeHosts'].rstrip()
@@ -593,13 +602,15 @@ hosts += '\n${CENTRAL_TS_IP} rancher.${DOMAIN} gitlab.${DOMAIN}\n'
 d['data']['NodeHosts'] = hosts
 json.dump(d, sys.stdout)
 " | kubectl apply -f -
-            kubectl -n kube-system rollout restart deploy/coredns
-          fi
-        fi
+        kubectl -n kube-system rollout restart deploy/coredns
+        echo "CoreDNS updated with ${DOMAIN} entries"
+      args:
+        executable: /bin/bash
       environment:
         KUBECONFIG: /etc/rancher/k3s/k3s.yaml
-      changed_when: false
-      ignore_errors: yes
+      register: coredns_result
+      changed_when: "'updated' in coredns_result.stdout"
+      failed_when: coredns_result.rc != 0 and 'not set' not in coredns_result.stdout
 
     - name: Edge cluster ready
       debug:

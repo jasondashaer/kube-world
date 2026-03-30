@@ -973,8 +973,12 @@ deploy_tailscale_keys() {
 
     # Deploy key management CronJobs
     log "Deploying Tailscale key management CronJobs..."
-    kubectl apply -f "${SCRIPT_DIR}/apps/tailscale-rotate/cronjob.yaml"
-    log "Tailscale key management deployed ✓"
+    if kubectl apply -f "${SCRIPT_DIR}/apps/tailscale-rotate/cronjob.yaml"; then
+        log "Tailscale key management deployed ✓"
+    else
+        warn "Failed to deploy Tailscale key management CronJobs"
+        warn "Apply manually: kubectl apply -f apps/tailscale-rotate/cronjob.yaml"
+    fi
 }
 
 #===============================================================================
@@ -1014,7 +1018,9 @@ setup_gitops() {
     
     # Create Fleet clusters if needed
     if [[ -f "${SCRIPT_DIR}/gitops/clusters.yaml" ]]; then
-        kubectl apply -f "${SCRIPT_DIR}/gitops/clusters.yaml"
+        if ! kubectl apply -f "${SCRIPT_DIR}/gitops/clusters.yaml"; then
+            warn "Failed to apply Fleet clusters configuration"
+        fi
     fi
     
     log "GitOps setup complete ✓"
@@ -1077,15 +1083,21 @@ setup_flux() {
 
     # Apply GitRepository source
     log "Applying Flux GitRepository source..."
-    kubectl apply -f "${SCRIPT_DIR}/flux/sources/git-repository.yaml"
+    if ! kubectl apply -f "${SCRIPT_DIR}/flux/sources/git-repository.yaml"; then
+        error "Failed to apply Flux GitRepository source"
+        return 1
+    fi
 
     # Create the Karmada kubeconfig secret so Flux can target the Karmada API
     local karmada_config="${HOME}/.karmada/karmada-apiserver.config"
     if [[ -f "$karmada_config" ]]; then
         log "Creating Karmada kubeconfig secret for Flux..."
-        kubectl -n flux-system create secret generic karmada-kubeconfig \
+        if ! kubectl -n flux-system create secret generic karmada-kubeconfig \
             --from-file=value="${karmada_config}" \
-            --dry-run=client -o yaml | kubectl apply -f -
+            --dry-run=client -o yaml | kubectl apply -f -; then
+            warn "Failed to create Karmada kubeconfig secret for Flux"
+            warn "Flux kustomizations targeting Karmada will fail until this is created."
+        fi
     else
         warn "Karmada kubeconfig not found at ${karmada_config}"
         warn "Flux kustomizations targeting Karmada will fail until this is created."
@@ -1094,9 +1106,22 @@ setup_flux() {
 
     # Apply Flux kustomizations in dependency order
     log "Applying Flux kustomizations..."
-    kubectl apply -f "${SCRIPT_DIR}/flux/kustomizations/karmada-policies.yaml"
-    kubectl apply -f "${SCRIPT_DIR}/flux/kustomizations/policies.yaml"
-    kubectl apply -f "${SCRIPT_DIR}/flux/kustomizations/apps.yaml"
+    local flux_failed=0
+    if ! kubectl apply -f "${SCRIPT_DIR}/flux/kustomizations/karmada-policies.yaml"; then
+        warn "Failed to apply karmada-policies kustomization"
+        flux_failed=1
+    fi
+    if ! kubectl apply -f "${SCRIPT_DIR}/flux/kustomizations/policies.yaml"; then
+        warn "Failed to apply policies kustomization"
+        flux_failed=1
+    fi
+    if ! kubectl apply -f "${SCRIPT_DIR}/flux/kustomizations/apps.yaml"; then
+        warn "Failed to apply apps kustomization"
+        flux_failed=1
+    fi
+    if [[ "$flux_failed" -eq 1 ]]; then
+        warn "Some Flux kustomizations failed — check: flux get kustomizations -A"
+    fi
 
     # Verify Flux sources and kustomizations
     log "Flux sources:"
@@ -1120,11 +1145,20 @@ install_traefik() {
 
     # Install Gateway API CRDs (required before Traefik can use them)
     log "Installing Gateway API CRDs..."
-    kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.1.0/standard-install.yaml
+    if ! kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.1.0/standard-install.yaml; then
+        error "Failed to install Gateway API CRDs — network issue or invalid URL"
+        return 1
+    fi
 
     # Add Traefik Helm repo
-    helm repo add traefik https://traefik.github.io/charts 2>/dev/null || true
-    helm repo update
+    if ! helm repo add traefik https://traefik.github.io/charts 2>/dev/null; then
+        # Repo may already exist — try update anyway
+        debug "helm repo add returned non-zero (repo may already exist)"
+    fi
+    if ! helm repo update; then
+        error "Failed to update Helm repos — check network connectivity"
+        return 1
+    fi
 
     # Install Traefik with Pi-optimized values
     local traefik_values="${SCRIPT_DIR}/infrastructure/traefik/values.yaml"
@@ -1134,10 +1168,13 @@ install_traefik() {
     fi
 
     log "Installing Traefik Helm chart..."
-    helm upgrade --install traefik traefik/traefik \
+    if ! helm upgrade --install traefik traefik/traefik \
         --namespace kube-system \
         -f "$traefik_values" \
-        --wait --timeout 5m
+        --wait --timeout 5m; then
+        error "Traefik Helm install failed"
+        return 1
+    fi
 
     # Wait for Traefik pods
     kubectl -n kube-system wait --for=condition=Available deployment/traefik --timeout=120s
@@ -1145,7 +1182,10 @@ install_traefik() {
 
     # Apply the shared Gateway resource (HTTP + HTTPS listeners)
     log "Applying Gateway resource..."
-    kubectl apply -f "${SCRIPT_DIR}/infrastructure/gateway/gateway.yaml"
+    if ! kubectl apply -f "${SCRIPT_DIR}/infrastructure/gateway/gateway.yaml"; then
+        error "Failed to apply Gateway resource"
+        return 1
+    fi
     log "Gateway API configured ✓"
 }
 
@@ -1164,10 +1204,15 @@ create_secrets() {
     if kubectl -n cert-manager get secret cloudflare-api-token &>/dev/null; then
         log "Cloudflare API token secret already exists"
     elif [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]]; then
-        kubectl create namespace cert-manager --dry-run=client -o yaml | kubectl apply -f -
-        kubectl create secret generic cloudflare-api-token \
+        if ! kubectl create namespace cert-manager --dry-run=client -o yaml | kubectl apply -f -; then
+            warn "Failed to create cert-manager namespace"
+        fi
+        if ! kubectl create secret generic cloudflare-api-token \
             --from-literal=api-token="${CLOUDFLARE_API_TOKEN}" \
-            -n cert-manager --dry-run=client -o yaml | kubectl apply -f -
+            -n cert-manager --dry-run=client -o yaml | kubectl apply -f -; then
+            error "Failed to create Cloudflare API token secret"
+            return 1
+        fi
         log "Cloudflare API token secret created ✓"
     else
         warn "CLOUDFLARE_API_TOKEN not set — skipping cert-manager secret"
@@ -1198,12 +1243,17 @@ setup_cert_manager_le() {
     # Apply ClusterIssuer (Let's Encrypt + Cloudflare DNS-01)
     local issuer_file="${SCRIPT_DIR}/infrastructure/cert-manager/clusterissuer.yaml"
     if [[ -f "$issuer_file" ]]; then
+        local apply_ok=true
         if [[ -n "$DOMAIN" ]]; then
-            sed "s/kubew\.dev/${DOMAIN}/g" "$issuer_file" | kubectl apply -f -
+            sed "s/kubew\.dev/${DOMAIN}/g" "$issuer_file" | kubectl apply -f - || apply_ok=false
         else
-            kubectl apply -f "$issuer_file"
+            kubectl apply -f "$issuer_file" || apply_ok=false
         fi
-        log "ClusterIssuer applied ✓"
+        if [[ "$apply_ok" == "true" ]]; then
+            log "ClusterIssuer applied ✓"
+        else
+            warn "Failed to apply ClusterIssuer — TLS certs won't be issued"
+        fi
     else
         warn "ClusterIssuer file not found: ${issuer_file}"
     fi
@@ -1211,12 +1261,17 @@ setup_cert_manager_le() {
     # Apply Certificate (*.<domain> wildcard)
     local cert_file="${SCRIPT_DIR}/infrastructure/cert-manager/certificate.yaml"
     if [[ -f "$cert_file" ]]; then
+        local apply_ok=true
         if [[ -n "$DOMAIN" ]]; then
-            sed "s/kubew\.dev/${DOMAIN}/g" "$cert_file" | kubectl apply -f -
+            sed "s/kubew\.dev/${DOMAIN}/g" "$cert_file" | kubectl apply -f - || apply_ok=false
         else
-            kubectl apply -f "$cert_file"
+            kubectl apply -f "$cert_file" || apply_ok=false
         fi
-        log "Wildcard certificate requested ✓"
+        if [[ "$apply_ok" == "true" ]]; then
+            log "Wildcard certificate requested ✓"
+        else
+            warn "Failed to apply Certificate — TLS certs won't be issued"
+        fi
     else
         warn "Certificate file not found: ${cert_file}"
     fi
@@ -1243,12 +1298,17 @@ setup_httproutes() {
             debug "Gateway file not found: ${file}"
             return
         fi
+        local apply_ok=true
         if [[ -n "${DOMAIN:-}" ]]; then
-            sed "s/kubew\.dev/${DOMAIN}/g" "$file" | kubectl apply -f -
+            sed "s/kubew\.dev/${DOMAIN}/g" "$file" | kubectl apply -f - || apply_ok=false
         else
-            kubectl apply -f "$file"
+            kubectl apply -f "$file" || apply_ok=false
         fi
-        log "${label} HTTPRoute applied ✓"
+        if [[ "$apply_ok" == "true" ]]; then
+            log "${label} HTTPRoute applied ✓"
+        else
+            warn "Failed to apply ${label} HTTPRoute"
+        fi
     }
 
     # Rancher HTTPRoute
@@ -1256,9 +1316,12 @@ setup_httproutes() {
 
     # GitLab HTTPRoute + Service/Endpoints (native GitLab on host)
     if [[ -f "${SCRIPT_DIR}/apps/gitlab/service.yaml" ]]; then
-        kubectl create namespace gitlab --dry-run=client -o yaml | kubectl apply -f -
-        kubectl apply -f "${SCRIPT_DIR}/apps/gitlab/service.yaml"
-        log "GitLab Service/Endpoints applied ✓"
+        kubectl create namespace gitlab --dry-run=client -o yaml | kubectl apply -f - || warn "Failed to create gitlab namespace"
+        if kubectl apply -f "${SCRIPT_DIR}/apps/gitlab/service.yaml"; then
+            log "GitLab Service/Endpoints applied ✓"
+        else
+            warn "Failed to apply GitLab Service/Endpoints"
+        fi
     fi
     apply_gateway "${SCRIPT_DIR}/apps/gitlab/gateway.yaml" "GitLab"
 
@@ -1338,28 +1401,39 @@ cleanup_karmada() {
 #===============================================================================
 deploy_core_apps() {
     log "Deploying core applications..."
-    
+    local failed=0
+
     # Apply base configurations (excluding fleet.yaml which is processed by Fleet)
     # Fleet bundle configs (fleet.yaml) don't have apiVersion/kind - they're Fleet-specific
     for manifest in "${SCRIPT_DIR}"/apps/base/*.yaml; do
         if [[ -f "$manifest" && "$(basename "$manifest")" != "fleet.yaml" ]]; then
             debug "Applying: $manifest"
-            kubectl apply -f "$manifest" 2>/dev/null || true
+            if ! kubectl apply -f "$manifest"; then
+                warn "Failed to apply: $(basename "$manifest")"
+                failed=$((failed + 1))
+            fi
         fi
     done
-    
+
     # Apply platform-specific configurations
     local platform_apps="${SCRIPT_DIR}/apps/${PLATFORM}/"
     if [[ -d "$platform_apps" ]]; then
         for manifest in "${platform_apps}"*.yaml; do
             if [[ -f "$manifest" && "$(basename "$manifest")" != "fleet.yaml" ]]; then
                 debug "Applying: $manifest"
-                kubectl apply -f "$manifest" 2>/dev/null || true
+                if ! kubectl apply -f "$manifest"; then
+                    warn "Failed to apply: $(basename "$manifest")"
+                    failed=$((failed + 1))
+                fi
             fi
         done
     fi
-    
-    log "Core apps deployed ✓"
+
+    if [[ "$failed" -gt 0 ]]; then
+        warn "Core apps: ${failed} manifest(s) failed to apply"
+    else
+        log "Core apps deployed ✓"
+    fi
 }
 
 #===============================================================================

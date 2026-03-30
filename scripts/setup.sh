@@ -188,8 +188,8 @@ validate_cloudflare_token() {
     response=$(curl -s --max-time 10 -H "Authorization: Bearer ${token}" \
         "https://api.cloudflare.com/client/v4/user/tokens/verify" 2>/dev/null || echo "")
 
-    if echo "$response" | grep -q '"success":true'; then
-        echo -e "\r  ${GREEN}✓${NC} Cloudflare token is valid                    "
+    if echo "$response" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
+        echo -e "\r  ${GREEN}✓${NC} Cloudflare token is valid                     "
         # Try to show zone info
         local zones
         zones=$(curl -s --max-time 10 -H "Authorization: Bearer ${token}" \
@@ -204,6 +204,11 @@ validate_cloudflare_token() {
         return 0
     else
         echo -e "\r  ${RED}✗${NC} Cloudflare token validation failed             "
+        if [[ -n "$response" ]]; then
+            hint "Response: $(echo "$response" | head -c 200)"
+        else
+            hint "No response — check network or token format"
+        fi
         return 1
     fi
 }

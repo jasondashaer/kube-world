@@ -593,15 +593,10 @@
           echo "Domain entries already present in CoreDNS"
           exit 0
         fi
+        NEW_LINE="${CENTRAL_TS_IP} rancher.${DOMAIN} gitlab.${DOMAIN}"
         kubectl -n kube-system get configmap coredns -o json | \
-          python3 -c "
-import sys,json
-d = json.load(sys.stdin)
-hosts = d['data']['NodeHosts'].rstrip()
-hosts += '\n${CENTRAL_TS_IP} rancher.${DOMAIN} gitlab.${DOMAIN}\n'
-d['data']['NodeHosts'] = hosts
-json.dump(d, sys.stdout)
-" | kubectl apply -f -
+          jq --arg entry "$NEW_LINE" '.data.NodeHosts = (.data.NodeHosts | rtrimstr("\n") + "\n" + $entry + "\n")' | \
+          kubectl apply -f -
         kubectl -n kube-system rollout restart deploy/coredns
         echo "CoreDNS updated with ${DOMAIN} entries"
       args:

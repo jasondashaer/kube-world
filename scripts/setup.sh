@@ -119,7 +119,9 @@ confirm() {
     local input
     read -r input
     input="${input:-$default}"
-    [[ "${input,,}" == "y" || "${input,,}" == "yes" ]]
+    local lower
+    lower=$(echo "$input" | tr '[:upper:]' '[:lower:]')
+    [[ "$lower" == "y" || "$lower" == "yes" ]]
 }
 
 # Select from numbered options. Sets variable to selected value.
@@ -183,14 +185,14 @@ validate_cloudflare_token() {
 
     echo -ne "  ${DIM}Validating Cloudflare token...${NC}"
     local response
-    response=$(curl -sf -H "Authorization: Bearer ${token}" \
+    response=$(curl -s --max-time 10 -H "Authorization: Bearer ${token}" \
         "https://api.cloudflare.com/client/v4/user/tokens/verify" 2>/dev/null || echo "")
 
     if echo "$response" | grep -q '"success":true'; then
         echo -e "\r  ${GREEN}✓${NC} Cloudflare token is valid                    "
         # Try to show zone info
         local zones
-        zones=$(curl -sf -H "Authorization: Bearer ${token}" \
+        zones=$(curl -s --max-time 10 -H "Authorization: Bearer ${token}" \
             "https://api.cloudflare.com/client/v4/zones?per_page=5" 2>/dev/null || echo "")
         if [[ -n "$zones" ]]; then
             local zone_names

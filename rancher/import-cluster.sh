@@ -16,8 +16,9 @@
 #   ./import-cluster.sh --name pi-edge-1 --pi-ip 10.5.5.136
 #
 # ENVIRONMENT:
-#   RANCHER_URL       Rancher server URL (default: https://rancher.kubew.dev)
+#   RANCHER_URL       Rancher server URL (default: https://rancher.$DOMAIN)
 #   RANCHER_TOKEN     Rancher API bearer token (required)
+#   DOMAIN            Base domain (default: kubew.dev)
 #===============================================================================
 set -euo pipefail
 
@@ -31,7 +32,7 @@ warn()  { echo -e "${YELLOW}[IMPORT]${NC} $*"; }
 error() { echo -e "${RED}[IMPORT]${NC} $*" >&2; }
 
 # Defaults
-RANCHER_URL="${RANCHER_URL:-https://rancher.kubew.dev}"
+RANCHER_URL="${RANCHER_URL:-https://rancher.${DOMAIN:-kubew.dev}}"
 RANCHER_TOKEN="${RANCHER_TOKEN:-}"
 CLUSTER_NAME=""
 CLUSTER_KUBECONFIG=""

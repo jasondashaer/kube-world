@@ -319,11 +319,11 @@
       debug:
         msg: "{{ node_name | default(inventory_hostname) }} Tailscale IP: {{ tailscale_ip.stdout }}"
 
-    - name: Add kubew.dev DNS entries to /etc/hosts (central node resolution)
+    - name: Add domain DNS entries to /etc/hosts (central node resolution)
       lineinfile:
         path: /etc/hosts
-        regexp: '.*kubew\.dev'
-        line: "{{ central_tailscale_ip }} rancher.kubew.dev gitlab.kubew.dev"
+        regexp: '.*{{ domain | default("kubew.dev") }}'
+        line: "{{ central_tailscale_ip }} rancher.{{ domain | default('kubew.dev') }} gitlab.{{ domain | default('kubew.dev') }}"
         state: present
       when: central_tailscale_ip | length > 0
 
@@ -577,18 +577,19 @@
       debug:
         var: edge_status.stdout_lines
 
-    - name: Add kubew.dev to CoreDNS NodeHosts (for Rancher agent)
+    - name: Add domain to CoreDNS NodeHosts (for Rancher agent)
       shell: |
         CENTRAL_TS_IP="{{ lookup('env', 'CENTRAL_TAILSCALE_IP') }}"
+        DOMAIN="{{ domain | default('kubew.dev') }}"
         if [ -n "$CENTRAL_TS_IP" ]; then
           HOSTS=$(kubectl -n kube-system get configmap coredns -o jsonpath='{.data.NodeHosts}')
-          if ! echo "$HOSTS" | grep -q "kubew.dev"; then
+          if ! echo "$HOSTS" | grep -q "$DOMAIN"; then
             kubectl -n kube-system get configmap coredns -o json | \
               python3 -c "
 import sys,json
 d = json.load(sys.stdin)
 hosts = d['data']['NodeHosts'].rstrip()
-hosts += '\n${CENTRAL_TS_IP} rancher.kubew.dev gitlab.kubew.dev\n'
+hosts += '\n${CENTRAL_TS_IP} rancher.${DOMAIN} gitlab.${DOMAIN}\n'
 d['data']['NodeHosts'] = hosts
 json.dump(d, sys.stdout)
 " | kubectl apply -f -

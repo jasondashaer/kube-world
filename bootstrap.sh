@@ -66,6 +66,12 @@ DRY_RUN=false
 CLEANUP=false
 VERBOSE=false
 
+# Domain — configurable via env or .env.bootstrap, used everywhere
+DOMAIN="${DOMAIN:-}"
+# Derived hostnames (set in main() after DOMAIN is resolved)
+RANCHER_HOSTNAME="${RANCHER_HOSTNAME:-}"
+GITLAB_HOSTNAME="${GITLAB_HOSTNAME:-}"
+
 #===============================================================================
 # Logging Functions
 #===============================================================================
@@ -705,10 +711,16 @@ setup_pi_cluster() {
             tailscale_args="${tailscale_args} -e central_tailscale_ip=${CENTRAL_TAILSCALE_IP}"
         fi
 
+        local domain_args=""
+        if [[ -n "${DOMAIN:-}" ]]; then
+            domain_args="-e domain=${DOMAIN}"
+        fi
+
         ansible-playbook -i "$inventory" "$playbook" \
             -e "k3s_version=${K3S_VERSION}" \
             -e "mode=${MODE}" \
-            ${tailscale_args}
+            ${tailscale_args} \
+            ${domain_args}
 
         # Copy kubeconfig from Pi to Mac
         log "Fetching kubeconfig from Pi..."
@@ -751,10 +763,16 @@ setup_pi_cluster() {
                 tailscale_args="${tailscale_args} -e central_tailscale_ip=${CENTRAL_TAILSCALE_IP}"
             fi
 
+            local domain_args=""
+            if [[ -n "${DOMAIN:-}" ]]; then
+                domain_args="-e domain=${DOMAIN}"
+            fi
+
             ansible-playbook -i "$inventory" "$playbook" \
                 -e "k3s_version=${K3S_VERSION}" \
                 -e "mode=${MODE}" \
                 ${tailscale_args} \
+                ${domain_args} \
                 --connection=local
         fi
 
@@ -828,7 +846,7 @@ configure_rancher_api() {
         return 0
     fi
 
-    local rancher_url="https://${RANCHER_HOSTNAME:-rancher.kubew.dev}"
+    local rancher_url="https://${RANCHER_HOSTNAME:?RANCHER_HOSTNAME must be set}"
     log "Configuring Rancher API settings..."
 
     # Wait for Rancher to respond
@@ -1167,7 +1185,7 @@ setup_cert_manager_le() {
     log "Configuring Let's Encrypt wildcard certificate..."
 
     if [[ "$DRY_RUN" == "true" ]]; then
-        log "[DRY RUN] Would apply ClusterIssuer and Certificate for *.kubew.dev"
+        log "[DRY RUN] Would apply ClusterIssuer and Certificate for *.${DOMAIN:-<domain>}"
         return 0
     fi
 
@@ -1180,16 +1198,24 @@ setup_cert_manager_le() {
     # Apply ClusterIssuer (Let's Encrypt + Cloudflare DNS-01)
     local issuer_file="${SCRIPT_DIR}/infrastructure/cert-manager/clusterissuer.yaml"
     if [[ -f "$issuer_file" ]]; then
-        kubectl apply -f "$issuer_file"
+        if [[ -n "$DOMAIN" ]]; then
+            sed "s/kubew\.dev/${DOMAIN}/g" "$issuer_file" | kubectl apply -f -
+        else
+            kubectl apply -f "$issuer_file"
+        fi
         log "ClusterIssuer applied ✓"
     else
         warn "ClusterIssuer file not found: ${issuer_file}"
     fi
 
-    # Apply Certificate (*.kubew.dev wildcard)
+    # Apply Certificate (*.<domain> wildcard)
     local cert_file="${SCRIPT_DIR}/infrastructure/cert-manager/certificate.yaml"
     if [[ -f "$cert_file" ]]; then
-        kubectl apply -f "$cert_file"
+        if [[ -n "$DOMAIN" ]]; then
+            sed "s/kubew\.dev/${DOMAIN}/g" "$cert_file" | kubectl apply -f -
+        else
+            kubectl apply -f "$cert_file"
+        fi
         log "Wildcard certificate requested ✓"
     else
         warn "Certificate file not found: ${cert_file}"
@@ -1210,11 +1236,23 @@ setup_httproutes() {
         return 0
     fi
 
+    # Helper: apply a gateway YAML, substituting domain if set
+    apply_gateway() {
+        local file="$1" label="$2"
+        if [[ ! -f "$file" ]]; then
+            debug "Gateway file not found: ${file}"
+            return
+        fi
+        if [[ -n "${DOMAIN:-}" ]]; then
+            sed "s/kubew\.dev/${DOMAIN}/g" "$file" | kubectl apply -f -
+        else
+            kubectl apply -f "$file"
+        fi
+        log "${label} HTTPRoute applied ✓"
+    }
+
     # Rancher HTTPRoute
-    if [[ -f "${SCRIPT_DIR}/rancher/gateway.yaml" ]]; then
-        kubectl apply -f "${SCRIPT_DIR}/rancher/gateway.yaml"
-        log "Rancher HTTPRoute applied ✓"
-    fi
+    apply_gateway "${SCRIPT_DIR}/rancher/gateway.yaml" "Rancher"
 
     # GitLab HTTPRoute + Service/Endpoints (native GitLab on host)
     if [[ -f "${SCRIPT_DIR}/apps/gitlab/service.yaml" ]]; then
@@ -1222,10 +1260,7 @@ setup_httproutes() {
         kubectl apply -f "${SCRIPT_DIR}/apps/gitlab/service.yaml"
         log "GitLab Service/Endpoints applied ✓"
     fi
-    if [[ -f "${SCRIPT_DIR}/apps/gitlab/gateway.yaml" ]]; then
-        kubectl apply -f "${SCRIPT_DIR}/apps/gitlab/gateway.yaml"
-        log "GitLab HTTPRoute applied ✓"
-    fi
+    apply_gateway "${SCRIPT_DIR}/apps/gitlab/gateway.yaml" "GitLab"
 
     kubectl get httproute -A 2>/dev/null || true
 }
@@ -1628,12 +1663,26 @@ main() {
             ;;
     esac
     
+    # Resolve domain and derived hostnames
+    if [[ -z "$DOMAIN" && -f "$CONFIG_FILE" ]] && command -v yq &>/dev/null; then
+        DOMAIN=$(yq eval '.dns.domain // ""' "$CONFIG_FILE" 2>/dev/null || echo "")
+    fi
+    if [[ -n "$DOMAIN" ]]; then
+        RANCHER_HOSTNAME="${RANCHER_HOSTNAME:-rancher.${DOMAIN}}"
+        GITLAB_HOSTNAME="${GITLAB_HOSTNAME:-gitlab.${DOMAIN}}"
+        export DOMAIN RANCHER_HOSTNAME GITLAB_HOSTNAME
+        log "Domain: ${DOMAIN} (Rancher: ${RANCHER_HOSTNAME}, GitLab: ${GITLAB_HOSTNAME})"
+    else
+        warn "DOMAIN not set — hostnames will use auto-detected LAN address"
+        warn "Set via: export DOMAIN=yourdomain.com  or use scripts/setup.sh"
+    fi
+
     # Stack-specific orchestration
     if [[ "$STACK" == "karmada" ]]; then
         # Pi with Karmada uses cert-manager/Traefik for TLS, not Rancher's built-in
         if [[ "$PLATFORM" == "pi" ]]; then
             export RANCHER_TLS_SOURCE="secret"
-            export RANCHER_HOSTNAME="${RANCHER_HOSTNAME:-rancher.kubew.dev}"
+            export RANCHER_HOSTNAME="${RANCHER_HOSTNAME:-}"
         fi
 
         # Karmada stack: full infrastructure pipeline
@@ -1668,8 +1717,8 @@ main() {
         echo "Next steps:"
         echo "  1. Change Rancher admin password"
         if [[ "$PLATFORM" == "pi" ]]; then
-            echo "  2. Access Rancher: https://rancher.kubew.dev"
-            echo "  3. Access GitLab:  https://gitlab.kubew.dev"
+            echo "  2. Access Rancher: https://${RANCHER_HOSTNAME:-rancher.<domain>}"
+            echo "  3. Access GitLab:  https://${GITLAB_HOSTNAME:-gitlab.<domain>}"
             echo "  4. Register edge Pi with Karmada:"
             echo "     ./karmada/cluster-registration/register-pi.sh --pi-ip <edge-pi-ip>"
             echo "  5. Import edge Pi into Rancher:"

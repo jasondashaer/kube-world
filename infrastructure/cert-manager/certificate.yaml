@@ -1,0 +1,23 @@
+# Wildcard TLS certificate for *.kubew.dev
+#
+# cert-manager automatically requests and renews this certificate
+# via Let's Encrypt using DNS-01 challenge (Cloudflare).
+#
+# The resulting Secret (kube-world-tls) is referenced by the Gateway
+# HTTPS listener in infrastructure/gateway/gateway.yaml.
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: kubew-dev-wildcard
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/part-of: kube-world
+spec:
+  secretName: kube-world-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - "*.kubew.dev"
+    - kubew.dev

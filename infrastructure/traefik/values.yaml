@@ -1,14 +1,14 @@
 # Traefik Ingress Controller - Pi-optimized values
 # Deployed via Helm in the kube-system namespace
 #
-# Uses NodePort service (not hostNetwork) to avoid permission issues
-# with privileged ports on Pi. Access via:
-#   http://<pi-ip>:30080  (HTTP)
-#   https://<pi-ip>:30443 (HTTPS)
+# Uses NodePort + hostPort for standard port access:
+#   http://<pi-ip>:80   (hostPort) — primary access for kubew.dev domains
+#   http://<pi-ip>:30080 (NodePort) — fallback
+#   https://<pi-ip>:443  (hostPort)
+#   https://<pi-ip>:30443 (NodePort)
 #
-# When a proper domain + Tailscale is configured, these ports
-# can be made transparent via iptables or switched to hostNetwork
-# with root capabilities.
+# Gateway API routes traffic by hostname (e.g., gitlab.kubew.dev)
+# to the appropriate backend service.
 
 # Resource constraints for Pi 5
 resources:
@@ -34,11 +34,13 @@ ports:
     expose:
       default: true
     nodePort: 30080
+    hostPort: 80
   websecure:
     port: 8443
     expose:
       default: true
     nodePort: 30443
+    hostPort: 443
 
 # NodePort service type
 service:
@@ -66,6 +68,7 @@ providers:
   kubernetesGateway:
     enabled: true
 
-# Gateway API support
+# Gateway API — Traefik auto-creates a GatewayClass.
+# We manage our own Gateway resource in infrastructure/gateway/gateway.yaml
 gateway:
-  enabled: true
+  enabled: false

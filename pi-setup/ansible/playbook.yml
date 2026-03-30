@@ -293,7 +293,7 @@
       shell: >
         tailscale up
         --authkey={{ tailscale_auth_key }}
-        --hostname={{ node_name }}
+        --hostname={{ node_name | default(inventory_hostname) }}
         --accept-routes
         --ssh
         --timeout=30s
@@ -317,7 +317,7 @@
 
     - name: Display Tailscale status
       debug:
-        msg: "{{ node_name }} Tailscale IP: {{ tailscale_ip.stdout }}"
+        msg: "{{ node_name | default(inventory_hostname) }} Tailscale IP: {{ tailscale_ip.stdout }}"
 
     - name: Add kubew.dev DNS entries to /etc/hosts (central node resolution)
       lineinfile:
@@ -338,7 +338,7 @@
       --disable=servicelb
       --write-kubeconfig-mode=0644
       --tls-san={{ ansible_host }}
-      --tls-san={{ node_name }}
+      --tls-san={{ node_name | default(inventory_hostname) }}
       --node-label=node.kubernetes.io/role=master
       --node-label=topology.kubernetes.io/zone=edge
       --node-label=workload-type=iot
@@ -485,7 +485,7 @@
       --disable=servicelb
       --write-kubeconfig-mode=0644
       --tls-san={{ ansible_host }}
-      --tls-san={{ node_name }}
+      --tls-san={{ node_name | default(inventory_hostname) }}
       --node-label=node.kubernetes.io/role=master
       --node-label=topology.kubernetes.io/zone=edge
       --node-label=workload-type=iot
@@ -604,7 +604,7 @@ json.dump(d, sys.stdout)
       debug:
         msg: |
           ============================================
-          EDGE K3s CLUSTER READY: {{ node_name }}
+          EDGE K3s CLUSTER READY: {{ node_name | default(inventory_hostname) }}
           ============================================
           Independent K3s server installed.
           Tailscale connected. CoreDNS configured.

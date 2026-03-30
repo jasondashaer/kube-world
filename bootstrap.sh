@@ -800,12 +800,22 @@ setup_pi_cluster() {
 #===============================================================================
 install_rancher() {
     log "Installing Rancher..."
-    
-    # Source the install script and call main to actually install
+
+    # Export RANCHER_HOSTNAME and RANCHER_TLS_SOURCE BEFORE sourcing so the
+    # sourced script's top-level detection logic respects our values
+    export RANCHER_HOSTNAME="${RANCHER_HOSTNAME:-}"
+    export RANCHER_TLS_SOURCE="${RANCHER_TLS_SOURCE:-}"
+
+    # Source the install script (runs top-level code: hostname detection,
+    # password generation, function definitions)
     source "${SCRIPT_DIR}/rancher/install-rancher.sh"
-    
-    # CRITICAL: The sourced script only defines functions, we must call main()
+
+    # Call main() to actually install (sourced script only defines functions)
     main
+
+    # Capture RANCHER_BOOTSTRAP_PASSWORD set by the sourced script so
+    # configure_rancher_api() and other post-install functions can use it
+    export RANCHER_BOOTSTRAP_PASSWORD="${RANCHER_BOOTSTRAP_PASSWORD}"
 }
 
 #===============================================================================
@@ -1607,10 +1617,10 @@ main() {
     # Setup cluster based on platform
     case "$PLATFORM" in
         mac|mac-*)
-            setup_mac_cluster
+            setup_mac_cluster || { error "Mac cluster setup failed"; exit 1; }
             ;;
         pi)
-            setup_pi_cluster
+            setup_pi_cluster || { error "Pi cluster setup failed"; exit 1; }
             ;;
         *)
             error "Platform $PLATFORM not yet implemented"
@@ -1627,16 +1637,17 @@ main() {
         fi
 
         # Karmada stack: full infrastructure pipeline
-        install_traefik              # Traefik + Gateway API CRDs + Gateway resource
-        install_karmada              # Karmada control plane
-        create_secrets               # Cloudflare API token (needed for cert-manager LE)
-        install_rancher              # cert-manager + Rancher Helm charts
-        configure_rancher_api        # Set server-url + agent-tls-mode for Tailscale/LE
-        setup_cert_manager_le        # Let's Encrypt ClusterIssuer + wildcard cert
-        setup_flux                   # Flux controllers + kustomizations
-        install_gitlab_native        # GitLab CE native deb on Pi host
-        setup_httproutes             # HTTPRoutes for Rancher, GitLab, etc.
-        deploy_tailscale_keys        # Seed secrets + key management CronJobs
+        # Critical steps abort on failure; optional steps warn and continue
+        install_traefik || { error "Traefik install failed — cannot continue"; exit 1; }
+        install_karmada || { error "Karmada install failed — cannot continue"; exit 1; }
+        create_secrets               # Optional: warns if CLOUDFLARE_API_TOKEN missing
+        install_rancher || { error "Rancher install failed — cannot continue"; exit 1; }
+        configure_rancher_api        # Best-effort: warns and continues on failure
+        setup_cert_manager_le        # Depends on create_secrets; warns if cert not issued
+        setup_flux || { error "Flux setup failed — cannot continue"; exit 1; }
+        install_gitlab_native        # Optional: warns if install script missing
+        setup_httproutes             # Best-effort: applies available routes
+        deploy_tailscale_keys        # Optional: warns if TAILSCALE_API_TOKEN missing
     else
         # Legacy Fleet stack: Rancher -> Fleet -> Apps
         install_rancher

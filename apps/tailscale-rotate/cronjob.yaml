@@ -151,7 +151,7 @@ data:
       exit 1
     fi
 
-    # Create new 90-day reusable pre-authorized auth key
+    # Create new 90-day reusable pre-authorized auth key with edge tag
     log "Creating new auth key..."
     RESPONSE=$(curl -sf -u "${API_TOKEN}:" \
       -X POST "${TAILSCALE_API}/tailnet/-/keys" \
@@ -162,7 +162,8 @@ data:
             "create": {
               "reusable": true,
               "ephemeral": false,
-              "preauthorized": true
+              "preauthorized": true,
+              "tags": ["tag:edge"]
             }
           }
         },

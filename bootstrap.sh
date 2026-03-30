@@ -921,7 +921,7 @@ deploy_tailscale_keys() {
         -X POST "https://api.tailscale.com/api/v2/tailnet/-/keys" \
         -H "Content-Type: application/json" \
         -d '{
-            "capabilities": {"devices": {"create": {"reusable": true, "ephemeral": false, "preauthorized": true}}},
+            "capabilities": {"devices": {"create": {"reusable": true, "ephemeral": false, "preauthorized": true, "tags": ["tag:edge"]}}},
             "expirySeconds": 7776000,
             "description": "kube-world provisioning"
         }' 2>/dev/null || echo "")

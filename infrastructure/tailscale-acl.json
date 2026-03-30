@@ -1,0 +1,56 @@
+{
+  "tagOwners": {
+    "tag:central": ["autogroup:admin"],
+    "tag:edge":    ["autogroup:admin"],
+    "tag:operator": ["autogroup:admin"]
+  },
+
+  "grants": [
+    {
+      "src": ["autogroup:member", "tag:operator"],
+      "dst": ["*"],
+      "ip":  ["*"]
+    },
+    {
+      "src": ["tag:central"],
+      "dst": ["tag:edge", "tag:central"],
+      "ip":  ["*"]
+    },
+    {
+      "src": ["tag:edge"],
+      "dst": ["tag:central"],
+      "ip":  ["*"]
+    },
+    {
+      "src": ["tag:edge"],
+      "dst": ["tag:edge"],
+      "ip":  ["*"]
+    }
+  ],
+
+  "ssh": [
+    {
+      "action": "check",
+      "src":    ["autogroup:member"],
+      "dst":    ["autogroup:self"],
+      "users":  ["autogroup:nonroot", "root"]
+    },
+    {
+      "action": "accept",
+      "src":    ["tag:central", "autogroup:member"],
+      "dst":    ["tag:edge", "tag:central"],
+      "users":  ["admin", "root"]
+    }
+  ],
+
+  "tests": [
+    {
+      "src":    "tag:edge",
+      "accept": ["tag:central:443", "tag:central:6443"]
+    },
+    {
+      "src":    "tag:central",
+      "accept": ["tag:edge:6443"]
+    }
+  ]
+}

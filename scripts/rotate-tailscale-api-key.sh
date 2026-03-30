@@ -138,7 +138,8 @@ AUTH_RESPONSE=$(curl -sf -u "${NEW_API_KEY}:" \
                 "create": {
                     "reusable": true,
                     "ephemeral": false,
-                    "preauthorized": true
+                    "preauthorized": true,
+                    "tags": ["tag:edge"]
                 }
             }
         },

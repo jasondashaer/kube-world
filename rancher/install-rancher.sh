@@ -212,14 +212,16 @@ install_rancher() {
     kubectl create namespace cattle-system --dry-run=client -o yaml | kubectl apply -f -
     
     # Determine TLS source based on environment
-    local tls_source="rancher"  # Self-signed for dev
+    # Pi with Karmada stack uses cert-manager/Traefik for TLS (source=secret)
+    # KIND/Mac uses Rancher's built-in self-signed certs
+    local tls_source="${RANCHER_TLS_SOURCE:-rancher}"
     local extra_args=""
-    
-    if [[ "${RANCHER_TLS_SOURCE:-}" == "letsEncrypt" ]]; then
-        tls_source="letsEncrypt"
+
+    if [[ "$tls_source" == "letsEncrypt" ]]; then
         extra_args="--set letsEncrypt.email=${LETSENCRYPT_EMAIL:-admin@example.com}"
-    elif [[ "${RANCHER_TLS_SOURCE:-}" == "secret" ]]; then
-        tls_source="secret"
+    elif [[ "$tls_source" == "secret" ]]; then
+        # External TLS (cert-manager/Traefik) — no internal CA needed
+        extra_args="--set privateCA=false"
     fi
     
     # Check if already installed
@@ -368,32 +370,16 @@ EOF
     chmod 600 "$rancher_info_file"
     log "Saved Rancher info to ${rancher_info_file}"
 
-    # Print RPi import instructions
+    # Print edge cluster import instructions
     echo ""
     echo "=============================================="
-    echo "  Importing RPi Cluster into Rancher"
+    echo "  Importing Edge Clusters into Rancher"
     echo "=============================================="
     echo ""
-    echo "  1. Open Rancher UI: https://${RANCHER_HOSTNAME}"
+    echo "  Programmatic import (recommended):"
+    echo "    RANCHER_TOKEN=<token> ./rancher/import-cluster.sh --name pi-edge-1 --pi-ip <ip>"
     echo ""
-    echo "  2. Navigate to: Cluster Management > Import Existing"
-    echo ""
-    echo "  3. Choose 'Generic' and give it a name (e.g., 'pi-cluster')"
-    echo ""
-    echo "  4. Copy the registration command shown in Rancher UI"
-    echo ""
-    echo "  5. On the RPi, run the command with --insecure flag:"
-    echo ""
-    echo "     # If using self-signed certs (development):"
-    echo "     curl --insecure -sfL https://${RANCHER_HOSTNAME}/v3/import/XXXXX.yaml | kubectl apply -f -"
-    echo ""
-    echo "  Or use the helper script:"
-    echo "     ./rancher/import-cluster.sh <registration-url>"
-    echo ""
-    echo "  TROUBLESHOOTING:"
-    echo "  - Verify connectivity: ping ${RANCHER_LAN_IP}"
-    echo "  - Test HTTPS: curl -k https://${RANCHER_HOSTNAME}/ping"
-    echo "  - Check firewall: Ensure ports 80,443 are open on Mac"
+    echo "  Create an API token at: https://${RANCHER_HOSTNAME}/dashboard/account"
     echo ""
 }
 

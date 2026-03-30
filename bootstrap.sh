@@ -696,9 +696,19 @@ setup_pi_cluster() {
             exit 1
         fi
 
+        # Pass Tailscale auth key if available (for headless Tailscale setup)
+        local tailscale_args=""
+        if [[ -n "${TAILSCALE_AUTH_KEY:-}" ]]; then
+            tailscale_args="-e tailscale_auth_key=${TAILSCALE_AUTH_KEY}"
+        fi
+        if [[ -n "${CENTRAL_TAILSCALE_IP:-}" ]]; then
+            tailscale_args="${tailscale_args} -e central_tailscale_ip=${CENTRAL_TAILSCALE_IP}"
+        fi
+
         ansible-playbook -i "$inventory" "$playbook" \
             -e "k3s_version=${K3S_VERSION}" \
-            -e "mode=${MODE}"
+            -e "mode=${MODE}" \
+            ${tailscale_args}
 
         # Copy kubeconfig from Pi to Mac
         log "Fetching kubeconfig from Pi..."
@@ -733,9 +743,18 @@ setup_pi_cluster() {
         log "Provisioning Pi locally..."
 
         if [[ -f "$playbook" ]]; then
+            local tailscale_args=""
+            if [[ -n "${TAILSCALE_AUTH_KEY:-}" ]]; then
+                tailscale_args="-e tailscale_auth_key=${TAILSCALE_AUTH_KEY}"
+            fi
+            if [[ -n "${CENTRAL_TAILSCALE_IP:-}" ]]; then
+                tailscale_args="${tailscale_args} -e central_tailscale_ip=${CENTRAL_TAILSCALE_IP}"
+            fi
+
             ansible-playbook -i "$inventory" "$playbook" \
                 -e "k3s_version=${K3S_VERSION}" \
                 -e "mode=${MODE}" \
+                ${tailscale_args} \
                 --connection=local
         fi
 
@@ -787,6 +806,147 @@ install_rancher() {
     
     # CRITICAL: The sourced script only defines functions, we must call main()
     main
+}
+
+#===============================================================================
+# Configure Rancher API Settings (post-install)
+# Sets server-url and agent-tls-mode for Tailscale/LE cert connectivity
+#===============================================================================
+configure_rancher_api() {
+    if [[ "$PLATFORM" != "pi" ]]; then
+        debug "Skipping Rancher API config (Pi-only)"
+        return 0
+    fi
+
+    local rancher_url="https://${RANCHER_HOSTNAME:-rancher.kubew.dev}"
+    log "Configuring Rancher API settings..."
+
+    # Wait for Rancher to respond
+    local attempts=0
+    while [[ $attempts -lt 30 ]]; do
+        if curl -sk --connect-timeout 3 "${rancher_url}/ping" 2>/dev/null | grep -q "pong"; then
+            break
+        fi
+        attempts=$((attempts + 1))
+        sleep 10
+    done
+
+    if [[ $attempts -ge 30 ]]; then
+        warn "Rancher not responding at ${rancher_url} — skipping API config"
+        return 0
+    fi
+
+    # Get API token via bootstrap password
+    local login_response
+    login_response=$(curl -sk "${rancher_url}/v3-public/localProviders/local?action=login" \
+        -H "Content-Type: application/json" \
+        -d "{\"username\":\"admin\",\"password\":\"${RANCHER_BOOTSTRAP_PASSWORD}\"}" 2>/dev/null)
+    local api_token
+    api_token=$(echo "$login_response" | python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || echo "")
+
+    if [[ -z "$api_token" ]]; then
+        warn "Could not authenticate to Rancher API — configure manually"
+        return 0
+    fi
+
+    # Set server-url to the public hostname
+    curl -sk "${rancher_url}/v3/settings/server-url" \
+        -H "Authorization: Bearer ${api_token}" \
+        -H "Content-Type: application/json" \
+        -X PUT -d "{\"value\":\"${rancher_url}\"}" > /dev/null 2>&1
+    log "  server-url = ${rancher_url}"
+
+    # Set agent-tls-mode to system-store (required for LE certs via Tailscale)
+    curl -sk "${rancher_url}/v3/settings/agent-tls-mode" \
+        -H "Authorization: Bearer ${api_token}" \
+        -H "Content-Type: application/json" \
+        -X PUT -d '{"value":"system-store"}' > /dev/null 2>&1
+    log "  agent-tls-mode = system-store"
+
+    # Clear cacerts (not needed with LE + system-store)
+    curl -sk "${rancher_url}/v3/settings/cacerts" \
+        -H "Authorization: Bearer ${api_token}" \
+        -H "Content-Type: application/json" \
+        -X PUT -d '{"value":""}' > /dev/null 2>&1
+    log "  cacerts cleared"
+
+    # Delete internal CA secrets (not needed with LE)
+    kubectl -n cattle-system delete secret tls-rancher-internal-ca tls-rancher-internal --ignore-not-found 2>/dev/null || true
+
+    log "Rancher API configuration complete ✓"
+}
+
+#===============================================================================
+# Seed kube-world-secrets and deploy Tailscale key management
+#===============================================================================
+deploy_tailscale_keys() {
+    if [[ "$PLATFORM" != "pi" ]]; then
+        debug "Skipping Tailscale key deployment (Pi-only)"
+        return 0
+    fi
+
+    local tailscale_api_token="${TAILSCALE_API_TOKEN:-}"
+    if [[ -z "$tailscale_api_token" ]]; then
+        warn "TAILSCALE_API_TOKEN not set — skipping key management deployment"
+        warn "Set it and re-run, or deploy apps/tailscale-rotate/cronjob.yaml manually"
+        return 0
+    fi
+
+    log "Seeding kube-world-secrets with Tailscale credentials..."
+
+    # Extract key ID from the token string (tskey-api-<ID>-<secret>)
+    local key_id
+    key_id=$(echo "$tailscale_api_token" | sed -E 's/tskey-api-([^-]+)-.*/\1/')
+
+    # Create or update kube-world-secrets
+    if kubectl get secret kube-world-secrets -n default &>/dev/null; then
+        # Patch existing secret
+        kubectl patch secret kube-world-secrets -n default -p "{
+            \"data\": {
+                \"tailscale-api-token\": \"$(echo -n "$tailscale_api_token" | base64)\",
+                \"tailscale-api-key-id\": \"$(echo -n "$key_id" | base64)\"
+            }
+        }" > /dev/null
+    else
+        kubectl -n default create secret generic kube-world-secrets \
+            --from-literal=tailscale-api-token="$tailscale_api_token" \
+            --from-literal=tailscale-api-key-id="$key_id"
+    fi
+    log "  kube-world-secrets seeded with API token"
+
+    # Create initial auth key for provisioning
+    log "Creating initial Tailscale auth key..."
+    local auth_response
+    auth_response=$(curl -sf -u "${tailscale_api_token}:" \
+        -X POST "https://api.tailscale.com/api/v2/tailnet/-/keys" \
+        -H "Content-Type: application/json" \
+        -d '{
+            "capabilities": {"devices": {"create": {"reusable": true, "ephemeral": false, "preauthorized": true}}},
+            "expirySeconds": 7776000,
+            "description": "kube-world provisioning"
+        }' 2>/dev/null || echo "")
+
+    if [[ -n "$auth_response" ]]; then
+        local auth_key auth_key_id
+        auth_key=$(echo "$auth_response" | python3 -c "import sys,json; print(json.load(sys.stdin).get('key',''))" 2>/dev/null || echo "")
+        auth_key_id=$(echo "$auth_response" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
+        if [[ -n "$auth_key" ]]; then
+            kubectl patch secret kube-world-secrets -n default -p "{
+                \"data\": {
+                    \"tailscale-auth-key\": \"$(echo -n "$auth_key" | base64)\",
+                    \"tailscale-auth-key-id\": \"$(echo -n "$auth_key_id" | base64)\"
+                }
+            }" > /dev/null
+            log "  Auth key created: ${auth_key_id}"
+        fi
+    else
+        warn "Could not create auth key — Tailscale API may be unreachable"
+    fi
+
+    # Deploy key management CronJobs
+    log "Deploying Tailscale key management CronJobs..."
+    kubectl apply -f "${SCRIPT_DIR}/apps/tailscale-rotate/cronjob.yaml"
+    log "Tailscale key management deployed ✓"
 }
 
 #===============================================================================
@@ -1399,17 +1559,19 @@ main() {
             echo "  5. Install Traefik + Gateway API"
             echo "  6. Install Karmada control plane"
             echo "  7. Create secrets (Cloudflare API token)"
-            echo "  8. Install Rancher (includes cert-manager)"
-            echo "  9. Configure Let's Encrypt wildcard cert"
-            echo " 10. Setup Flux GitOps"
-            echo " 11. Install GitLab CE (native on Pi)"
-            echo " 12. Apply HTTPRoutes (Rancher, GitLab)"
+            echo "  8. Install Rancher (includes cert-manager, TLS=secret for Pi)"
+            echo "  9. Configure Rancher API (server-url, agent-tls-mode)"
+            echo " 10. Configure Let's Encrypt wildcard cert"
+            echo " 11. Setup Flux GitOps"
+            echo " 12. Install GitLab CE (native on Pi)"
+            echo " 13. Apply HTTPRoutes (Rancher, GitLab)"
+            echo " 14. Deploy Tailscale key management CronJobs"
         else
             echo "  5. Install Rancher"
             echo "  6. Setup Fleet GitOps"
             echo "  7. Deploy core apps"
         fi
-        echo " 13. Verify installation"
+        echo " 15. Verify installation"
         exit 0
     fi
     
@@ -1458,15 +1620,23 @@ main() {
     
     # Stack-specific orchestration
     if [[ "$STACK" == "karmada" ]]; then
+        # Pi with Karmada uses cert-manager/Traefik for TLS, not Rancher's built-in
+        if [[ "$PLATFORM" == "pi" ]]; then
+            export RANCHER_TLS_SOURCE="secret"
+            export RANCHER_HOSTNAME="${RANCHER_HOSTNAME:-rancher.kubew.dev}"
+        fi
+
         # Karmada stack: full infrastructure pipeline
         install_traefik              # Traefik + Gateway API CRDs + Gateway resource
         install_karmada              # Karmada control plane
         create_secrets               # Cloudflare API token (needed for cert-manager LE)
         install_rancher              # cert-manager + Rancher Helm charts
+        configure_rancher_api        # Set server-url + agent-tls-mode for Tailscale/LE
         setup_cert_manager_le        # Let's Encrypt ClusterIssuer + wildcard cert
         setup_flux                   # Flux controllers + kustomizations
         install_gitlab_native        # GitLab CE native deb on Pi host
         setup_httproutes             # HTTPRoutes for Rancher, GitLab, etc.
+        deploy_tailscale_keys        # Seed secrets + key management CronJobs
     else
         # Legacy Fleet stack: Rancher -> Fleet -> Apps
         install_rancher
@@ -1489,17 +1659,24 @@ main() {
         if [[ "$PLATFORM" == "pi" ]]; then
             echo "  2. Access Rancher: https://rancher.kubew.dev"
             echo "  3. Access GitLab:  https://gitlab.kubew.dev"
-            echo "  4. Register edge Pi clusters:"
+            echo "  4. Register edge Pi with Karmada:"
             echo "     ./karmada/cluster-registration/register-pi.sh --pi-ip <edge-pi-ip>"
+            echo "  5. Import edge Pi into Rancher:"
+            echo "     RANCHER_TOKEN=<token> ./rancher/import-cluster.sh --name <name> --pi-ip <ip>"
         else
             echo "  2. Register Pi clusters: ./karmada/cluster-registration/register-pi.sh"
         fi
-        echo "  5. Monitor Flux sync: flux get kustomizations -A"
-        echo "  6. Check Karmada clusters: karmadactl get clusters"
+        echo "  6. Monitor Flux sync: flux get kustomizations -A"
+        echo "  7. Check Karmada clusters: karmadactl get clusters"
         if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
             echo ""
-            echo "  ⚠ CLOUDFLARE_API_TOKEN was not set — TLS cert not issued"
+            echo "  CLOUDFLARE_API_TOKEN was not set — TLS cert not issued"
             echo "    Set it and re-run, or create the secret manually."
+        fi
+        if [[ -z "${TAILSCALE_API_TOKEN:-}" ]]; then
+            echo ""
+            echo "  TAILSCALE_API_TOKEN was not set — key management not deployed"
+            echo "    Set it and re-run, or deploy apps/tailscale-rotate/cronjob.yaml manually."
         fi
     else
         echo "Next steps:"

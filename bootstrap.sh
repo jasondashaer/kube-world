@@ -920,6 +920,182 @@ setup_flux() {
 }
 
 #===============================================================================
+# Traefik Ingress Controller (replaces K3s builtin, adds Gateway API)
+#===============================================================================
+install_traefik() {
+    log "Installing Traefik ingress controller..."
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "[DRY RUN] Would install Gateway API CRDs, Traefik Helm chart, and Gateway resource"
+        return 0
+    fi
+
+    # Install Gateway API CRDs (required before Traefik can use them)
+    log "Installing Gateway API CRDs..."
+    kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.1.0/standard-install.yaml
+
+    # Add Traefik Helm repo
+    helm repo add traefik https://traefik.github.io/charts 2>/dev/null || true
+    helm repo update
+
+    # Install Traefik with Pi-optimized values
+    local traefik_values="${SCRIPT_DIR}/infrastructure/traefik/values.yaml"
+    if [[ ! -f "$traefik_values" ]]; then
+        error "Traefik values file not found: ${traefik_values}"
+        return 1
+    fi
+
+    log "Installing Traefik Helm chart..."
+    helm upgrade --install traefik traefik/traefik \
+        --namespace kube-system \
+        -f "$traefik_values" \
+        --wait --timeout 5m
+
+    # Wait for Traefik pods
+    kubectl -n kube-system wait --for=condition=Available deployment/traefik --timeout=120s
+    log "Traefik installed ✓"
+
+    # Apply the shared Gateway resource (HTTP + HTTPS listeners)
+    log "Applying Gateway resource..."
+    kubectl apply -f "${SCRIPT_DIR}/infrastructure/gateway/gateway.yaml"
+    log "Gateway API configured ✓"
+}
+
+#===============================================================================
+# Secrets Creation (secrets needed before cert-manager and Flux can work)
+#===============================================================================
+create_secrets() {
+    log "Creating required secrets..."
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "[DRY RUN] Would create Cloudflare API token secret"
+        return 0
+    fi
+
+    # Cloudflare API token — required for cert-manager DNS-01 challenges
+    if kubectl -n cert-manager get secret cloudflare-api-token &>/dev/null; then
+        log "Cloudflare API token secret already exists"
+    elif [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+        kubectl create namespace cert-manager --dry-run=client -o yaml | kubectl apply -f -
+        kubectl create secret generic cloudflare-api-token \
+            --from-literal=api-token="${CLOUDFLARE_API_TOKEN}" \
+            -n cert-manager --dry-run=client -o yaml | kubectl apply -f -
+        log "Cloudflare API token secret created ✓"
+    else
+        warn "CLOUDFLARE_API_TOKEN not set — skipping cert-manager secret"
+        warn "Set it via: export CLOUDFLARE_API_TOKEN=<your-token>"
+        warn "Then re-run bootstrap or create manually:"
+        warn "  kubectl create secret generic cloudflare-api-token \\"
+        warn "    --from-literal=api-token=<token> -n cert-manager"
+    fi
+}
+
+#===============================================================================
+# Let's Encrypt Certificate Setup (runs after cert-manager is installed by Rancher)
+#===============================================================================
+setup_cert_manager_le() {
+    log "Configuring Let's Encrypt wildcard certificate..."
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "[DRY RUN] Would apply ClusterIssuer and Certificate for *.kubew.dev"
+        return 0
+    fi
+
+    # Verify cert-manager is running (installed by rancher/install-rancher.sh)
+    if ! kubectl -n cert-manager get deployment cert-manager &>/dev/null; then
+        warn "cert-manager not found — skipping Let's Encrypt setup"
+        return 0
+    fi
+
+    # Apply ClusterIssuer (Let's Encrypt + Cloudflare DNS-01)
+    local issuer_file="${SCRIPT_DIR}/infrastructure/cert-manager/clusterissuer.yaml"
+    if [[ -f "$issuer_file" ]]; then
+        kubectl apply -f "$issuer_file"
+        log "ClusterIssuer applied ✓"
+    else
+        warn "ClusterIssuer file not found: ${issuer_file}"
+    fi
+
+    # Apply Certificate (*.kubew.dev wildcard)
+    local cert_file="${SCRIPT_DIR}/infrastructure/cert-manager/certificate.yaml"
+    if [[ -f "$cert_file" ]]; then
+        kubectl apply -f "$cert_file"
+        log "Wildcard certificate requested ✓"
+    else
+        warn "Certificate file not found: ${cert_file}"
+    fi
+
+    # Don't wait for cert — DNS propagation can take minutes
+    log "Certificate will be issued once DNS-01 challenge completes"
+}
+
+#===============================================================================
+# HTTPRoute Setup (Rancher, GitLab, and other services)
+#===============================================================================
+setup_httproutes() {
+    log "Applying HTTPRoutes for services..."
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "[DRY RUN] Would apply HTTPRoutes for Rancher, GitLab"
+        return 0
+    fi
+
+    # Rancher HTTPRoute
+    if [[ -f "${SCRIPT_DIR}/rancher/gateway.yaml" ]]; then
+        kubectl apply -f "${SCRIPT_DIR}/rancher/gateway.yaml"
+        log "Rancher HTTPRoute applied ✓"
+    fi
+
+    # GitLab HTTPRoute + Service/Endpoints (native GitLab on host)
+    if [[ -f "${SCRIPT_DIR}/apps/gitlab/service.yaml" ]]; then
+        kubectl create namespace gitlab --dry-run=client -o yaml | kubectl apply -f -
+        kubectl apply -f "${SCRIPT_DIR}/apps/gitlab/service.yaml"
+        log "GitLab Service/Endpoints applied ✓"
+    fi
+    if [[ -f "${SCRIPT_DIR}/apps/gitlab/gateway.yaml" ]]; then
+        kubectl apply -f "${SCRIPT_DIR}/apps/gitlab/gateway.yaml"
+        log "GitLab HTTPRoute applied ✓"
+    fi
+
+    kubectl get httproute -A 2>/dev/null || true
+}
+
+#===============================================================================
+# GitLab Native Installation (runs on Pi host as systemd, not K8s)
+#===============================================================================
+install_gitlab_native() {
+    log "Installing GitLab CE on Pi host..."
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "[DRY RUN] Would install GitLab CE native deb on Pi"
+        return 0
+    fi
+
+    local gitlab_script="${SCRIPT_DIR}/scripts/install-gitlab.sh"
+    if [[ ! -f "$gitlab_script" ]]; then
+        warn "GitLab install script not found: ${gitlab_script}"
+        return 0
+    fi
+
+    # Determine the target host for SSH
+    local target_ip="${PI_IP:-}"
+    if [[ -z "$target_ip" ]]; then
+        warn "PI_IP not set — skipping GitLab native install"
+        return 0
+    fi
+
+    # Check if GitLab is already installed
+    if ssh "admin@${target_ip}" "command -v gitlab-ctl" &>/dev/null 2>&1; then
+        log "GitLab already installed on ${target_ip}"
+    else
+        log "Running GitLab install script on ${target_ip}..."
+        bash "$gitlab_script"
+    fi
+
+    log "GitLab native install complete ✓"
+}
+
+#===============================================================================
 # Karmada Stack Cleanup
 #===============================================================================
 cleanup_karmada() {
@@ -1006,6 +1182,21 @@ verify_installation() {
     kubectl -n cattle-system get pods 2>/dev/null || echo "Rancher not installed"
 
     if [[ "$STACK" == "karmada" ]]; then
+        echo ""
+        echo "=============================================="
+        echo "TRAEFIK / GATEWAY API"
+        echo "=============================================="
+        kubectl -n kube-system get pods -l app.kubernetes.io/name=traefik 2>/dev/null || echo "Traefik not installed"
+        kubectl get gateway -n kube-system 2>/dev/null || echo "No Gateway resources"
+        kubectl get httproute -A 2>/dev/null || echo "No HTTPRoutes"
+
+        echo ""
+        echo "=============================================="
+        echo "TLS CERTIFICATES"
+        echo "=============================================="
+        kubectl get certificate -n kube-system 2>/dev/null || echo "No certificates"
+        kubectl get clusterissuer 2>/dev/null || echo "No ClusterIssuers"
+
         echo ""
         echo "=============================================="
         echo "KARMADA STATUS"
@@ -1205,16 +1396,20 @@ main() {
             echo "  4. Setup ${PLATFORM} cluster"
         fi
         if [[ "$STACK" == "karmada" ]]; then
-            echo "  5. Install Karmada control plane"
-            echo "  6. Install Rancher"
-            echo "  7. Setup Flux GitOps"
-            echo "  8. Apps deployed via Flux -> Karmada pipeline"
+            echo "  5. Install Traefik + Gateway API"
+            echo "  6. Install Karmada control plane"
+            echo "  7. Create secrets (Cloudflare API token)"
+            echo "  8. Install Rancher (includes cert-manager)"
+            echo "  9. Configure Let's Encrypt wildcard cert"
+            echo " 10. Setup Flux GitOps"
+            echo " 11. Install GitLab CE (native on Pi)"
+            echo " 12. Apply HTTPRoutes (Rancher, GitLab)"
         else
             echo "  5. Install Rancher"
             echo "  6. Setup Fleet GitOps"
             echo "  7. Deploy core apps"
         fi
-        echo "  9. Verify installation"
+        echo " 13. Verify installation"
         exit 0
     fi
     
@@ -1263,10 +1458,15 @@ main() {
     
     # Stack-specific orchestration
     if [[ "$STACK" == "karmada" ]]; then
-        # Karmada stack: Karmada -> Rancher -> Flux -> Apps (via Karmada propagation)
-        install_karmada
-        install_rancher
-        setup_flux
+        # Karmada stack: full infrastructure pipeline
+        install_traefik              # Traefik + Gateway API CRDs + Gateway resource
+        install_karmada              # Karmada control plane
+        create_secrets               # Cloudflare API token (needed for cert-manager LE)
+        install_rancher              # cert-manager + Rancher Helm charts
+        setup_cert_manager_le        # Let's Encrypt ClusterIssuer + wildcard cert
+        setup_flux                   # Flux controllers + kustomizations
+        install_gitlab_native        # GitLab CE native deb on Pi host
+        setup_httproutes             # HTTPRoutes for Rancher, GitLab, etc.
     else
         # Legacy Fleet stack: Rancher -> Fleet -> Apps
         install_rancher
@@ -1287,15 +1487,20 @@ main() {
         echo "Next steps:"
         echo "  1. Change Rancher admin password"
         if [[ "$PLATFORM" == "pi" ]]; then
-            echo "  2. Access Rancher UI: https://${PI_IP:-<pi-ip>}:8443"
-            echo "  3. Purchase + provision edge Pi, then register:"
+            echo "  2. Access Rancher: https://rancher.kubew.dev"
+            echo "  3. Access GitLab:  https://gitlab.kubew.dev"
+            echo "  4. Register edge Pi clusters:"
             echo "     ./karmada/cluster-registration/register-pi.sh --pi-ip <edge-pi-ip>"
         else
             echo "  2. Register Pi clusters: ./karmada/cluster-registration/register-pi.sh"
         fi
-        echo "  4. Configure secrets in /secrets/ directory"
         echo "  5. Monitor Flux sync: flux get kustomizations -A"
         echo "  6. Check Karmada clusters: karmadactl get clusters"
+        if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+            echo ""
+            echo "  ⚠ CLOUDFLARE_API_TOKEN was not set — TLS cert not issued"
+            echo "    Set it and re-run, or create the secret manually."
+        fi
     else
         echo "Next steps:"
         echo "  1. Change Rancher admin password"

@@ -1,0 +1,370 @@
+# Tailscale Key Management CronJobs
+#
+# Two jobs:
+# 1. tailscale-api-key-check — Daily. Checks API key expiry. Sends ntfy alerts
+#    weekly when within 30 days, daily when within 7 days, and urgent if expired.
+#    API keys can only be rotated manually in the Tailscale admin console;
+#    run scripts/rotate-tailscale-api-key.sh after.
+#
+# 2. tailscale-auth-key-rotate — Monthly. Uses the API key to create a fresh
+#    90-day reusable pre-authorized auth key for provisioning new devices,
+#    stores it in kube-world-secrets, and cleans up old auth keys.
+#
+# Both read from kube-world-secrets in default namespace (SOPS-managed).
+# Portable: apply to whichever cluster is central.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tailscale-key-scripts
+  namespace: default
+  labels:
+    app.kubernetes.io/name: tailscale-key-mgmt
+    app.kubernetes.io/part-of: kube-world
+data:
+  check-api-key.sh: |
+    #!/bin/sh
+    set -eu
+
+    TAILSCALE_API="https://api.tailscale.com/api/v2"
+    NTFY_URL="${NTFY_URL:-http://10.5.5.249:8090/kube-world}"
+    WARN_DAYS="${WARN_DAYS:-30}"
+
+    log()   { echo "[ts-check] $*"; }
+    error() { echo "[ts-check] ERROR: $*" >&2; }
+
+    notify() {
+      local title="$1" message="$2" priority="${3:-default}" tags="${4:-key}"
+      curl -sf -X POST "$NTFY_URL" \
+        -H "Title: $title" \
+        -H "Priority: $priority" \
+        -H "Tags: $tags" \
+        -d "$message" 2>/dev/null || log "ntfy notification failed (non-fatal)"
+    }
+
+    CURRENT_TOKEN=$(cat /etc/tailscale/tailscale-api-token)
+    KEY_ID=$(cat /etc/tailscale/tailscale-api-key-id 2>/dev/null || echo "")
+
+    if [ -z "$CURRENT_TOKEN" ]; then
+      error "API token is empty"
+      notify "Tailscale API Key MISSING" "API token secret is empty in kube-world-secrets." "urgent" "x"
+      exit 1
+    fi
+
+    # Verify token works
+    log "Checking API token..."
+    if ! curl -sf -u "${CURRENT_TOKEN}:" "${TAILSCALE_API}/tailnet/-/devices" >/dev/null 2>&1; then
+      error "API token is invalid or expired"
+      notify "Tailscale API Key EXPIRED" "API token is invalid. Create a new one at https://login.tailscale.com/admin/settings/keys then run: scripts/rotate-tailscale-api-key.sh <new-key>" "urgent" "x"
+      exit 1
+    fi
+    log "API token is valid"
+
+    # Check expiry if we have the key ID
+    if [ -z "$KEY_ID" ]; then
+      log "No key ID stored — token works but cannot check expiry"
+      notify "Tailscale API Key OK" "Token valid but key ID missing — cannot check expiry date." "default" "warning"
+      exit 0
+    fi
+
+    KEY_INFO=$(curl -sf -u "${CURRENT_TOKEN}:" "${TAILSCALE_API}/tailnet/-/keys/${KEY_ID}" 2>/dev/null || echo "")
+    if [ -z "$KEY_INFO" ]; then
+      log "Could not fetch key details for ${KEY_ID}"
+      notify "Tailscale API Key OK" "Token valid but could not fetch details for key ${KEY_ID}." "default" "warning"
+      exit 0
+    fi
+
+    EXPIRES=$(echo "$KEY_INFO" | jq -r '.expires // empty')
+    if [ -z "$EXPIRES" ]; then
+      log "No expiry date — key may be non-expiring"
+      exit 0
+    fi
+
+    # Calculate days remaining
+    EXPIRES_EPOCH=$(date -d "$EXPIRES" +%s 2>/dev/null || date -jf "%Y-%m-%dT%H:%M:%SZ" "$EXPIRES" +%s 2>/dev/null || echo "")
+    NOW_EPOCH=$(date +%s)
+    if [ -z "$EXPIRES_EPOCH" ]; then
+      log "Could not parse expiry: ${EXPIRES}"
+      exit 0
+    fi
+
+    DAYS_LEFT=$(( (EXPIRES_EPOCH - NOW_EPOCH) / 86400 ))
+    EXPIRES_SHORT=$(echo "$EXPIRES" | cut -c1-10)
+    log "Key ${KEY_ID} expires ${EXPIRES_SHORT} — ${DAYS_LEFT} days remaining"
+
+    ROTATE_MSG="Create a new one at https://login.tailscale.com/admin/settings/keys then run: scripts/rotate-tailscale-api-key.sh <new-key>"
+    DOW=$(date +%u)  # 1=Monday ... 7=Sunday
+
+    if [ "$DAYS_LEFT" -le 0 ]; then
+      # Expired — alert every run (daily)
+      notify "Tailscale API Key EXPIRED" "Key ${KEY_ID} expired ${EXPIRES_SHORT}. ${ROTATE_MSG}" "urgent" "x"
+      exit 1
+    elif [ "$DAYS_LEFT" -le 7 ]; then
+      # Critical — alert daily
+      notify "Tailscale API Key Expiring (${DAYS_LEFT}d)" "Key ${KEY_ID} expires in ${DAYS_LEFT} days (${EXPIRES_SHORT}). ${ROTATE_MSG}" "urgent" "warning"
+    elif [ "$DAYS_LEFT" -le "$WARN_DAYS" ]; then
+      # Warning — alert weekly (Mondays only)
+      if [ "$DOW" = "1" ]; then
+        notify "Tailscale API Key Expiring (${DAYS_LEFT}d)" "Key ${KEY_ID} expires in ${DAYS_LEFT} days (${EXPIRES_SHORT}). ${ROTATE_MSG}" "high" "warning"
+      else
+        log "Within warning window but not Monday — skipping notification"
+      fi
+    else
+      log "Healthy — ${DAYS_LEFT} days remaining"
+    fi
+
+  rotate-auth-key.sh: |
+    #!/bin/sh
+    set -eu
+
+    TAILSCALE_API="https://api.tailscale.com/api/v2"
+    NTFY_URL="${NTFY_URL:-http://10.5.5.249:8090/kube-world}"
+    SECRET_NAME="kube-world-secrets"
+    SECRET_NS="default"
+
+    log()   { echo "[ts-auth] $*"; }
+    error() { echo "[ts-auth] ERROR: $*" >&2; }
+
+    notify() {
+      local title="$1" message="$2" priority="${3:-default}" tags="${4:-key}"
+      curl -sf -X POST "$NTFY_URL" \
+        -H "Title: $title" \
+        -H "Priority: $priority" \
+        -H "Tags: $tags" \
+        -d "$message" 2>/dev/null || log "ntfy notification failed (non-fatal)"
+    }
+
+    API_TOKEN=$(cat /etc/tailscale/tailscale-api-token)
+    OLD_AUTH_KEY_ID=$(cat /etc/tailscale/tailscale-auth-key-id 2>/dev/null || echo "")
+
+    if [ -z "$API_TOKEN" ]; then
+      error "API token is empty"
+      notify "Tailscale Auth Key Rotation Failed" "API token missing — cannot create auth keys." "urgent" "x"
+      exit 1
+    fi
+
+    # Verify API token
+    log "Verifying API token..."
+    if ! curl -sf -u "${API_TOKEN}:" "${TAILSCALE_API}/tailnet/-/devices" >/dev/null 2>&1; then
+      error "API token invalid — cannot rotate auth key"
+      notify "Tailscale Auth Key Rotation Failed" "API token invalid or expired. Rotate the API key first." "urgent" "x"
+      exit 1
+    fi
+
+    # Create new 90-day reusable pre-authorized auth key
+    log "Creating new auth key..."
+    RESPONSE=$(curl -sf -u "${API_TOKEN}:" \
+      -X POST "${TAILSCALE_API}/tailnet/-/keys" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "capabilities": {
+          "devices": {
+            "create": {
+              "reusable": true,
+              "ephemeral": false,
+              "preauthorized": true
+            }
+          }
+        },
+        "expirySeconds": 7776000,
+        "description": "kube-world provisioning"
+      }')
+
+    NEW_AUTH_KEY=$(echo "$RESPONSE" | jq -r '.key // empty')
+    NEW_AUTH_KEY_ID=$(echo "$RESPONSE" | jq -r '.id // empty')
+    AUTH_EXPIRY=$(echo "$RESPONSE" | jq -r '.expires[:10] // empty')
+
+    if [ -z "$NEW_AUTH_KEY" ] || [ -z "$NEW_AUTH_KEY_ID" ]; then
+      error "Failed to create auth key"
+      notify "Tailscale Auth Key Rotation Failed" "Could not create auth key — check API token permissions." "urgent" "x"
+      exit 1
+    fi
+    log "New auth key: ${NEW_AUTH_KEY_ID} (expires ${AUTH_EXPIRY})"
+
+    # Update K8s secret
+    log "Updating K8s secret..."
+    B64_KEY=$(echo -n "$NEW_AUTH_KEY" | base64 | tr -d '\n')
+    B64_ID=$(echo -n "$NEW_AUTH_KEY_ID" | base64 | tr -d '\n')
+    if ! kubectl patch secret "$SECRET_NAME" -n "$SECRET_NS" -p \
+      "{\"data\":{\"tailscale-auth-key\":\"${B64_KEY}\",\"tailscale-auth-key-id\":\"${B64_ID}\"}}"; then
+      error "Failed to update secret — new auth key ID: ${NEW_AUTH_KEY_ID}"
+      notify "Tailscale Auth Key Rotation Partial" "New key ${NEW_AUTH_KEY_ID} created but secret update failed." "urgent" "warning"
+      exit 1
+    fi
+    log "Secret updated"
+
+    # Delete old auth key
+    if [ -n "$OLD_AUTH_KEY_ID" ] && [ "$OLD_AUTH_KEY_ID" != "$NEW_AUTH_KEY_ID" ]; then
+      log "Deleting old auth key: ${OLD_AUTH_KEY_ID}"
+      curl -sf -u "${API_TOKEN}:" -X DELETE "${TAILSCALE_API}/tailnet/-/keys/${OLD_AUTH_KEY_ID}" 2>/dev/null || \
+        log "Could not delete old auth key (may already be expired)"
+    fi
+
+    # Also clean up any other stale provisioning auth keys
+    STALE_KEYS=$(curl -sf -u "${API_TOKEN}:" "${TAILSCALE_API}/tailnet/-/keys" 2>/dev/null | \
+      jq -r ".keys[] | select(.keyType == \"auth\" and .description == \"kube-world provisioning\" and .id != \"${NEW_AUTH_KEY_ID}\") | .id" 2>/dev/null || echo "")
+    for stale_id in $STALE_KEYS; do
+      log "Cleaning up stale auth key: ${stale_id}"
+      curl -sf -u "${API_TOKEN}:" -X DELETE "${TAILSCALE_API}/tailnet/-/keys/${stale_id}" 2>/dev/null || true
+    done
+
+    log "Auth key rotation complete: ${NEW_AUTH_KEY_ID} (expires ${AUTH_EXPIRY})"
+    notify "Tailscale Auth Key Rotated" "New provisioning key: ${NEW_AUTH_KEY_ID}, expires ${AUTH_EXPIRY}. Old key ${OLD_AUTH_KEY_ID:-none} cleaned up." "default" "white_check_mark"
+
+---
+# Job 1: API key expiry monitor (weekly)
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tailscale-api-key-check
+  namespace: default
+  labels:
+    app.kubernetes.io/name: tailscale-key-mgmt
+    app.kubernetes.io/part-of: kube-world
+spec:
+  # Daily at 06:00 UTC — only sends ntfy when action needed
+  schedule: "0 6 * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 60
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: tailscale-api-key-check
+        spec:
+          serviceAccountName: tailscale-key-mgmt
+          restartPolicy: Never
+          containers:
+            - name: check
+              image: bitnami/kubectl:latest
+              command: ["/bin/sh", "/scripts/check-api-key.sh"]
+              env:
+                - name: NTFY_URL
+                  value: "http://10.5.5.249:8090/kube-world"
+                - name: WARN_DAYS
+                  value: "30"
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+                - name: tailscale-creds
+                  mountPath: /etc/tailscale
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
+          volumes:
+            - name: scripts
+              configMap:
+                name: tailscale-key-scripts
+                defaultMode: 0755
+            - name: tailscale-creds
+              secret:
+                secretName: kube-world-secrets
+
+---
+# Job 2: Auth key rotation (monthly)
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tailscale-auth-key-rotate
+  namespace: default
+  labels:
+    app.kubernetes.io/name: tailscale-key-mgmt
+    app.kubernetes.io/part-of: kube-world
+spec:
+  schedule: "0 6 1 * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 120
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: tailscale-auth-key-rotate
+        spec:
+          serviceAccountName: tailscale-key-mgmt
+          restartPolicy: Never
+          containers:
+            - name: rotate
+              image: bitnami/kubectl:latest
+              command: ["/bin/sh", "/scripts/rotate-auth-key.sh"]
+              env:
+                - name: NTFY_URL
+                  value: "http://10.5.5.249:8090/kube-world"
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+                - name: tailscale-creds
+                  mountPath: /etc/tailscale
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
+          volumes:
+            - name: scripts
+              configMap:
+                name: tailscale-key-scripts
+                defaultMode: 0755
+            - name: tailscale-creds
+              secret:
+                secretName: kube-world-secrets
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tailscale-key-mgmt
+  namespace: default
+  labels:
+    app.kubernetes.io/name: tailscale-key-mgmt
+    app.kubernetes.io/part-of: kube-world
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tailscale-key-mgmt
+  namespace: default
+  labels:
+    app.kubernetes.io/name: tailscale-key-mgmt
+    app.kubernetes.io/part-of: kube-world
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["kube-world-secrets"]
+    verbs: ["get", "patch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tailscale-key-mgmt
+  namespace: default
+  labels:
+    app.kubernetes.io/name: tailscale-key-mgmt
+    app.kubernetes.io/part-of: kube-world
+subjects:
+  - kind: ServiceAccount
+    name: tailscale-key-mgmt
+    namespace: default
+roleRef:
+  kind: Role
+  name: tailscale-key-mgmt
+  apiGroup: rbac.authorization.k8s.io

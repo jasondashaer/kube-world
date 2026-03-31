@@ -289,6 +289,12 @@
       register: ts_install
       until: ts_install is success
 
+    - name: Check if Tailscale is already authenticated
+      shell: tailscale status --json 2>/dev/null | grep -q '"BackendState":"Running"'
+      register: tailscale_authed
+      failed_when: false
+      changed_when: false
+
     - name: Authenticate Tailscale (headless)
       shell: >
         tailscale up
@@ -299,7 +305,7 @@
         --timeout=30s
       when:
         - tailscale_auth_key | length > 0
-        - tailscale_installed.rc != 0
+        - tailscale_authed.rc != 0
       register: ts_auth
 
     - name: Wait for Tailscale to connect

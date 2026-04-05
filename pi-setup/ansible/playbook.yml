@@ -325,13 +325,21 @@
       debug:
         msg: "{{ node_name | default(inventory_hostname) }} Tailscale IP: {{ tailscale_ip.stdout }}"
 
+    - name: Look up central Pi Tailscale IP via MagicDNS (dynamic, no env var needed)
+      shell: tailscale ip -4 pi-central 2>/dev/null || echo ""
+      register: central_ts_ip_lookup
+      changed_when: false
+      failed_when: false
+
     - name: Add domain DNS entries to /etc/hosts (central node resolution)
       lineinfile:
         path: /etc/hosts
         regexp: '.*{{ domain | default("kubew.dev") }}'
-        line: "{{ central_tailscale_ip }} rancher.{{ domain | default('kubew.dev') }} gitlab.{{ domain | default('kubew.dev') }}"
+        line: "{{ central_ts_ip_lookup.stdout | trim }} rancher.{{ domain | default('kubew.dev') }} gitlab.{{ domain | default('kubew.dev') }}"
         state: present
-      when: central_tailscale_ip | length > 0
+      when:
+        - central_ts_ip_lookup.stdout | trim | length > 0
+        - central_ts_ip_lookup.stdout | trim | regex_search('^100\.')
 
 - name: Install K3s on master nodes
   hosts: masters
@@ -583,13 +591,19 @@
       debug:
         var: edge_status.stdout_lines
 
+    - name: Look up central Pi Tailscale IP for CoreDNS
+      command: tailscale ip -4 pi-central
+      register: coredns_central_ip
+      failed_when: false
+      changed_when: false
+
     - name: Add domain to CoreDNS NodeHosts (for Rancher agent)
       shell: |
         set -euo pipefail
-        CENTRAL_TS_IP="{{ lookup('env', 'CENTRAL_TAILSCALE_IP') }}"
+        CENTRAL_TS_IP="{{ coredns_central_ip.stdout | default('') | trim }}"
         DOMAIN="{{ domain | default('kubew.dev') }}"
         if [ -z "$CENTRAL_TS_IP" ]; then
-          echo "CENTRAL_TAILSCALE_IP not set — skipping CoreDNS config"
+          echo "Could not resolve pi-central via Tailscale"
           exit 0
         fi
         HOSTS=$(kubectl -n kube-system get configmap coredns -o jsonpath='{.data.NodeHosts}')
@@ -602,7 +616,8 @@
           jq --arg entry "$NEW_LINE" '.data.NodeHosts = (.data.NodeHosts | rtrimstr("\n") + "\n" + $entry + "\n")' | \
           kubectl apply -f -
         kubectl -n kube-system rollout restart deploy/coredns
-        echo "CoreDNS updated with ${DOMAIN} entries"
+        echo "CoreDNS updated with domain entries"
+      when: coredns_central_ip.rc == 0 and coredns_central_ip.stdout | trim | length > 0
       args:
         executable: /bin/bash
       environment:

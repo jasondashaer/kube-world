@@ -1194,8 +1194,19 @@ configure_rancher_api() {
     }
 
     _cfg_put_setting "server-url" "$public_url"
-    _cfg_put_setting "agent-tls-mode" "system-store"
-    _cfg_put_setting "cacerts" ""
+    # agent-tls-mode and cacerts are set via Helm values (--set agentTLSMode
+    # and --set privateCA) and become read-only in Rancher 2.13+. Setting
+    # them here would return HTTP 405. We only set them via API on older
+    # Rancher versions as a fallback — check before attempting.
+    local current_atm
+    current_atm=$(curl -sk "${local_url}/v3/settings/agent-tls-mode" \
+        -H "Authorization: Bearer ${session_token}" 2>/dev/null \
+        | jq -r '.value // ""' 2>/dev/null || echo "")
+    if [[ "$current_atm" != "system-store" ]]; then
+        _cfg_put_setting "agent-tls-mode" "system-store"
+    else
+        debug "  agent-tls-mode already = system-store (set via Helm)"
+    fi
 
     # Delete internal CA secrets (not needed with LE + system-store)
     kubectl -n cattle-system delete secret tls-rancher-internal-ca tls-rancher-internal \

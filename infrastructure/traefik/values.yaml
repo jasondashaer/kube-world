@@ -1,11 +1,16 @@
 # Traefik Ingress Controller - Pi-optimized values
 # Deployed via Helm in the kube-system namespace
 #
-# Uses NodePort + hostPort for standard port access:
-#   http://<pi-ip>:80   (hostPort) — primary access for kubew.dev domains
-#   http://<pi-ip>:30080 (NodePort) — fallback
-#   https://<pi-ip>:443  (hostPort)
-#   https://<pi-ip>:30443 (NodePort)
+# Uses LoadBalancer service type so K3s's built-in servicelb (klipper-lb)
+# spawns svclb-traefik pods on the host network that bind host ports 80
+# and 443. This is the correct way to expose standard HTTP/HTTPS ports
+# on bare-metal K3s — hostPort alone doesn't work because K3s's default
+# flannel CNI doesn't include the portmap plugin.
+#
+# Access paths once deployed:
+#   http://<pi-ip>:80   — host port via klipper-lb svclb pod
+#   https://<pi-ip>:443 — host port via klipper-lb svclb pod
+#   http://<pi-ip>:30080 / 30443 — NodePort fallback
 #
 # Gateway API routes traffic by hostname (e.g., gitlab.kubew.dev)
 # to the appropriate backend service.
@@ -23,7 +28,13 @@ resources:
 deployment:
   replicas: 1
 
-# Ports configuration
+# Ports configuration.
+# Note: do NOT set hostPort here. Even though K3s's flannel CNI ignores
+# hostPort (so it's harmless at the CNI level), the K8s scheduler still
+# tracks hostPort allocations on the node. Setting hostPort on the Traefik
+# pod would prevent K3s's svclb-traefik pods (spawned by servicelb for
+# the LoadBalancer service below) from binding the same host ports,
+# leaving them Pending with "didn't have free ports" errors.
 ports:
   traefik:
     port: 9000
@@ -34,17 +45,18 @@ ports:
     expose:
       default: true
     nodePort: 30080
-    hostPort: 80
   websecure:
     port: 8443
     expose:
       default: true
     nodePort: 30443
-    hostPort: 443
 
-# NodePort service type
+# LoadBalancer service type — triggers K3s's built-in servicelb (klipper-lb)
+# to spawn svclb-traefik-* pods on the host network that bind host ports
+# 80/443. Without this, nothing is actually reachable via the standard
+# HTTP/HTTPS ports on the node's IP.
 service:
-  type: NodePort
+  type: LoadBalancer
 
 # Access logs (lightweight)
 logs:

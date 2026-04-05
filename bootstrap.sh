@@ -1543,12 +1543,11 @@ cloudflare_upsert_dns_records() {
     log "DNS records upserted ✓"
 }
 
-# Fetch central Pi's Tailscale IP via SSH. Sets CENTRAL_TAILSCALE_IP if empty.
+# Fetch central Pi's Tailscale IP via SSH. ALWAYS fetches fresh (never
+# trusts a pre-existing CENTRAL_TAILSCALE_IP from .env.bootstrap) because
+# Tailscale IPs change on fresh wipes and any stale cached value causes
+# DNS drift that breaks cert issuance + external access.
 fetch_central_tailscale_ip() {
-    if [[ -n "${CENTRAL_TAILSCALE_IP:-}" ]]; then
-        debug "CENTRAL_TAILSCALE_IP already set: ${CENTRAL_TAILSCALE_IP}"
-        return 0
-    fi
     if [[ -z "${PI_IP:-}" ]]; then
         debug "PI_IP not set — cannot fetch Tailscale IP"
         return 0
@@ -1559,8 +1558,11 @@ fetch_central_tailscale_ip() {
         "admin@${PI_IP}" "tailscale ip -4" 2>/dev/null | head -1 || true)
 
     if [[ -n "$ip" && "$ip" =~ ^100\. ]]; then
+        if [[ -n "${CENTRAL_TAILSCALE_IP:-}" && "$CENTRAL_TAILSCALE_IP" != "$ip" ]]; then
+            warn "Central Pi Tailscale IP drifted: ${CENTRAL_TAILSCALE_IP} → ${ip}"
+        fi
         export CENTRAL_TAILSCALE_IP="$ip"
-        log "Detected central Pi Tailscale IP: ${CENTRAL_TAILSCALE_IP}"
+        log "Central Pi Tailscale IP: ${CENTRAL_TAILSCALE_IP}"
     else
         warn "Could not determine central Pi Tailscale IP via SSH"
     fi
@@ -2244,6 +2246,17 @@ main() {
         setup_flux || { error "Flux setup failed — cannot continue"; exit 1; }
         setup_httproutes             # Best-effort: applies available routes
         deploy_tailscale_keys        # Optional: warns if TAILSCALE_API_TOKEN missing
+
+        # Final DNS sync — re-fetch Pi Tailscale IP and re-upsert A records.
+        # Catches any drift from mid-run K3s/Tailscale restarts (e.g., if
+        # Ansible or helm triggered a node reboot after the initial upsert).
+        log "Verifying DNS matches current Pi Tailscale IP..."
+        local previous_ts_ip="${CENTRAL_TAILSCALE_IP:-}"
+        fetch_central_tailscale_ip
+        if [[ "$previous_ts_ip" != "${CENTRAL_TAILSCALE_IP:-}" ]]; then
+            log "Tailscale IP drifted during bootstrap — re-upserting DNS"
+        fi
+        cloudflare_upsert_dns_records
     else
         # Legacy Fleet stack: Rancher -> Fleet -> Apps
         install_rancher

@@ -36,7 +36,6 @@ DOMAIN=""
 CLOUDFLARE_API_TOKEN=""
 TAILSCALE_API_TOKEN=""
 TAILSCALE_AUTH_KEY=""
-CENTRAL_TAILSCALE_IP=""
 PI_IP=""
 SSH_USER=""
 SSH_KEY_PATH=""
@@ -353,7 +352,10 @@ load_existing_env() {
                 CLOUDFLARE_API_TOKEN) CLOUDFLARE_API_TOKEN="$value" ;;
                 TAILSCALE_API_TOKEN)  TAILSCALE_API_TOKEN="$value" ;;
                 TAILSCALE_AUTH_KEY)   TAILSCALE_AUTH_KEY="$value" ;;
-                CENTRAL_TAILSCALE_IP) CENTRAL_TAILSCALE_IP="$value" ;;
+                # CENTRAL_TAILSCALE_IP is intentionally ignored — no longer used
+                # (DNS uses CNAMEs to Tailscale MagicDNS, see bootstrap.sh).
+                # Kept in the case branch so legacy .env.bootstrap files don't warn.
+                CENTRAL_TAILSCALE_IP) ;;
                 RANCHER_BOOTSTRAP_PASSWORD) RANCHER_BOOTSTRAP_PASSWORD="$value" ;;
                 RANCHER_HOSTNAME)     RANCHER_HOSTNAME="$value" ;;
                 PI_IP)                PI_IP="$value" ;;
@@ -488,18 +490,10 @@ section_tailscale() {
         fi
     fi
 
-    echo ""
-    hint "Central node's Tailscale IP (100.x.x.x) for DNS entries."
-    hint "Find with: tailscale ip -4  (on the central node)"
-    prompt "Central Tailscale IP" "${CENTRAL_TAILSCALE_IP:-}" CENTRAL_TAILSCALE_IP
-
-    if [[ -n "$CENTRAL_TAILSCALE_IP" ]]; then
-        if validate_tailscale_ip "$CENTRAL_TAILSCALE_IP"; then
-            info "Tailscale IP: ${CENTRAL_TAILSCALE_IP}"
-        else
-            warn "${CENTRAL_TAILSCALE_IP} doesn't look like a Tailscale IP (expected 100.x.x.x)"
-        fi
-    fi
+    # Note: we no longer ask for the central Pi's Tailscale IP. DNS now
+    # uses CNAMEs → pi-central.<tailnet>.ts.net which resolve dynamically
+    # via Tailscale MagicDNS. The Pi's IP changes every wipe but the
+    # CNAMEs never need updating. See cloudflare_ensure_cnames in bootstrap.sh.
 }
 
 section_pi() {
@@ -617,8 +611,6 @@ section_review() {
         echo -e "  ${BOLD}Tailscale Auth:${NC} ${DIM}(will auto-create)${NC}"
     fi
 
-    echo -e "  ${BOLD}Central TS IP:${NC}  ${CENTRAL_TAILSCALE_IP:-${DIM}(not set)${NC}}"
-
     if [[ "$PLATFORM" == "pi" ]]; then
         echo ""
         echo -e "  ${BOLD}Pi IP:${NC}          ${PI_IP:-${RED}NOT SET${NC}}"
@@ -661,9 +653,11 @@ export DOMAIN=${DOMAIN}
 export CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN}
 
 # Tailscale (mesh VPN)
+# Note: we no longer store CENTRAL_TAILSCALE_IP. DNS uses CNAMEs to
+# Tailscale MagicDNS (pi-central.<tailnet>.ts.net) so the Pi's IP is
+# resolved dynamically and never needs to be tracked here.
 export TAILSCALE_API_TOKEN=${TAILSCALE_API_TOKEN}
 export TAILSCALE_AUTH_KEY=${TAILSCALE_AUTH_KEY}
-export CENTRAL_TAILSCALE_IP=${CENTRAL_TAILSCALE_IP}
 
 # Rancher
 export RANCHER_BOOTSTRAP_PASSWORD=${RANCHER_BOOTSTRAP_PASSWORD}

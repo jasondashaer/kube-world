@@ -339,7 +339,7 @@
         state: present
       when:
         - central_ts_ip_lookup.stdout | trim | length > 0
-        - central_ts_ip_lookup.stdout | trim | regex_search('^100\.')
+        - central_ts_ip_lookup.stdout | trim | regex_search('^100\.') is not none
 
 - name: Install K3s on master nodes
   hosts: masters

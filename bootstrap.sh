@@ -1665,40 +1665,52 @@ setup_cert_manager_le() {
 #===============================================================================
 # HTTPRoute Setup (Rancher, GitLab, and other services)
 #===============================================================================
+# Helper to apply a gateway YAML file with optional domain substitution.
+# Used by both apply_rancher_httproute and setup_httproutes.
+_apply_gateway_file() {
+    local file="$1" label="$2"
+    if [[ ! -f "$file" ]]; then
+        debug "Gateway file not found: ${file}"
+        return 0
+    fi
+    local output
+    if [[ -n "${DOMAIN:-}" ]]; then
+        output=$(sed "s/kubew\.dev/${DOMAIN}/g" "$file" | kubectl apply -f - 2>&1)
+    else
+        output=$(kubectl apply -f "$file" 2>&1)
+    fi
+    if [[ $? -eq 0 ]]; then
+        log "${label} HTTPRoute applied ✓"
+    else
+        warn "Failed to apply ${label} HTTPRoute: ${output}"
+    fi
+}
+
+# Apply the Rancher HTTPRoute. Called right after install_rancher so that
+# Traefik routes traffic to rancher.${DOMAIN} before configure_rancher_api
+# or rancher_import_edge_clusters try to reach it via that URL.
+apply_rancher_httproute() {
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "[DRY RUN] Would apply Rancher HTTPRoute"
+        return 0
+    fi
+    log "Applying Rancher HTTPRoute..."
+    _apply_gateway_file "${SCRIPT_DIR}/rancher/gateway.yaml" "Rancher"
+}
+
 setup_httproutes() {
-    log "Applying HTTPRoutes for services..."
+    log "Applying remaining HTTPRoutes..."
 
     if [[ "$DRY_RUN" == "true" ]]; then
-        log "[DRY RUN] Would apply HTTPRoutes for Rancher, GitLab"
+        log "[DRY RUN] Would apply GitLab HTTPRoute"
         return 0
     fi
 
-    # Helper: apply a gateway YAML, substituting domain if set
-    apply_gateway() {
-        local file="$1" label="$2"
-        if [[ ! -f "$file" ]]; then
-            debug "Gateway file not found: ${file}"
-            return
-        fi
-        local apply_ok=true
-        if [[ -n "${DOMAIN:-}" ]]; then
-            sed "s/kubew\.dev/${DOMAIN}/g" "$file" | kubectl apply -f - || apply_ok=false
-        else
-            kubectl apply -f "$file" || apply_ok=false
-        fi
-        if [[ "$apply_ok" == "true" ]]; then
-            log "${label} HTTPRoute applied ✓"
-        else
-            warn "Failed to apply ${label} HTTPRoute"
-        fi
-    }
-
-    # Rancher HTTPRoute
-    apply_gateway "${SCRIPT_DIR}/rancher/gateway.yaml" "Rancher"
-
     # GitLab HTTPRoute (Service/Endpoints are applied by install_gitlab_native
-    # earlier in main() with the correct templated Pi IP).
-    apply_gateway "${SCRIPT_DIR}/apps/gitlab/gateway.yaml" "GitLab"
+    # earlier in main() with the correct templated Pi IP). The Rancher
+    # HTTPRoute is applied by apply_rancher_httproute immediately after
+    # install_rancher, before configure_rancher_api needs it.
+    _apply_gateway_file "${SCRIPT_DIR}/apps/gitlab/gateway.yaml" "GitLab"
 
     kubectl get httproute -A 2>/dev/null || true
 }
@@ -2219,6 +2231,10 @@ main() {
         karmada_register_edge_clusters  # Auto-join edge clusters from inventory
         create_secrets               # Optional: warns if CLOUDFLARE_API_TOKEN missing
         install_rancher || { error "Rancher install failed — cannot continue"; exit 1; }
+        # Apply Rancher HTTPRoute BEFORE anything tries to reach it via
+        # the external hostname — configure_rancher_api and
+        # rancher_import_edge_clusters both hit https://rancher.${DOMAIN}.
+        apply_rancher_httproute
         configure_rancher_api        # Best-effort: warns and continues on failure
         rancher_import_edge_clusters # Auto-import edge clusters into Rancher
         setup_cert_manager_le        # Depends on create_secrets; warns if cert not issued

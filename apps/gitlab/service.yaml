@@ -1,6 +1,6 @@
 # GitLab CE Service Endpoint for Kubernetes
 #
-# GitLab runs natively on the Pi host (systemd) because the official
+# GitLab runs natively on the central Pi host (systemd) because the official
 # gitlab/gitlab-ce Docker image is amd64-only. This Service + Endpoints
 # pair makes the native GitLab reachable from within the K8s cluster.
 #
@@ -8,10 +8,13 @@
 # with the full K8s deployment (see deployment.yaml.amd64-future).
 #
 # GitLab listens on the host at:
-#   - HTTP: port 8180 (routed via Traefik Gateway API on port 80)
+#   - HTTP: port 8180 (bound by gitlab nginx, configured in install-gitlab.sh)
 #   - SSH:  port 22
 #
-# Traffic flow: Traefik (port 80) → HTTPRoute → Service:80 → Endpoints:8180 → GitLab
+# Traffic flow: Traefik (port 80/443) → HTTPRoute → Service:80 → Endpoints:8180 → GitLab
+#
+# The __PI_IP__ placeholder is substituted by bootstrap.sh (install_gitlab_native)
+# with the central Pi's node internal IP before kubectl apply.
 ---
 apiVersion: v1
 kind: Endpoints
@@ -23,9 +26,8 @@ metadata:
     app.kubernetes.io/part-of: kube-world
 subsets:
   - addresses:
-      # Host IP — the Pi node running GitLab natively
-      # This is the K8s node's internal IP, not an external one
-      - ip: "10.5.5.249"
+      # Host IP of the central Pi node — substituted at apply time
+      - ip: "__PI_IP__"
     ports:
       - name: http
         port: 8180

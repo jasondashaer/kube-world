@@ -1599,28 +1599,26 @@ setup_httproutes() {
     # Rancher HTTPRoute
     apply_gateway "${SCRIPT_DIR}/rancher/gateway.yaml" "Rancher"
 
-    # GitLab HTTPRoute + Service/Endpoints (native GitLab on host)
-    if [[ -f "${SCRIPT_DIR}/apps/gitlab/service.yaml" ]]; then
-        kubectl create namespace gitlab --dry-run=client -o yaml | kubectl apply -f - || warn "Failed to create gitlab namespace"
-        if kubectl apply -f "${SCRIPT_DIR}/apps/gitlab/service.yaml"; then
-            log "GitLab Service/Endpoints applied ✓"
-        else
-            warn "Failed to apply GitLab Service/Endpoints"
-        fi
-    fi
+    # GitLab HTTPRoute (Service/Endpoints are applied by install_gitlab_native
+    # earlier in main() with the correct templated Pi IP).
     apply_gateway "${SCRIPT_DIR}/apps/gitlab/gateway.yaml" "GitLab"
 
     kubectl get httproute -A 2>/dev/null || true
 }
 
 #===============================================================================
-# GitLab Native Installation (runs on Pi host as systemd, not K8s)
+# GitLab Native Install + Repo Bootstrap
+#
+# Installs GitLab CE on the central Pi (systemd), bootstraps the kube-world
+# repo inside it, and creates the gitlab-credentials K8s secret that Flux
+# uses to pull manifests. This makes Flux + GitOps work out of the box on
+# a clean bootstrap without needing to manually install GitLab afterward.
 #===============================================================================
 install_gitlab_native() {
-    log "Installing GitLab CE on Pi host..."
+    log "Installing GitLab CE + bootstrapping repo..."
 
     if [[ "$DRY_RUN" == "true" ]]; then
-        log "[DRY RUN] Would install GitLab CE native deb on Pi"
+        log "[DRY RUN] Would install GitLab CE, push repo, create deploy token + K8s secret"
         return 0
     fi
 
@@ -1630,22 +1628,83 @@ install_gitlab_native() {
         return 0
     fi
 
-    # Determine the target host for SSH
     local target_ip="${PI_IP:-}"
     if [[ -z "$target_ip" ]]; then
         warn "PI_IP not set — skipping GitLab native install"
         return 0
     fi
 
-    # Check if GitLab is already installed
-    if ssh "admin@${target_ip}" "command -v gitlab-ctl" &>/dev/null 2>&1; then
-        log "GitLab already installed on ${target_ip}"
-    else
-        log "Running GitLab install script on ${target_ip}..."
-        bash "$gitlab_script"
+    # Use Rancher bootstrap password as GitLab root password for operator
+    # convenience (one credential to remember during first login).
+    local state_file="/tmp/gitlab-bootstrap.state"
+
+    local gitlab_args=(
+        --pi-ip "$target_ip"
+        --ssh-user "${SSH_USER:-admin}"
+        --state-file "$state_file"
+        --root-password "${RANCHER_BOOTSTRAP_PASSWORD}"
+    )
+    if [[ -n "${DOMAIN:-}" ]]; then
+        gitlab_args+=(--domain "$DOMAIN")
     fi
 
-    log "GitLab native install complete ✓"
+    log "Running install-gitlab.sh (this takes 10-15 min on first run)..."
+    if ! bash "$gitlab_script" "${gitlab_args[@]}"; then
+        warn "GitLab install failed — Flux will not be able to sync from GitLab"
+        warn "You can retry manually: ${gitlab_script} --pi-ip ${target_ip} --domain ${DOMAIN}"
+        return 1
+    fi
+
+    if [[ ! -f "$state_file" ]]; then
+        warn "GitLab state file not found — cannot create gitlab-credentials secret"
+        return 1
+    fi
+
+    # Read credentials from state file (produced by install-gitlab.sh)
+    local deploy_token deploy_user
+    deploy_token=$(jq -r '.deploy_token // empty' "$state_file" 2>/dev/null || echo "")
+    deploy_user=$(jq -r '.deploy_token_user // "flux-bootstrap"' "$state_file" 2>/dev/null || echo "flux-bootstrap")
+
+    if [[ -z "$deploy_token" ]]; then
+        warn "No deploy token in state file — Flux will not be able to authenticate"
+        return 1
+    fi
+
+    # Create the gitlab namespace and apply the Service/Endpoints, substituting
+    # the central Pi's internal IP for the __PI_IP__ placeholder.
+    log "Applying GitLab Service + Endpoints (targeting ${target_ip}:8180)..."
+    if ! kubectl create namespace gitlab --dry-run=client -o yaml | kubectl apply -f -; then
+        warn "Failed to create gitlab namespace"
+        return 1
+    fi
+
+    local svc_file="${SCRIPT_DIR}/apps/gitlab/service.yaml"
+    if [[ ! -f "$svc_file" ]]; then
+        warn "GitLab service manifest not found: ${svc_file}"
+        return 1
+    fi
+    if ! sed "s/__PI_IP__/${target_ip}/g" "$svc_file" | kubectl apply -f -; then
+        warn "Failed to apply GitLab Service/Endpoints"
+        return 1
+    fi
+
+    # Create the gitlab-credentials secret in flux-system so Flux's
+    # GitRepository resource can authenticate.
+    log "Creating gitlab-credentials secret for Flux..."
+    if ! kubectl create namespace flux-system --dry-run=client -o yaml | kubectl apply -f -; then
+        warn "Failed to create flux-system namespace"
+        return 1
+    fi
+    if ! kubectl create secret generic gitlab-credentials \
+        --namespace=flux-system \
+        --from-literal=username="$deploy_user" \
+        --from-literal=password="$deploy_token" \
+        --dry-run=client -o yaml | kubectl apply -f -; then
+        warn "Failed to create gitlab-credentials secret"
+        return 1
+    fi
+
+    log "GitLab native install + repo bootstrap complete ✓"
 }
 
 #===============================================================================
@@ -2059,8 +2118,10 @@ main() {
         configure_rancher_api        # Best-effort: warns and continues on failure
         rancher_import_edge_clusters # Auto-import edge clusters into Rancher
         setup_cert_manager_le        # Depends on create_secrets; warns if cert not issued
+        # GitLab must come BEFORE Flux — Flux's GitRepository points at the
+        # self-hosted GitLab, so the repo and credentials must exist first.
+        install_gitlab_native        # Installs CE, pushes repo, creates gitlab-credentials secret
         setup_flux || { error "Flux setup failed — cannot continue"; exit 1; }
-        install_gitlab_native        # Optional: warns if install script missing
         setup_httproutes             # Best-effort: applies available routes
         deploy_tailscale_keys        # Optional: warns if TAILSCALE_API_TOKEN missing
     else

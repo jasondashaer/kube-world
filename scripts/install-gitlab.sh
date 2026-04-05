@@ -1,25 +1,45 @@
 #!/usr/bin/env bash
 #===============================================================================
-# GitLab CE Native Installation Script for Raspberry Pi (arm64)
+# GitLab CE Native Installation + Repo Bootstrap for Raspberry Pi (arm64)
 #
-# Installs GitLab CE via official arm64 deb package on the central Pi node.
+# Installs GitLab CE via official arm64 deb package on the central Pi node,
+# then bootstraps the kube-world repo inside it so Flux (and anything else
+# in the cluster) can pull from it immediately after bootstrap completes.
+#
 # GitLab runs as a systemd service alongside K3s (not as a K8s workload)
 # because the official gitlab/gitlab-ce Docker image is amd64-only.
 #
 # When the central node is upgraded to amd64 server hardware, GitLab can be
 # migrated to run as a K8s workload using the manifests in apps/gitlab/.
 #
+# Phases:
+#   1. check_prereqs     — SSH, arch, memory, disk
+#   2. install_gitlab    — apt install gitlab-ce (5-10 min)
+#   3. configure_gitlab  — pi-tuning.rb (Puma/Postgres/nginx port 8180)
+#   4. wait_ready        — poll /-/readiness until 200
+#   5. rotate_root_pass  — set root password to known value
+#   6. create_root_pat   — create personal access token via API
+#   7. create_project    — create root/kube-world project
+#   8. push_repo         — git push local contents to GitLab
+#   9. create_deploy_token — create read-only token for Flux
+#  10. write_credentials — write deploy token to stdout / file for parent script
+#
 # Prerequisites:
 #   - SSH access to the Pi (admin user with sudo)
 #   - Pi running Debian/Ubuntu arm64
 #   - At least 4GB free RAM
+#   - Local git repo clean (so we can push it)
 #
 # Usage:
 #   ./scripts/install-gitlab.sh [options]
+#
 #   Options:
 #     --pi-ip <ip>          Pi IP address (default: from inventory.ini)
-#     --external-url <url>  GitLab external URL (default: http://gitlab.<pi-ip>.nip.io)
+#     --domain <domain>     Base domain (sets external_url to http://gitlab.<domain>)
+#     --root-password <pw>  Root password to set (default: random or RANCHER_BOOTSTRAP_PASSWORD)
 #     --ssh-user <user>     SSH user (default: admin)
+#     --state-file <path>   Write credentials JSON to this file (default: /tmp/gitlab-bootstrap.state)
+#     --skip-repo-push      Only install GitLab; don't push repo or create tokens
 #     --dry-run             Show what would be done
 #     --help                Show this help message
 #===============================================================================
@@ -39,12 +59,16 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # Defaults
 PI_IP=""
 SSH_USER="admin"
-EXTERNAL_URL=""
+DOMAIN="${DOMAIN:-}"
+ROOT_PASSWORD="${GITLAB_ROOT_PASSWORD:-${RANCHER_BOOTSTRAP_PASSWORD:-}}"
+STATE_FILE="/tmp/gitlab-bootstrap.state"
+SKIP_REPO_PUSH=false
 DRY_RUN=false
 
-log() { echo -e "${GREEN}[GITLAB]${NC} $*"; }
-warn() { echo -e "${YELLOW}[GITLAB]${NC} $*"; }
+log()   { echo -e "${GREEN}[GITLAB]${NC} $*"; }
+warn()  { echo -e "${YELLOW}[GITLAB]${NC} $*"; }
 error() { echo -e "${RED}[GITLAB]${NC} $*" >&2; }
+debug() { echo -e "${BLUE}[GITLAB]${NC} $*"; }
 
 #===============================================================================
 # Parse Arguments
@@ -56,25 +80,32 @@ parse_args() {
                 PI_IP="$2"
                 shift 2
                 ;;
-            --external-url)
-                EXTERNAL_URL="$2"
+            --domain)
+                DOMAIN="$2"
+                shift 2
+                ;;
+            --root-password)
+                ROOT_PASSWORD="$2"
                 shift 2
                 ;;
             --ssh-user)
                 SSH_USER="$2"
                 shift 2
                 ;;
+            --state-file)
+                STATE_FILE="$2"
+                shift 2
+                ;;
+            --skip-repo-push)
+                SKIP_REPO_PUSH=true
+                shift
+                ;;
             --dry-run)
                 DRY_RUN=true
                 shift
                 ;;
             -h|--help)
-                echo "Usage: $0 [options]"
-                echo "Options:"
-                echo "  --pi-ip <ip>          Pi IP address (default: from inventory.ini)"
-                echo "  --external-url <url>  GitLab external URL"
-                echo "  --ssh-user <user>     SSH user (default: admin)"
-                echo "  --dry-run             Show what would be done"
+                sed -n '2,/^#====/p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'
                 exit 0
                 ;;
             *)
@@ -92,7 +123,8 @@ resolve_pi_ip() {
     if [[ -z "$PI_IP" ]]; then
         local inventory="${REPO_ROOT}/pi-setup/inventory.ini"
         if [[ -f "$inventory" ]]; then
-            PI_IP=$(awk '/^\[masters\]/{found=1; next} found && /^[^#\[]/ && NF{print; exit}' "$inventory" | sed 's/.*ansible_host=//' | awk '{print $1}')
+            PI_IP=$(awk '/^\[masters\]/{found=1; next} found && /^[^#\[]/ && NF{print; exit}' "$inventory" \
+                | sed 's/.*ansible_host=//' | awk '{print $1}')
         fi
     fi
 
@@ -101,41 +133,45 @@ resolve_pi_ip() {
         exit 1
     fi
 
-    if [[ -z "$EXTERNAL_URL" ]]; then
-        EXTERNAL_URL="http://gitlab.${PI_IP}.nip.io"
-    fi
-
     log "Target Pi: ${PI_IP}"
-    log "GitLab URL: ${EXTERNAL_URL}"
+    if [[ -n "$DOMAIN" ]]; then
+        log "GitLab external URL: http://gitlab.${DOMAIN}"
+    else
+        log "GitLab external URL: http://gitlab.${PI_IP}.nip.io (no DOMAIN set)"
+    fi
 }
 
 #===============================================================================
-# SSH helper
+# SSH helpers
 #===============================================================================
 run_on_pi() {
-    ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no "${SSH_USER}@${PI_IP}" "$@"
+    ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new \
+        "${SSH_USER}@${PI_IP}" "$@"
+}
+
+# Run a command on the Pi, capturing exit code without set -e aborting us
+run_on_pi_safe() {
+    ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new \
+        "${SSH_USER}@${PI_IP}" "$@" 2>&1 || true
 }
 
 #===============================================================================
-# Check prerequisites
+# Phase 1: Prerequisites
 #===============================================================================
 check_prereqs() {
     log "Checking prerequisites..."
 
-    # Test SSH
     if ! run_on_pi "echo ok" &>/dev/null; then
         error "Cannot SSH to ${SSH_USER}@${PI_IP}"
         exit 1
     fi
 
-    # Check architecture
     local arch
     arch=$(run_on_pi "uname -m")
     if [[ "$arch" != "aarch64" ]]; then
         warn "Expected aarch64, got ${arch}. Proceeding anyway..."
     fi
 
-    # Check available memory
     local avail_mb
     avail_mb=$(run_on_pi "awk '/MemAvailable/ {print int(\$2/1024)}' /proc/meminfo")
     log "Available memory: ${avail_mb}MB"
@@ -143,7 +179,6 @@ check_prereqs() {
         warn "Less than 3GB available. GitLab may struggle. Recommend 4GB+ free."
     fi
 
-    # Check disk space
     local avail_gb
     avail_gb=$(run_on_pi "df -BG / | tail -1 | awk '{print int(\$4)}'")
     log "Available disk: ${avail_gb}GB"
@@ -156,56 +191,79 @@ check_prereqs() {
 }
 
 #===============================================================================
-# Install GitLab CE
+# Phase 2: Install GitLab CE
 #===============================================================================
 install_gitlab() {
-    log "Installing GitLab CE on ${PI_IP}..."
+    if run_on_pi "command -v gitlab-ctl" &>/dev/null; then
+        log "GitLab already installed on ${PI_IP}"
+        return 0
+    fi
 
     if [[ "$DRY_RUN" == "true" ]]; then
         log "[DRY RUN] Would install GitLab CE via official arm64 deb package"
-        log "[DRY RUN] External URL: ${EXTERNAL_URL}"
         return 0
     fi
 
-    # Check if already installed
-    if run_on_pi "command -v gitlab-ctl" &>/dev/null; then
-        log "GitLab is already installed. Checking status..."
-        run_on_pi "sudo gitlab-ctl status" 2>&1 || true
-        log "To reconfigure: sudo gitlab-ctl reconfigure"
-        return 0
+    local external_url
+    if [[ -n "$DOMAIN" ]]; then
+        external_url="http://gitlab.${DOMAIN}"
+    else
+        external_url="http://gitlab.${PI_IP}.nip.io"
     fi
 
-    # Install dependencies
+    log "Installing GitLab CE on ${PI_IP}..."
     log "Installing dependencies..."
     run_on_pi "sudo apt-get update -qq && sudo apt-get install -y -qq curl openssh-server ca-certificates tzdata perl postfix" 2>&1 | tail -5
 
-    # Add GitLab package repository
     log "Adding GitLab CE repository..."
     run_on_pi "curl -sS https://packages.gitlab.com/install/repositories/gitlab/gitlab-ce/script.deb.sh | sudo bash" 2>&1 | tail -5
 
-    # Install GitLab CE with external URL
     log "Installing GitLab CE package (this takes 5-10 minutes on Pi)..."
-    run_on_pi "sudo EXTERNAL_URL='${EXTERNAL_URL}' apt-get install -y gitlab-ce" 2>&1 | tail -20
+    run_on_pi "sudo EXTERNAL_URL='${external_url}' apt-get install -y gitlab-ce" 2>&1 | tail -20
 
     log "GitLab CE package installed"
 }
 
 #===============================================================================
-# Configure GitLab for Pi resource constraints
+# Phase 3: Pi-optimized Configuration
 #===============================================================================
 configure_gitlab() {
     log "Applying Pi-optimized configuration..."
 
     if [[ "$DRY_RUN" == "true" ]]; then
-        log "[DRY RUN] Would apply Pi resource tuning to /etc/gitlab/gitlab.rb"
+        log "[DRY RUN] Would apply Pi resource tuning to /etc/gitlab/gitlab.rb.d/pi-tuning.rb"
         return 0
     fi
 
-    # Apply resource-tuned configuration
+    local external_url
+    if [[ -n "$DOMAIN" ]]; then
+        external_url="http://gitlab.${DOMAIN}"
+    else
+        external_url="http://gitlab.${PI_IP}.nip.io"
+    fi
+
+    # Write pi-tuning.rb. Includes:
+    # - Resource tuning for 16GB Pi shared with K3s
+    # - nginx bound to port 8180 (so Traefik on node port 80 doesn't conflict)
+    # - external_url matches what Traefik will serve so GitLab generates correct URLs
     run_on_pi "sudo mkdir -p /etc/gitlab/gitlab.rb.d"
-    run_on_pi "sudo tee /etc/gitlab/gitlab.rb.d/pi-tuning.rb > /dev/null" <<'PICONFIG'
+    run_on_pi "sudo tee /etc/gitlab/gitlab.rb.d/pi-tuning.rb > /dev/null" <<PICONFIG
 # Pi 5 (16GB) resource tuning for GitLab CE
 # Applied by kube-world/scripts/install-gitlab.sh
+
+# External URL — what users see. Traffic is routed via Traefik HTTPRoute.
+external_url '${external_url}'
+
+# Bind nginx to port 8180 so it doesn't conflict with anything on node port 80.
+# Traefik (in K3s) reverse-proxies traffic via the 'gitlab' Service in the
+# 'gitlab' namespace, whose manual Endpoints point at this host's IP:8180.
+nginx['listen_port'] = 8180
+nginx['listen_https'] = false
+
+# Tell GitLab the real host/port it's reachable at (for redirects, webhooks, etc)
+nginx['real_ip_header'] = 'X-Forwarded-For'
+nginx['real_ip_recursive'] = 'on'
+nginx['real_ip_trusted_addresses'] = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '100.64.0.0/10']
 
 # Puma (web server) - reduce workers for arm64
 puma['worker_processes'] = 2
@@ -246,72 +304,318 @@ logging['logrotate_size'] = '10M'
 logging['logrotate_rotate'] = 5
 PICONFIG
 
-    # Ensure the .d directory is used by the main config
+    # Ensure the .d directory is evaluated by the main config
     run_on_pi "sudo grep -q 'gitlab.rb.d' /etc/gitlab/gitlab.rb || echo 'Dir[\"/etc/gitlab/gitlab.rb.d/*.rb\"].each { |f| eval(File.read(f)) }' | sudo tee -a /etc/gitlab/gitlab.rb > /dev/null"
 
-    log "Reconfiguring GitLab with Pi-optimized settings..."
+    log "Reconfiguring GitLab with Pi-optimized settings (3-5 min)..."
     run_on_pi "sudo gitlab-ctl reconfigure" 2>&1 | tail -10
 
     log "Configuration applied"
 }
 
 #===============================================================================
-# Verify installation
+# Phase 4: Wait for GitLab to become ready
 #===============================================================================
-verify_gitlab() {
-    log "Verifying GitLab installation..."
+wait_for_gitlab_ready() {
+    log "Waiting for GitLab to be ready..."
 
-    # Check service status
-    local status
-    status=$(run_on_pi "sudo gitlab-ctl status" 2>&1)
-    echo "$status"
-
-    # Check if web interface responds
-    local http_code
-    http_code=$(run_on_pi "curl -s -o /dev/null -w '%{http_code}' http://localhost/-/readiness --max-time 10" 2>&1 || echo "000")
-
-    if [[ "$http_code" == "200" ]]; then
-        log "GitLab web interface is responding (HTTP 200)"
-    else
-        warn "GitLab web interface returned HTTP ${http_code} — it may still be starting up"
-        warn "Check manually: curl -s http://localhost/-/readiness"
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "[DRY RUN] Would poll GitLab /-/readiness"
+        return 0
     fi
 
-    # Get initial root password
-    if run_on_pi "sudo test -f /etc/gitlab/initial_root_password" 2>/dev/null; then
-        local password
-        password=$(run_on_pi "sudo grep 'Password:' /etc/gitlab/initial_root_password | awk '{print \$2}'")
-        echo ""
-        echo "=============================================="
-        echo "  GitLab CE Installed Successfully"
-        echo "=============================================="
-        echo ""
-        echo "  URL:      ${EXTERNAL_URL}"
-        echo "  Username: root"
-        echo "  Password: ${password}"
-        echo ""
-        echo "  NOTE: The initial password file is auto-deleted"
-        echo "  after 24 hours. Change it on first login."
-        echo ""
-        echo "  To manage GitLab:"
-        echo "    ssh ${SSH_USER}@${PI_IP}"
-        echo "    sudo gitlab-ctl status"
-        echo "    sudo gitlab-ctl reconfigure"
-        echo "    sudo gitlab-ctl restart"
-        echo ""
-        echo "=============================================="
-    else
-        echo ""
-        echo "=============================================="
-        echo "  GitLab CE Installed"
-        echo "=============================================="
-        echo ""
-        echo "  URL: ${EXTERNAL_URL}"
-        echo "  Initial password file not found."
-        echo "  Reset with: sudo gitlab-rake 'gitlab:password:reset[root]'"
-        echo ""
-        echo "=============================================="
+    local max_attempts=60  # 5 minutes
+    local attempt=0
+    while [[ $attempt -lt $max_attempts ]]; do
+        local http_code
+        http_code=$(run_on_pi "curl -s -o /dev/null -w '%{http_code}' http://localhost:8180/-/readiness?all=1 --max-time 5" 2>&1 || echo "000")
+        if [[ "$http_code" == "200" ]]; then
+            log "GitLab is ready ✓"
+            return 0
+        fi
+        debug "  [$((attempt * 5))s] GitLab not ready yet (HTTP ${http_code})"
+        sleep 5
+        attempt=$((attempt + 1))
+    done
+
+    error "GitLab did not become ready within 5 minutes"
+    return 1
+}
+
+#===============================================================================
+# Phase 5: Rotate root password to known value
+#===============================================================================
+rotate_root_password() {
+    if [[ -z "$ROOT_PASSWORD" ]]; then
+        # Generate random password if none provided
+        ROOT_PASSWORD=$(openssl rand -base64 24 | tr -d '/+=' | head -c 24)
+        log "Generated random root password (will be saved to state file)"
     fi
+
+    log "Setting GitLab root password..."
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "[DRY RUN] Would set root password via gitlab-rails runner"
+        return 0
+    fi
+
+    # Use gitlab-rails runner to set the password non-interactively.
+    # gitlab-rails drops privileges to the 'git' user, so any temp file
+    # must be readable by that user. We write the password to a file
+    # owned by git:git with mode 600, run the rails script, then delete.
+    local remote_tmp="/tmp/gitlab-pw-$$"
+    # shellcheck disable=SC2029
+    ssh "${SSH_USER}@${PI_IP}" "cat > ${remote_tmp} && sudo chown git:git ${remote_tmp} && sudo chmod 600 ${remote_tmp}" <<< "$ROOT_PASSWORD"
+
+    local rails_script
+    rails_script='pw = File.read(ENV["PW_FILE"]).chomp; u = User.find_by_username("root"); u.password = pw; u.password_confirmation = pw; u.password_automatically_set = false; u.save!; puts "ok"'
+
+    local result
+    result=$(run_on_pi "sudo PW_FILE=${remote_tmp} gitlab-rails runner '${rails_script}'" 2>&1 || true)
+    run_on_pi "sudo rm -f ${remote_tmp}" || true
+
+    if echo "$result" | grep -q "^ok$"; then
+        log "Root password set ✓"
+    else
+        error "Failed to set root password:"
+        echo "$result"
+        return 1
+    fi
+
+    # Remove the initial_root_password file now that we have a known password
+    run_on_pi "sudo rm -f /etc/gitlab/initial_root_password" 2>/dev/null || true
+}
+
+#===============================================================================
+# Phase 6: Create a Personal Access Token for root via API
+#===============================================================================
+create_root_pat() {
+    log "Creating root personal access token..."
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "[DRY RUN] Would POST /oauth/token then create PAT"
+        ROOT_PAT="dry-run-token"
+        return 0
+    fi
+
+    local gitlab_url="http://${PI_IP}:8180"
+
+    # Get OAuth token using Resource Owner Password Credentials grant
+    local oauth_resp
+    oauth_resp=$(run_on_pi "curl -s -X POST \
+        -H 'Content-Type: application/json' \
+        -d '{\"grant_type\":\"password\",\"username\":\"root\",\"password\":\"${ROOT_PASSWORD}\"}' \
+        ${gitlab_url}/oauth/token")
+
+    local oauth_token
+    oauth_token=$(echo "$oauth_resp" | jq -r '.access_token // empty' 2>/dev/null || echo "")
+    if [[ -z "$oauth_token" ]]; then
+        error "Failed to obtain OAuth token:"
+        echo "$oauth_resp"
+        return 1
+    fi
+    debug "OAuth token obtained"
+
+    # Create a personal access token via the v4 API
+    local pat_resp
+    pat_resp=$(run_on_pi "curl -s -X POST \
+        -H 'Authorization: Bearer ${oauth_token}' \
+        -H 'Content-Type: application/json' \
+        -d '{\"name\":\"kube-world-bootstrap\",\"scopes\":[\"api\",\"write_repository\"],\"expires_at\":\"$(date -v+1y +%Y-%m-%d 2>/dev/null || date -d '+1 year' +%Y-%m-%d)\"}' \
+        ${gitlab_url}/api/v4/users/1/personal_access_tokens")
+
+    ROOT_PAT=$(echo "$pat_resp" | jq -r '.token // empty' 2>/dev/null || echo "")
+    if [[ -z "$ROOT_PAT" ]]; then
+        error "Failed to create PAT:"
+        echo "$pat_resp"
+        return 1
+    fi
+
+    log "Personal access token created ✓"
+}
+
+#===============================================================================
+# Phase 7: Create the root/kube-world project
+#===============================================================================
+create_project() {
+    log "Creating root/kube-world project..."
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "[DRY RUN] Would POST /api/v4/projects"
+        return 0
+    fi
+
+    local gitlab_url="http://${PI_IP}:8180"
+
+    # Check if project exists
+    local existing
+    existing=$(run_on_pi "curl -s -H 'PRIVATE-TOKEN: ${ROOT_PAT}' \
+        '${gitlab_url}/api/v4/projects/root%2Fkube-world'" 2>&1)
+
+    if echo "$existing" | jq -e '.id' >/dev/null 2>&1; then
+        log "Project root/kube-world already exists"
+        return 0
+    fi
+
+    # Create project
+    local create_resp
+    create_resp=$(run_on_pi "curl -s -X POST \
+        -H 'PRIVATE-TOKEN: ${ROOT_PAT}' \
+        -H 'Content-Type: application/json' \
+        -d '{\"name\":\"kube-world\",\"path\":\"kube-world\",\"visibility\":\"private\",\"initialize_with_readme\":false,\"default_branch\":\"main\"}' \
+        ${gitlab_url}/api/v4/projects")
+
+    if echo "$create_resp" | jq -e '.id' >/dev/null 2>&1; then
+        log "Project created ✓"
+    else
+        error "Failed to create project:"
+        echo "$create_resp"
+        return 1
+    fi
+}
+
+#===============================================================================
+# Phase 8: Push the local repo to GitLab
+#===============================================================================
+push_repo() {
+    log "Pushing local repo to GitLab..."
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "[DRY RUN] Would push repo to GitLab"
+        return 0
+    fi
+
+    # Use the Pi IP directly since DNS may not be ready yet.
+    # Git HTTP Basic auth with root:PAT works for pushes.
+    local push_url="http://root:${ROOT_PAT}@${PI_IP}:8180/root/kube-world.git"
+
+    # Use a temp remote so we don't mess with the user's git remotes
+    cd "$REPO_ROOT"
+    git remote remove gitlab-bootstrap 2>/dev/null || true
+    git remote add gitlab-bootstrap "$push_url"
+
+    # Push current branch as main. Force since the empty GitLab project may
+    # have a server-side initial commit (shouldn't with initialize_with_readme
+    # false, but be safe).
+    if ! git push gitlab-bootstrap HEAD:refs/heads/main --force 2>&1 | grep -v "^remote:" | grep -v "^To http"; then
+        warn "git push may have reported messages above — verifying..."
+    fi
+
+    git remote remove gitlab-bootstrap 2>/dev/null || true
+
+    # Verify by querying project's default branch
+    local gitlab_url="http://${PI_IP}:8180"
+    local branch_check
+    branch_check=$(run_on_pi "curl -s -H 'PRIVATE-TOKEN: ${ROOT_PAT}' \
+        '${gitlab_url}/api/v4/projects/root%2Fkube-world/repository/branches/main'" 2>&1)
+    if echo "$branch_check" | jq -e '.name == "main"' >/dev/null 2>&1; then
+        local commit
+        commit=$(echo "$branch_check" | jq -r '.commit.short_id')
+        log "Repo pushed ✓ (main @ ${commit})"
+    else
+        error "Push verification failed:"
+        echo "$branch_check"
+        return 1
+    fi
+}
+
+#===============================================================================
+# Phase 9: Create a project deploy token for Flux
+#===============================================================================
+create_deploy_token() {
+    log "Creating project deploy token for Flux..."
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "[DRY RUN] Would POST /api/v4/projects/.../deploy_tokens"
+        DEPLOY_TOKEN_USER="flux-bootstrap"
+        DEPLOY_TOKEN="dry-run-deploy-token"
+        return 0
+    fi
+
+    local gitlab_url="http://${PI_IP}:8180"
+
+    # Deploy tokens are read-only credentials scoped to a project.
+    # Flux only needs read_repository to clone.
+    local resp
+    resp=$(run_on_pi "curl -s -X POST \
+        -H 'PRIVATE-TOKEN: ${ROOT_PAT}' \
+        -H 'Content-Type: application/json' \
+        -d '{\"name\":\"flux-read\",\"scopes\":[\"read_repository\"],\"username\":\"flux-bootstrap\"}' \
+        ${gitlab_url}/api/v4/projects/root%2Fkube-world/deploy_tokens")
+
+    DEPLOY_TOKEN=$(echo "$resp" | jq -r '.token // empty' 2>/dev/null || echo "")
+    DEPLOY_TOKEN_USER=$(echo "$resp" | jq -r '.username // "flux-bootstrap"' 2>/dev/null || echo "flux-bootstrap")
+
+    if [[ -z "$DEPLOY_TOKEN" ]]; then
+        # Might already exist with that name — deploy tokens can't be retrieved,
+        # only re-created with a different name
+        warn "Deploy token creation failed — attempting with unique name..."
+        local unique_name="flux-read-$(date +%s)"
+        resp=$(run_on_pi "curl -s -X POST \
+            -H 'PRIVATE-TOKEN: ${ROOT_PAT}' \
+            -H 'Content-Type: application/json' \
+            -d '{\"name\":\"${unique_name}\",\"scopes\":[\"read_repository\"],\"username\":\"flux-bootstrap\"}' \
+            ${gitlab_url}/api/v4/projects/root%2Fkube-world/deploy_tokens")
+        DEPLOY_TOKEN=$(echo "$resp" | jq -r '.token // empty' 2>/dev/null || echo "")
+        DEPLOY_TOKEN_USER=$(echo "$resp" | jq -r '.username // "flux-bootstrap"' 2>/dev/null || echo "flux-bootstrap")
+    fi
+
+    if [[ -z "$DEPLOY_TOKEN" ]]; then
+        error "Failed to create deploy token:"
+        echo "$resp"
+        return 1
+    fi
+
+    log "Deploy token created ✓"
+}
+
+#===============================================================================
+# Phase 10: Write credentials to state file
+#===============================================================================
+write_state_file() {
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "[DRY RUN] Would write state to ${STATE_FILE}"
+        return 0
+    fi
+
+    umask 077
+    cat > "$STATE_FILE" <<EOF
+{
+  "pi_ip": "${PI_IP}",
+  "domain": "${DOMAIN}",
+  "external_url": "http://gitlab.${DOMAIN:-${PI_IP}.nip.io}",
+  "root_password": "${ROOT_PASSWORD}",
+  "root_pat": "${ROOT_PAT:-}",
+  "deploy_token_user": "${DEPLOY_TOKEN_USER:-}",
+  "deploy_token": "${DEPLOY_TOKEN:-}",
+  "bootstrapped_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
+    chmod 600 "$STATE_FILE"
+    log "State written to ${STATE_FILE} (mode 600)"
+}
+
+#===============================================================================
+# Summary
+#===============================================================================
+print_summary() {
+    local external_url="http://gitlab.${DOMAIN:-${PI_IP}.nip.io}"
+    echo ""
+    echo "=============================================="
+    echo "  GitLab CE Bootstrap Complete"
+    echo "=============================================="
+    echo ""
+    echo "  URL:              ${external_url}"
+    echo "  Username:         root"
+    echo "  Password:         ${ROOT_PASSWORD}"
+    echo ""
+    echo "  Project:          ${external_url}/root/kube-world"
+    echo "  Deploy token:     ${DEPLOY_TOKEN_USER:-<none>}"
+    echo ""
+    echo "  State file:       ${STATE_FILE}"
+    echo "  (parent bootstrap.sh reads deploy token from here to create"
+    echo "   the gitlab-credentials K8s secret for Flux)"
+    echo ""
+    echo "=============================================="
 }
 
 #===============================================================================
@@ -330,7 +634,20 @@ main() {
     check_prereqs
     install_gitlab
     configure_gitlab
-    verify_gitlab
+    wait_for_gitlab_ready
+
+    if [[ "$SKIP_REPO_PUSH" == "true" ]]; then
+        log "Skipping repo bootstrap (--skip-repo-push)"
+        return 0
+    fi
+
+    rotate_root_password
+    create_root_pat
+    create_project
+    push_repo
+    create_deploy_token
+    write_state_file
+    print_summary
 
     log "Done!"
 }

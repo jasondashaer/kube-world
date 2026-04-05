@@ -120,6 +120,11 @@ NC='\033[0m'
 log() { echo -e "${GREEN}[RANCHER]${NC} $*"; }
 warn() { echo -e "${YELLOW}[RANCHER]${NC} $*"; }
 debug() { echo -e "${GRAY}[RANCHER]${NC} $*"; }
+# error() is already defined by bootstrap.sh when sourced; provide fallback
+# for standalone execution.
+if ! declare -F error >/dev/null 2>&1; then
+    error() { echo -e "${RED:-\033[0;31m}[RANCHER]${NC} $*" >&2; }
+fi
 
 #===============================================================================
 # Add Helm Repositories
@@ -223,30 +228,39 @@ install_rancher() {
     # Pi with Karmada stack uses cert-manager/Traefik for TLS (source=secret)
     # KIND/Mac uses Rancher's built-in self-signed certs
     local tls_source="${RANCHER_TLS_SOURCE:-rancher}"
-    local extra_args=""
+    # Use arrays (not strings) to safely pass multi-arg flags.
+    # Caller scripts may set IFS=$'\n\t' which breaks space-splitting on
+    # unquoted string expansion.
+    local -a extra_args=()
 
     if [[ "$tls_source" == "letsEncrypt" ]]; then
-        extra_args="--set letsEncrypt.email=${LETSENCRYPT_EMAIL:-admin@example.com}"
+        extra_args+=(--set "letsEncrypt.email=${LETSENCRYPT_EMAIL:-admin@example.com}")
     elif [[ "$tls_source" == "secret" ]]; then
         # External TLS (cert-manager/Traefik) — no internal CA needed
-        extra_args="--set privateCA=false"
+        extra_args+=(--set "privateCA=false")
+        # Agent TLS mode: use system cert store so Rancher agents trust
+        # the Let's Encrypt cert served via Traefik.
+        extra_args+=(--set "agentTLSMode=system-store")
     fi
-    
+
     # Check if already installed
     if helm status rancher -n cattle-system &>/dev/null; then
         log "Rancher already installed, upgrading..."
     fi
-    
+
     # For KIND clusters, we may need to adjust resources for limited environments
-    local resource_args=""
+    local -a resource_args=()
     if kubectl get nodes -o jsonpath='{.items[0].metadata.labels}' 2>/dev/null | grep -q "kind"; then
         log "KIND cluster detected - adjusting for local development..."
-        # Reduce resource requests for KIND (won't have full cloud resources)
-        resource_args="--set resources.requests.memory=256Mi --set resources.requests.cpu=100m"
+        resource_args+=(--set "resources.requests.memory=256Mi")
+        resource_args+=(--set "resources.requests.cpu=100m")
     fi
-    
-    # Install/upgrade Rancher
-    helm upgrade --install rancher rancher-stable/rancher \
+
+    # Install/upgrade Rancher — check exit code explicitly so failures
+    # don't silently continue and break later verification steps.
+    # Note: ${arr[@]+"${arr[@]}"} safely expands empty arrays under set -u
+    # on macOS bash 3.2 (plain "${arr[@]}" triggers "unbound variable").
+    if ! helm upgrade --install rancher rancher-stable/rancher \
         --namespace cattle-system \
         --version "${RANCHER_VERSION}" \
         --set hostname="${RANCHER_HOSTNAME}" \
@@ -254,10 +268,13 @@ install_rancher() {
         --set bootstrapPassword="${RANCHER_BOOTSTRAP_PASSWORD}" \
         --set ingress.tls.source="${tls_source}" \
         --set global.cattle.psp.enabled=false \
-        ${resource_args} \
-        ${extra_args} \
-        --wait --timeout 10m
-    
+        ${resource_args[@]+"${resource_args[@]}"} \
+        ${extra_args[@]+"${extra_args[@]}"} \
+        --wait --timeout 10m; then
+        error "Rancher Helm install failed"
+        return 1
+    fi
+
     log "Rancher Helm install complete ✓"
     
     # Verify pods are actually running
@@ -265,16 +282,20 @@ install_rancher() {
     local verify_timeout=120
     local verify_elapsed=0
     while [[ $verify_elapsed -lt $verify_timeout ]]; do
-        local ready_pods
-        ready_pods=$(kubectl -n cattle-system get pods -l app=rancher -o jsonpath='{.items[*].status.containerStatuses[*].ready}' 2>/dev/null | tr ' ' '\n' | grep -c "true" || echo "0")
-        local total_pods
+        # grep -c exits non-zero when count is 0, appending a spurious second
+        # "0" via `|| echo "0"`. Use `wc -l` instead to get a clean integer.
+        local ready_pods total_pods
+        ready_pods=$(kubectl -n cattle-system get pods -l app=rancher \
+            -o jsonpath='{.items[*].status.containerStatuses[*].ready}' 2>/dev/null \
+            | tr ' ' '\n' | grep -c "true" || true)
+        ready_pods=$(echo "$ready_pods" | head -1 | tr -d ' ')
         total_pods=$(kubectl -n cattle-system get pods -l app=rancher --no-headers 2>/dev/null | wc -l | tr -d ' ')
-        
-        if [[ "$ready_pods" -gt 0 ]] && [[ "$ready_pods" == "$total_pods" ]]; then
+
+        if [[ "${ready_pods:-0}" -gt 0 ]] && [[ "${ready_pods:-0}" -eq "${total_pods:-0}" ]]; then
             log "Rancher pods ready: ${ready_pods}/${total_pods} ✓"
             break
         fi
-        debug "Waiting for Rancher pods: ${ready_pods}/${total_pods} ready (${verify_elapsed}/${verify_timeout}s)"
+        debug "Waiting for Rancher pods: ${ready_pods:-0}/${total_pods:-0} ready (${verify_elapsed}/${verify_timeout}s)"
         sleep 10
         verify_elapsed=$((verify_elapsed + 10))
     done
@@ -371,7 +392,7 @@ post_install() {
     fi
 
     # Save configuration for import script
-    local rancher_info_file="${SCRIPT_DIR}/.rancher-info"
+    local rancher_info_file="${RANCHER_SCRIPT_DIR}/.rancher-info"
     cat > "$rancher_info_file" << EOF
 # Rancher installation info - generated $(date)
 RANCHER_URL=https://${RANCHER_HOSTNAME}
@@ -395,7 +416,9 @@ EOF
     echo ""
 }
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Use a namespaced name so this doesn't clobber the parent script's SCRIPT_DIR
+# when install-rancher.sh is sourced by bootstrap.sh.
+RANCHER_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 #===============================================================================
 # Main

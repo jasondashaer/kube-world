@@ -23,6 +23,10 @@ secrets/*.yaml
 !secrets/README.md
 age.key
 
+# Bootstrap configuration (contains API tokens, passwords)
+.env.bootstrap
+rancher/.rancher-info
+
 # Age private keys
 *.txt
 key.txt

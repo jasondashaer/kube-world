@@ -69,6 +69,7 @@ hint() { echo -e "  ${DIM}$*${NC}"; }
 
 # Prompt with default value. Reads from existing env if available and not --reconfigure.
 # Usage: prompt "Label" DEFAULT_VALUE VARIABLE_NAME [--secret]
+# Type "-" to clear a stored value without losing the leave-blank-to-reuse feature.
 prompt() {
     local label="$1"
     local default="$2"
@@ -83,7 +84,7 @@ prompt() {
     fi
 
     if [[ -n "$display_default" ]]; then
-        echo -ne "  ${BOLD}${label}${NC} [${DIM}${display_default}${NC}]: "
+        echo -ne "  ${BOLD}${label}${NC} [${DIM}${display_default}${NC}] ${DIM}(- to clear)${NC}: "
     else
         echo -ne "  ${BOLD}${label}${NC}: "
     fi
@@ -94,6 +95,12 @@ prompt() {
         echo ""
     else
         read -r input
+    fi
+
+    # Clear keyword — explicitly set to empty
+    if [[ "$input" == "-" ]]; then
+        eval "$varname=\"\""
+        return
     fi
 
     # Use input if provided, otherwise keep current/default
@@ -248,6 +255,69 @@ validate_pi_reachable() {
     fi
 }
 
+check_ssh_host_key() {
+    local ip="$1"
+
+    # Check if we have any existing host key stored for this IP
+    local stored_key
+    stored_key=$(ssh-keygen -F "$ip" 2>/dev/null | grep -v "^#" || true)
+    if [[ -z "$stored_key" ]]; then
+        # No existing host key — nothing to conflict
+        return 0
+    fi
+
+    # We have a stored key. Scan the remote host for its current key.
+    echo -ne "  ${DIM}Checking SSH host key for ${ip}...${NC}"
+    local remote_keys
+    remote_keys=$(ssh-keyscan -T 3 "$ip" 2>/dev/null || true)
+    if [[ -z "$remote_keys" ]]; then
+        echo -e "\r  ${DIM}Could not scan host key for ${ip} (host may be offline)${NC}    "
+        return 0
+    fi
+
+    # Compare: check if any remote key type matches what we have stored
+    local mismatch=false
+    while IFS= read -r remote_line; do
+        [[ -z "$remote_line" || "$remote_line" =~ ^# ]] && continue
+        local key_type
+        key_type=$(echo "$remote_line" | awk '{print $2}')
+        # Check if we have a stored key of this same type
+        local stored_of_type
+        stored_of_type=$(ssh-keygen -F "$ip" 2>/dev/null | grep -v "^#" | grep "$key_type" || true)
+        if [[ -n "$stored_of_type" ]]; then
+            # We have a stored key of this type — does it match?
+            local remote_key_data
+            remote_key_data=$(echo "$remote_line" | awk '{print $3}')
+            if ! echo "$stored_of_type" | grep -q "$remote_key_data"; then
+                mismatch=true
+                break
+            fi
+        fi
+    done <<< "$remote_keys"
+
+    if [[ "$mismatch" == "true" ]]; then
+        echo -e "\r  ${YELLOW}⚠${NC} SSH host key mismatch for ${ip} (expected after SD card wipe)   "
+        if confirm "Clear old SSH host key for ${ip}?" "y"; then
+            ssh-keygen -R "$ip" 2>/dev/null
+            # Immediately add the new key so bootstrap doesn't have to
+            ssh-keyscan -T 3 "$ip" >> ~/.ssh/known_hosts 2>/dev/null
+            info "Cleared old key and added new host key for ${ip}"
+        else
+            warn "Keeping stale host key — SSH/Ansible will fail for ${ip}"
+        fi
+    else
+        echo -e "\r  ${GREEN}✓${NC} SSH host key for ${ip} is current                              "
+    fi
+
+    # If there's still no stored key (first time connecting), add it now
+    local final_check
+    final_check=$(ssh-keygen -F "$ip" 2>/dev/null | grep -v "^#" || true)
+    if [[ -z "$final_check" && -n "$remote_keys" ]]; then
+        echo "$remote_keys" >> ~/.ssh/known_hosts
+        info "Added new host key for ${ip} to known_hosts"
+    fi
+}
+
 validate_ssh_connection() {
     local ip="$1"
     local user="$2"
@@ -255,12 +325,12 @@ validate_ssh_connection() {
     key="${key/#\~/$HOME}"
 
     echo -ne "  ${DIM}Testing SSH to ${user}@${ip}...${NC}"
-    if ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
+    if ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new -o BatchMode=yes \
         -i "$key" "${user}@${ip}" "echo ok" &>/dev/null; then
-        echo -e "\r  ${GREEN}✓${NC} SSH connection successful                     "
+        echo -e "\r  ${GREEN}✓${NC} SSH connection to ${ip} verified                "
         return 0
     else
-        echo -e "\r  ${YELLOW}⚠${NC} SSH connection failed (key may not be deployed yet)"
+        echo -e "\r  ${YELLOW}⚠${NC} SSH connection failed to ${ip} (key may not be deployed yet)"
         return 1
     fi
 }
@@ -276,8 +346,8 @@ load_existing_env() {
             # Skip comments and empty lines
             [[ "$key" =~ ^[[:space:]]*# ]] && continue
             [[ -z "$key" ]] && continue
-            # Remove leading/trailing whitespace and quotes
-            key=$(echo "$key" | xargs)
+            # Remove leading/trailing whitespace, 'export' prefix, and quotes
+            key=$(echo "$key" | xargs | sed 's/^export[[:space:]]*//')
             value=$(echo "$value" | sed "s/^['\"]//;s/['\"]$//")
             case "$key" in
                 CLOUDFLARE_API_TOKEN) CLOUDFLARE_API_TOKEN="$value" ;;
@@ -358,11 +428,21 @@ section_cloudflare() {
 
     hint "Required for Let's Encrypt wildcard certs via DNS-01 challenge."
     hint "Create at: https://dash.cloudflare.com/profile/api-tokens"
-    hint "Permissions needed: Zone:DNS:Edit for ${DOMAIN}"
+    hint "Use the 'Edit zone DNS' template. Permissions needed: Zone:DNS:Edit for ${DOMAIN}"
+    hint "Expected format: starts with 'cfut_' (API Token). NOT a Global API Key (hex string)"
     echo ""
     prompt "Cloudflare API Token" "" CLOUDFLARE_API_TOKEN --secret
 
     if [[ -n "$CLOUDFLARE_API_TOKEN" ]]; then
+        # Warn about wrong token types before hitting the API
+        if [[ "$CLOUDFLARE_API_TOKEN" =~ ^[0-9a-f]{37}$ ]]; then
+            warn "This looks like a Global API Key (37-char hex), not an API Token"
+            warn "API Tokens start with a prefix like 'cfut_' and are created per-permission"
+            hint "Create one at: https://dash.cloudflare.com/profile/api-tokens → 'Edit zone DNS' template"
+        elif [[ "$CLOUDFLARE_API_TOKEN" =~ ^cfat_ ]]; then
+            warn "This looks like a Cloudflare Account Token (cfat_), not a zone-scoped API Token"
+            hint "Create a zone-scoped token: 'Edit zone DNS' template at the API Tokens page"
+        fi
         validate_cloudflare_token "$CLOUDFLARE_API_TOKEN" || true
     else
         warn "No token set — TLS certs won't be auto-issued"
@@ -376,10 +456,20 @@ section_tailscale() {
     hint "Tailscale connects your clusters over a secure mesh network."
     hint "Create an API key at: https://login.tailscale.com/admin/settings/keys"
     hint "Type: API key, Scopes: all, Expiry: 90 days"
+    hint "Expected format: starts with 'tskey-api-' (API key, NOT an auth key)"
     echo ""
     prompt "Tailscale API Token" "" TAILSCALE_API_TOKEN --secret
 
     if [[ -n "$TAILSCALE_API_TOKEN" ]]; then
+        # Warn about wrong key types
+        if [[ "$TAILSCALE_API_TOKEN" =~ ^tskey-auth- ]]; then
+            warn "This looks like a Tailscale Auth Key (tskey-auth-...), not an API key"
+            hint "API keys start with 'tskey-api-' and are used to manage the tailnet"
+            hint "Auth keys are for joining devices — enter those in the next prompt instead"
+        elif [[ ! "$TAILSCALE_API_TOKEN" =~ ^tskey-api- ]]; then
+            warn "Expected a Tailscale API key starting with 'tskey-api-'"
+            hint "Create one at: https://login.tailscale.com/admin/settings/keys"
+        fi
         validate_tailscale_token "$TAILSCALE_API_TOKEN" || true
     else
         warn "No token set — Tailscale key management won't be deployed"
@@ -387,8 +477,16 @@ section_tailscale() {
     fi
 
     echo ""
-    hint "Auth key for provisioning new nodes. Leave blank to auto-create."
+    hint "Auth key for provisioning new nodes. Leave blank to auto-create from API key above."
+    hint "If provided, expected format: starts with 'tskey-auth-'"
     prompt "Tailscale Auth Key (optional)" "" TAILSCALE_AUTH_KEY --secret
+
+    if [[ -n "$TAILSCALE_AUTH_KEY" && ! "$TAILSCALE_AUTH_KEY" =~ ^tskey-auth- ]]; then
+        warn "Expected a Tailscale auth key starting with 'tskey-auth-'"
+        if [[ "$TAILSCALE_AUTH_KEY" =~ ^tskey-api- ]]; then
+            hint "This looks like an API key — it belongs in the API Token field above"
+        fi
+    fi
 
     echo ""
     hint "Central node's Tailscale IP (100.x.x.x) for DNS entries."
@@ -420,6 +518,8 @@ section_pi() {
     if [[ -n "$PI_IP" ]]; then
         if validate_ip "$PI_IP"; then
             validate_pi_reachable "$PI_IP" || true
+            # Check for stale SSH host keys (common after wiping SD cards)
+            check_ssh_host_key "$PI_IP"
         else
             err "Invalid IP format: ${PI_IP}"
         fi
@@ -439,6 +539,21 @@ section_pi() {
     else
         warn "SSH key not found at ${SSH_KEY_PATH}"
         warn "Generate one with: ssh-keygen -t ed25519"
+    fi
+
+    # Also check edge Pi IPs from inventory — host keys + SSH connection
+    local inv_file="${REPO_ROOT}/pi-setup/inventory.ini"
+    if [[ -f "$inv_file" ]]; then
+        local edge_ips
+        edge_ips=$(grep -E '^\s*pi-edge' "$inv_file" | grep -o 'ansible_host=[^ ]*' | cut -d= -f2 || true)
+        for edge_ip in $edge_ips; do
+            if [[ -n "$edge_ip" && "$edge_ip" != "$PI_IP" ]]; then
+                check_ssh_host_key "$edge_ip"
+                if validate_ssh_key "$SSH_KEY_PATH"; then
+                    validate_ssh_connection "$edge_ip" "$SSH_USER" "$SSH_KEY_PATH" || true
+                fi
+            fi
+        done
     fi
 }
 
@@ -528,27 +643,31 @@ generate_env_file() {
 # Usage:
 #   source .env.bootstrap && ./bootstrap.sh --platform ${PLATFORM} --stack ${STACK}
 #
+# Variables use 'export' so they propagate to child processes (bootstrap.sh,
+# ansible-playbook, etc.). Without this, values set here are invisible to
+# anything bootstrap.sh spawns.
+#
 # To reconfigure: ./scripts/setup.sh --reconfigure
 
 # Platform & Mode
-PLATFORM=${PLATFORM}
-MODE=${MODE}
-STACK=${STACK}
+export PLATFORM=${PLATFORM}
+export MODE=${MODE}
+export STACK=${STACK}
 
 # Domain
-DOMAIN=${DOMAIN}
+export DOMAIN=${DOMAIN}
 
 # Cloudflare (DNS-01 cert challenges)
-CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN}
+export CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN}
 
 # Tailscale (mesh VPN)
-TAILSCALE_API_TOKEN=${TAILSCALE_API_TOKEN}
-TAILSCALE_AUTH_KEY=${TAILSCALE_AUTH_KEY}
-CENTRAL_TAILSCALE_IP=${CENTRAL_TAILSCALE_IP}
+export TAILSCALE_API_TOKEN=${TAILSCALE_API_TOKEN}
+export TAILSCALE_AUTH_KEY=${TAILSCALE_AUTH_KEY}
+export CENTRAL_TAILSCALE_IP=${CENTRAL_TAILSCALE_IP}
 
 # Rancher
-RANCHER_BOOTSTRAP_PASSWORD=${RANCHER_BOOTSTRAP_PASSWORD}
-RANCHER_HOSTNAME=${RANCHER_HOSTNAME}
+export RANCHER_BOOTSTRAP_PASSWORD=${RANCHER_BOOTSTRAP_PASSWORD}
+export RANCHER_HOSTNAME=${RANCHER_HOSTNAME}
 ENVEOF
 
     # Add Pi-specific vars
@@ -556,9 +675,9 @@ ENVEOF
         cat >> "$tmpfile" << PIEOF
 
 # Pi Hardware
-PI_IP=${PI_IP}
-SSH_USER=${SSH_USER}
-SSH_KEY_PATH=${SSH_KEY_PATH}
+export PI_IP=${PI_IP}
+export SSH_USER=${SSH_USER}
+export SSH_KEY_PATH=${SSH_KEY_PATH}
 PIEOF
     fi
 

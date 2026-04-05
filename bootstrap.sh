@@ -554,7 +554,7 @@ preflight_checks() {
             pi_ip=$(awk '/^\[masters\]/{found=1; next} found && /^[^#\[]/ && NF{print; exit}' "$inventory" | sed 's/.*ansible_host=//' | awk '{print $1}')
             if [[ -n "$pi_ip" && "$pi_ip" != "CHANGE_ME" ]]; then
                 log "Checking SSH connectivity to Pi at ${pi_ip}..."
-                if ssh -o ConnectTimeout=5 -o BatchMode=yes "admin@${pi_ip}" true 2>/dev/null; then
+                if ssh -o ConnectTimeout=5 -o BatchMode=yes -o StrictHostKeyChecking=accept-new "admin@${pi_ip}" true 2>/dev/null; then
                     log "SSH to Pi ✓"
                 else
                     warn "Cannot SSH to Pi at ${pi_ip}. Ensure:"
@@ -716,6 +716,7 @@ setup_pi_cluster() {
             domain_args="-e domain=${DOMAIN}"
         fi
 
+        ANSIBLE_CONFIG="${SCRIPT_DIR}/pi-setup/ansible/ansible.cfg" \
         ansible-playbook -i "$inventory" "$playbook" \
             -e "k3s_version=${K3S_VERSION}" \
             -e "mode=${MODE}" \
@@ -729,7 +730,7 @@ setup_pi_cluster() {
         local retries=5
         local count=0
         while [[ $count -lt $retries ]]; do
-            if scp "admin@${PI_IP}:/etc/rancher/k3s/k3s.yaml" "${KUBECONFIG_DIR}/pi-config" 2>/dev/null; then
+            if scp -o StrictHostKeyChecking=accept-new "admin@${PI_IP}:/etc/rancher/k3s/k3s.yaml" "${KUBECONFIG_DIR}/pi-config" 2>/dev/null; then
                 break
             fi
             count=$((count + 1))
@@ -768,6 +769,7 @@ setup_pi_cluster() {
                 domain_args="-e domain=${DOMAIN}"
             fi
 
+            ANSIBLE_CONFIG="${SCRIPT_DIR}/pi-setup/ansible/ansible.cfg" \
             ansible-playbook -i "$inventory" "$playbook" \
                 -e "k3s_version=${K3S_VERSION}" \
                 -e "mode=${MODE}" \
@@ -1051,6 +1053,138 @@ install_karmada() {
 }
 
 #===============================================================================
+# Edge Cluster Auto-Registration (Karmada + Rancher)
+#===============================================================================
+
+# Parse edge cluster entries from inventory.ini. Prints one line per cluster:
+#   <name> <ip>
+inventory_edge_clusters() {
+    local inv="${SCRIPT_DIR}/pi-setup/inventory.ini"
+    if [[ ! -f "$inv" ]]; then
+        return 0
+    fi
+    # Read the [edge_clusters] section until the next section or EOF
+    awk '
+        /^\[edge_clusters\]/ { in_section=1; next }
+        /^\[/ { in_section=0 }
+        in_section && /^[a-zA-Z]/ && /ansible_host=/ {
+            name=$1
+            for (i=2; i<=NF; i++) {
+                if (match($i, /^ansible_host=/)) {
+                    ip=substr($i, 14)
+                    print name, ip
+                }
+            }
+        }
+    ' "$inv"
+}
+
+# Get a Rancher API token by logging in with the bootstrap password.
+# Prints the token to stdout, or empty on failure.
+rancher_get_api_token() {
+    local rancher_url="https://${RANCHER_HOSTNAME:?RANCHER_HOSTNAME must be set}"
+    if [[ -z "${RANCHER_BOOTSTRAP_PASSWORD:-}" ]]; then
+        return 0
+    fi
+
+    local login_resp
+    login_resp=$(curl -sk -X POST \
+        -H "Content-Type: application/json" \
+        -d "{\"username\":\"admin\",\"password\":\"${RANCHER_BOOTSTRAP_PASSWORD}\",\"responseType\":\"json\"}" \
+        "${rancher_url}/v3-public/localProviders/local?action=login" 2>/dev/null)
+
+    local session_token
+    session_token=$(echo "$login_resp" | jq -r '.token // empty' 2>/dev/null || true)
+    if [[ -z "$session_token" ]]; then
+        return 0
+    fi
+
+    # Create a non-expiring API token for long-lived automation
+    local token_resp
+    token_resp=$(curl -sk -X POST \
+        -H "Authorization: Bearer ${session_token}" \
+        -H "Content-Type: application/json" \
+        -d '{"type":"token","description":"kube-world bootstrap automation","ttl":0}' \
+        "${rancher_url}/v3/token" 2>/dev/null)
+
+    echo "$token_resp" | jq -r '.token // empty' 2>/dev/null || true
+}
+
+# Auto-import edge clusters from inventory.ini into Rancher.
+rancher_import_edge_clusters() {
+    if [[ "$PLATFORM" != "pi" ]]; then
+        return 0
+    fi
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "[DRY RUN] Would import edge clusters into Rancher"
+        return 0
+    fi
+
+    local clusters
+    clusters=$(inventory_edge_clusters)
+    if [[ -z "$clusters" ]]; then
+        debug "No edge clusters found in inventory — skipping Rancher import"
+        return 0
+    fi
+
+    log "Obtaining Rancher API token..."
+    local token
+    token=$(rancher_get_api_token)
+    if [[ -z "$token" ]]; then
+        warn "Could not obtain Rancher API token — skipping auto-import"
+        warn "Import manually: RANCHER_TOKEN=<token> ./rancher/import-cluster.sh --name <name> --pi-ip <ip>"
+        return 0
+    fi
+
+    log "Importing edge clusters into Rancher..."
+    local name ip
+    while IFS=' ' read -r name ip; do
+        [[ -z "$name" || -z "$ip" ]] && continue
+        log "  Importing ${name} (${ip})..."
+        if ! RANCHER_TOKEN="$token" RANCHER_URL="https://${RANCHER_HOSTNAME}" \
+             DOMAIN="${DOMAIN}" \
+             bash "${SCRIPT_DIR}/rancher/import-cluster.sh" --name "$name" --pi-ip "$ip"; then
+            warn "Failed to import ${name} into Rancher — continue manually"
+        fi
+    done <<< "$clusters"
+
+    log "Edge cluster Rancher import complete ✓"
+}
+
+# Auto-register edge clusters from inventory.ini with Karmada.
+karmada_register_edge_clusters() {
+    if [[ "$PLATFORM" != "pi" ]]; then
+        return 0
+    fi
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "[DRY RUN] Would register edge clusters with Karmada"
+        return 0
+    fi
+
+    local clusters
+    clusters=$(inventory_edge_clusters)
+    if [[ -z "$clusters" ]]; then
+        debug "No edge clusters in inventory — skipping Karmada join"
+        return 0
+    fi
+
+    log "Registering edge clusters with Karmada..."
+    local name ip
+    while IFS=' ' read -r name ip; do
+        [[ -z "$name" || -z "$ip" ]] && continue
+        log "  Joining ${name} (${ip})..."
+        if ! bash "${SCRIPT_DIR}/karmada/cluster-registration/register-pi.sh" \
+             --cluster-name "$name" \
+             --cluster-kubeconfig "${HOME}/.kube/${name}-config" \
+             --pi-ip "$ip"; then
+            warn "Failed to join ${name} to Karmada — continue manually"
+        fi
+    done <<< "$clusters"
+
+    log "Edge cluster Karmada registration complete ✓"
+}
+
+#===============================================================================
 # Flux GitOps Setup (--stack karmada)
 #===============================================================================
 setup_flux() {
@@ -1143,12 +1277,10 @@ install_traefik() {
         return 0
     fi
 
-    # Install Gateway API CRDs (required before Traefik can use them)
-    log "Installing Gateway API CRDs..."
-    if ! kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.1.0/standard-install.yaml; then
-        error "Failed to install Gateway API CRDs — network issue or invalid URL"
-        return 1
-    fi
+    # Note: Gateway API CRDs are NOT installed here — the Traefik Helm chart
+    # ships its own copy in crds/ and installs them on first release. Installing
+    # them separately causes field-manager conflicts because Helm and kubectl
+    # fight over ownership of the CRD spec.
 
     # Add Traefik Helm repo
     if ! helm repo add traefik https://traefik.github.io/charts 2>/dev/null; then
@@ -1187,6 +1319,154 @@ install_traefik() {
         return 1
     fi
     log "Gateway API configured ✓"
+}
+
+#===============================================================================
+# Cloudflare DNS Management
+#===============================================================================
+
+# Look up zone ID for $DOMAIN. Prints zone ID or empty.
+cloudflare_get_zone_id() {
+    if [[ -z "${CLOUDFLARE_API_TOKEN:-}" || -z "${DOMAIN:-}" ]]; then
+        return 0
+    fi
+    curl -s -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+        "https://api.cloudflare.com/client/v4/zones?name=${DOMAIN}" 2>/dev/null \
+        | jq -r '.result[0].id // empty' 2>/dev/null || true
+}
+
+# Toggle SSL mode briefly to force Cloudflare edge DNS cache rebuild.
+# New zones have a known bug where underscore-prefixed TXT records
+# (like _acme-challenge) don't propagate to authoritative NS until
+# an SSL setting change forces a rebuild. See docs/troubleshooting.md.
+cloudflare_force_edge_rebuild() {
+    if [[ -z "${CLOUDFLARE_API_TOKEN:-}" || -z "${DOMAIN:-}" ]]; then
+        debug "Skipping CF edge rebuild (no token or domain)"
+        return 0
+    fi
+
+    local zone_id
+    zone_id=$(cloudflare_get_zone_id)
+    if [[ -z "$zone_id" ]]; then
+        warn "Could not find Cloudflare zone for ${DOMAIN} — skipping edge rebuild"
+        return 0
+    fi
+
+    log "Forcing Cloudflare edge DNS rebuild (fixes TXT propagation for new zones)..."
+
+    local current
+    current=$(curl -s -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+        "https://api.cloudflare.com/client/v4/zones/${zone_id}/settings/ssl" \
+        2>/dev/null | jq -r '.result.value // "full"' 2>/dev/null || echo "full")
+
+    # Toggle to a different value then back. If the token lacks Zone:SSL:Edit
+    # permission, warn but don't fail — user can still do it manually.
+    local other="full"
+    [[ "$current" == "full" ]] && other="flexible"
+
+    local resp
+    resp=$(curl -s -X PATCH \
+        -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+        -H "Content-Type: application/json" \
+        -d "{\"value\":\"${other}\"}" \
+        "https://api.cloudflare.com/client/v4/zones/${zone_id}/settings/ssl" 2>/dev/null)
+
+    if ! echo "$resp" | jq -e '.success == true' >/dev/null 2>&1; then
+        warn "Cloudflare SSL toggle failed — token may lack Zone:SSL:Edit permission"
+        warn "If cert issuance is stuck, manually toggle SSL in the Cloudflare dashboard"
+        warn "  https://dash.cloudflare.com → ${DOMAIN} → SSL/TLS → change mode and back"
+        return 0
+    fi
+
+    sleep 3
+    curl -s -X PATCH \
+        -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+        -H "Content-Type: application/json" \
+        -d "{\"value\":\"${current}\"}" \
+        "https://api.cloudflare.com/client/v4/zones/${zone_id}/settings/ssl" >/dev/null 2>&1
+
+    log "Cloudflare edge rebuild triggered ✓"
+}
+
+# Create or update A records for the domain pointing to the central Pi's
+# Tailscale IP. This eliminates stale DNS from prior bootstraps.
+cloudflare_upsert_dns_records() {
+    if [[ -z "${CLOUDFLARE_API_TOKEN:-}" || -z "${DOMAIN:-}" ]]; then
+        debug "Skipping DNS record upsert (no token or domain)"
+        return 0
+    fi
+    if [[ -z "${CENTRAL_TAILSCALE_IP:-}" ]]; then
+        warn "CENTRAL_TAILSCALE_IP not set — cannot update DNS A records"
+        warn "After bootstrap, update manually in Cloudflare or re-run with CENTRAL_TAILSCALE_IP set"
+        return 0
+    fi
+
+    local zone_id
+    zone_id=$(cloudflare_get_zone_id)
+    if [[ -z "$zone_id" ]]; then
+        warn "Could not find Cloudflare zone for ${DOMAIN} — skipping DNS upsert"
+        return 0
+    fi
+
+    log "Upserting DNS A records → ${CENTRAL_TAILSCALE_IP}..."
+
+    # Records to create/update — apex, wildcard, and common service subdomains
+    local names=("${DOMAIN}" "*.${DOMAIN}" "rancher.${DOMAIN}" "gitlab.${DOMAIN}" "auth.${DOMAIN}" "ha.${DOMAIN}" "ntfy.${DOMAIN}")
+
+    for name in "${names[@]}"; do
+        # Check if record already exists
+        local existing_id
+        existing_id=$(curl -s -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records?type=A&name=${name}" \
+            2>/dev/null | jq -r '.result[0].id // empty' 2>/dev/null || true)
+
+        local payload
+        payload="{\"type\":\"A\",\"name\":\"${name}\",\"content\":\"${CENTRAL_TAILSCALE_IP}\",\"ttl\":60,\"proxied\":false}"
+
+        local result
+        if [[ -n "$existing_id" ]]; then
+            result=$(curl -s -X PUT \
+                -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                -H "Content-Type: application/json" \
+                -d "$payload" \
+                "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records/${existing_id}" \
+                2>/dev/null | jq -r '.success' 2>/dev/null || echo "false")
+            debug "  ${name}: updated (${result})"
+        else
+            result=$(curl -s -X POST \
+                -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                -H "Content-Type: application/json" \
+                -d "$payload" \
+                "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records" \
+                2>/dev/null | jq -r '.success' 2>/dev/null || echo "false")
+            debug "  ${name}: created (${result})"
+        fi
+    done
+
+    log "DNS records upserted ✓"
+}
+
+# Fetch central Pi's Tailscale IP via SSH. Sets CENTRAL_TAILSCALE_IP if empty.
+fetch_central_tailscale_ip() {
+    if [[ -n "${CENTRAL_TAILSCALE_IP:-}" ]]; then
+        debug "CENTRAL_TAILSCALE_IP already set: ${CENTRAL_TAILSCALE_IP}"
+        return 0
+    fi
+    if [[ -z "${PI_IP:-}" ]]; then
+        debug "PI_IP not set — cannot fetch Tailscale IP"
+        return 0
+    fi
+
+    local ip
+    ip=$(ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new \
+        "admin@${PI_IP}" "tailscale ip -4" 2>/dev/null | head -1 || true)
+
+    if [[ -n "$ip" && "$ip" =~ ^100\. ]]; then
+        export CENTRAL_TAILSCALE_IP="$ip"
+        log "Detected central Pi Tailscale IP: ${CENTRAL_TAILSCALE_IP}"
+    else
+        warn "Could not determine central Pi Tailscale IP via SSH"
+    fi
 }
 
 #===============================================================================
@@ -1239,6 +1519,11 @@ setup_cert_manager_le() {
         warn "cert-manager not found — skipping Let's Encrypt setup"
         return 0
     fi
+
+    # Force Cloudflare edge DNS rebuild before issuing the cert. New zones
+    # have a known bug where underscore-prefixed TXT records don't propagate
+    # until an SSL setting change forces a rebuild. This is idempotent.
+    cloudflare_force_edge_rebuild
 
     # Apply ClusterIssuer (Let's Encrypt + Cloudflare DNS-01)
     local issuer_file="${SCRIPT_DIR}/infrastructure/cert-manager/clusterissuer.yaml"
@@ -1759,13 +2044,20 @@ main() {
             export RANCHER_HOSTNAME="${RANCHER_HOSTNAME:-}"
         fi
 
+        # Detect central Pi Tailscale IP and upsert Cloudflare DNS records
+        # before anything that depends on DNS resolution (cert issuance, etc.)
+        fetch_central_tailscale_ip
+        cloudflare_upsert_dns_records
+
         # Karmada stack: full infrastructure pipeline
         # Critical steps abort on failure; optional steps warn and continue
         install_traefik || { error "Traefik install failed — cannot continue"; exit 1; }
         install_karmada || { error "Karmada install failed — cannot continue"; exit 1; }
+        karmada_register_edge_clusters  # Auto-join edge clusters from inventory
         create_secrets               # Optional: warns if CLOUDFLARE_API_TOKEN missing
         install_rancher || { error "Rancher install failed — cannot continue"; exit 1; }
         configure_rancher_api        # Best-effort: warns and continues on failure
+        rancher_import_edge_clusters # Auto-import edge clusters into Rancher
         setup_cert_manager_le        # Depends on create_secrets; warns if cert not issued
         setup_flux || { error "Flux setup failed — cannot continue"; exit 1; }
         install_gitlab_native        # Optional: warns if install script missing

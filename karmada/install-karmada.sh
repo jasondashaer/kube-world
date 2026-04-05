@@ -176,12 +176,19 @@ verify_installation() {
     local timeout=300
     local elapsed=0
     while [[ $elapsed -lt $timeout ]]; do
-        local not_ready
-        not_ready=$(kubectl -n karmada-system get pods --no-headers 2>/dev/null | grep -cv "Running\|Completed" || echo "0")
-        if [[ "$not_ready" == "0" ]]; then
+        # Count pods that are NOT in Running or Completed state.
+        # grep -c prints count AND exits non-zero when count is 0, so we
+        # use `|| true` to swallow the exit code without polluting the
+        # captured output with a spurious extra "0".
+        local not_ready total
+        not_ready=$(kubectl -n karmada-system get pods --no-headers 2>/dev/null \
+            | grep -v "Running\|Completed" | wc -l | tr -d ' ')
+        total=$(kubectl -n karmada-system get pods --no-headers 2>/dev/null | wc -l | tr -d ' ')
+        if [[ "$not_ready" == "0" && "$total" -gt 0 ]]; then
+            log "All ${total} Karmada pods are ready ✓"
             break
         fi
-        debug "Waiting for ${not_ready} pod(s)... (${elapsed}/${timeout}s)"
+        debug "Waiting for ${not_ready}/${total} pod(s)... (${elapsed}/${timeout}s)"
         sleep 10
         elapsed=$((elapsed + 10))
     done

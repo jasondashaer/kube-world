@@ -1,0 +1,16 @@
+# Home Assistant kustomization.
+#
+# This directory contains multi-cluster resources (Deployment, Service,
+# USB udev rules) that Flux applies to the Karmada API so they propagate
+# to edge clusters via PropagationPolicy. The HTTPRoute (gateway.yaml)
+# is a HOST-cluster concern (Traefik lives on the central Pi) and is
+# applied separately by bootstrap.sh via setup_httproutes — NOT by this
+# kustomization. Gateway API CRDs are not installed on the Karmada API
+# server, so including gateway.yaml here would cause Flux reconciliation
+# to fail.
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - deployment.yaml
+  - udev-rules.yaml

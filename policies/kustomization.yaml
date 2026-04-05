@@ -1,0 +1,12 @@
+# Cluster policies kustomization.
+#
+# Currently only includes scheduling-priorities.yaml (standard K8s
+# PriorityClass resources). kyverno-policies.yaml is excluded because
+# Kyverno itself is not yet installed — it's a Phase 2+ item. Once
+# Kyverno is deployed as part of bootstrap (or Flux-managed), add
+# kyverno-policies.yaml back to the resources list below.
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - scheduling-priorities.yaml

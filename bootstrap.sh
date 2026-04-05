@@ -1390,10 +1390,22 @@ cloudflare_get_zone_id() {
         | jq -r '.result[0].id // empty' 2>/dev/null || true
 }
 
-# Toggle SSL mode briefly to force Cloudflare edge DNS cache rebuild.
-# New zones have a known bug where underscore-prefixed TXT records
-# (like _acme-challenge) don't propagate to authoritative NS until
-# an SSL setting change forces a rebuild. See docs/troubleshooting.md.
+# Force a Cloudflare edge DNS cache rebuild by toggling zone settings.
+#
+# New Cloudflare zones have a known bug where underscore-prefixed TXT
+# records (like _acme-challenge.*) don't propagate from the zone API to
+# the authoritative nameservers until a zone-level setting change
+# triggers an edge rebuild. Without this, cert-manager's DNS-01 challenge
+# hangs indefinitely waiting for the TXT record to propagate.
+#
+# Requires CF API token permissions:
+#   - Zone:DNS:Edit (for DNS upsert)
+#   - Zone:Zone:Read (for zone ID lookup)
+#   - Zone:Zone Settings:Edit (for SSL and dev_mode toggles below)
+#
+# Observed behavior: a single SSL toggle doesn't always flush the cache;
+# pairing SSL toggle with a dev_mode toggle and longer delays is more
+# reliable. Safe to run multiple times — idempotent.
 cloudflare_force_edge_rebuild() {
     if [[ -z "${CLOUDFLARE_API_TOKEN:-}" || -z "${DOMAIN:-}" ]]; then
         debug "Skipping CF edge rebuild (no token or domain)"
@@ -1407,26 +1419,36 @@ cloudflare_force_edge_rebuild() {
         return 0
     fi
 
-    log "Forcing Cloudflare edge DNS rebuild (fixes TXT propagation for new zones)..."
+    log "Forcing Cloudflare edge DNS rebuild (fixes TXT propagation on new zones)..."
 
-    local current
-    current=$(curl -s -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+    # Helper: PATCH a zone setting. Returns 0 on success, 1 on auth failure.
+    _cf_patch_setting() {
+        local setting="$1"
+        local value="$2"
+        local resp
+        resp=$(curl -s -X PATCH \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"value\":\"${value}\"}" \
+            "https://api.cloudflare.com/client/v4/zones/${zone_id}/settings/${setting}" 2>/dev/null)
+        echo "$resp" | jq -e '.success == true' >/dev/null 2>&1
+    }
+
+    # Snapshot current values so we can restore them
+    local current_ssl current_dev_mode
+    current_ssl=$(curl -s -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
         "https://api.cloudflare.com/client/v4/zones/${zone_id}/settings/ssl" \
         2>/dev/null | jq -r '.result.value // "full"' 2>/dev/null || echo "full")
+    current_dev_mode=$(curl -s -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+        "https://api.cloudflare.com/client/v4/zones/${zone_id}/settings/development_mode" \
+        2>/dev/null | jq -r '.result.value // "off"' 2>/dev/null || echo "off")
 
-    # Toggle to a different value then back. If the token lacks Zone:SSL:Edit
-    # permission, warn but don't fail — user can still do it manually.
-    local other="full"
-    [[ "$current" == "full" ]] && other="flexible"
+    # Determine alternate SSL value to toggle to
+    local other_ssl="full"
+    [[ "$current_ssl" == "full" ]] && other_ssl="flexible"
 
-    local resp
-    resp=$(curl -s -X PATCH \
-        -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-        -H "Content-Type: application/json" \
-        -d "{\"value\":\"${other}\"}" \
-        "https://api.cloudflare.com/client/v4/zones/${zone_id}/settings/ssl" 2>/dev/null)
-
-    if ! echo "$resp" | jq -e '.success == true' >/dev/null 2>&1; then
+    # Step 1: Toggle SSL to a different value
+    if ! _cf_patch_setting "ssl" "$other_ssl"; then
         warn "Cloudflare SSL toggle failed — token lacks 'Zone:Zone Settings:Edit' permission"
         warn "(this is a DIFFERENT permission from 'Zone:SSL and Certificates:Edit')"
         warn ""
@@ -1446,15 +1468,21 @@ cloudflare_force_edge_rebuild() {
         warn "  kubectl -n kube-system rollout restart deploy/coredns"
         return 0
     fi
+    sleep 10
 
-    sleep 3
-    curl -s -X PATCH \
-        -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-        -H "Content-Type: application/json" \
-        -d "{\"value\":\"${current}\"}" \
-        "https://api.cloudflare.com/client/v4/zones/${zone_id}/settings/ssl" >/dev/null 2>&1
+    # Step 2: Also toggle development_mode on briefly — additional nudge
+    # to the edge rebuild machinery. Best-effort; don't fail if it errors.
+    _cf_patch_setting "development_mode" "on" || debug "dev_mode on failed"
+    sleep 5
 
-    log "Cloudflare edge rebuild triggered ✓"
+    # Step 3: Restore SSL to original value
+    _cf_patch_setting "ssl" "$current_ssl" || warn "Failed to restore SSL to ${current_ssl}"
+    sleep 5
+
+    # Step 4: Restore development_mode to original value (should be 'off')
+    _cf_patch_setting "development_mode" "$current_dev_mode" || debug "dev_mode restore failed"
+
+    log "Cloudflare edge rebuild triggered ✓ (restored ssl=${current_ssl})"
 }
 
 # Create or update A records for the domain pointing to the central Pi's

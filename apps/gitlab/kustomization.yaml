@@ -1,0 +1,16 @@
+# GitLab kustomization — intentionally empty for Flux → Karmada.
+#
+# GitLab runs natively on the central Pi (systemd, not K8s) and is
+# fully managed by bootstrap.sh via scripts/install-gitlab.sh. The
+# Service, Endpoints, and HTTPRoute resources that make it reachable
+# from inside the cluster live on the HOST cluster and are applied by
+# bootstrap.sh (install_gitlab_native) with the correct templated
+# node IP — not via Flux.
+#
+# When the central node upgrades to amd64 hardware, GitLab can be
+# containerized and this file can reference deployment.yaml (currently
+# stored as deployment.yaml.amd64-future).
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources: []

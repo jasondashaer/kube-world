@@ -1011,8 +1011,119 @@ install_rancher() {
 }
 
 #===============================================================================
+# Rancher API access helpers — use kubectl port-forward to hit Rancher
+# directly via the K8s API server, bypassing DNS/Tailscale/Traefik/svclb.
+#
+# WHY port-forward instead of the public URL: post-install, the external
+# URL (https://rancher.${DOMAIN}) has MANY dependencies that can all fail
+# independently — DNS propagation, Tailscale device sync on the operator
+# machine, Traefik HTTPRoute reload, svclb readiness, TLS cert, Rancher
+# pod internal init. Every dependency is a failure mode that's hard to
+# diagnose from bootstrap. Port-forward only depends on:
+#   1. kubectl + kubeconfig (which we already have)
+#   2. Rancher Service having Endpoints (guaranteed by install_rancher
+#      completing its --wait)
+# That's it. No network, no DNS, no TLS, no routing.
+#===============================================================================
+
+# Start kubectl port-forward to svc/rancher in cattle-system.
+# Sets RANCHER_PF_PORT, RANCHER_PF_PID, RANCHER_PF_URL.
+# Returns 0 on success (port is listening), 1 on failure.
+_rancher_pf_start() {
+    unset RANCHER_PF_PORT RANCHER_PF_PID RANCHER_PF_URL
+
+    # Find a free local port starting at 18443
+    local port=18443
+    while lsof -iTCP:${port} -sTCP:LISTEN 2>/dev/null | grep -q LISTEN; do
+        port=$((port + 1))
+        if [[ $port -gt 18500 ]]; then
+            warn "Could not find free port for Rancher port-forward"
+            return 1
+        fi
+    done
+
+    local pf_log="/tmp/kube-world-rancher-pf-$$.log"
+    kubectl -n cattle-system port-forward svc/rancher ${port}:443 \
+        > "$pf_log" 2>&1 &
+    local pid=$!
+
+    # Wait for the port to start listening
+    local waited=0
+    while [[ $waited -lt 30 ]]; do
+        if lsof -iTCP:${port} -sTCP:LISTEN 2>/dev/null | grep -q LISTEN; then
+            export RANCHER_PF_PORT=$port
+            export RANCHER_PF_PID=$pid
+            export RANCHER_PF_URL="https://localhost:${port}"
+            debug "port-forward ready: svc/rancher:443 → localhost:${port} (pid ${pid})"
+            return 0
+        fi
+        # If the process died, bail early with the log
+        if ! kill -0 "$pid" 2>/dev/null; then
+            error "kubectl port-forward died unexpectedly. Log:"
+            cat "$pf_log" >&2 2>/dev/null || true
+            return 1
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+
+    warn "kubectl port-forward did not start listening within 30s. Log:"
+    cat "$pf_log" >&2 2>/dev/null || true
+    kill "$pid" 2>/dev/null || true
+    return 1
+}
+
+# Stop the Rancher port-forward started by _rancher_pf_start.
+_rancher_pf_stop() {
+    if [[ -n "${RANCHER_PF_PID:-}" ]]; then
+        kill "${RANCHER_PF_PID}" 2>/dev/null || true
+        wait "${RANCHER_PF_PID}" 2>/dev/null || true
+        debug "port-forward stopped (pid ${RANCHER_PF_PID})"
+    fi
+    rm -f "/tmp/kube-world-rancher-pf-$$.log" 2>/dev/null || true
+    unset RANCHER_PF_PORT RANCHER_PF_PID RANCHER_PF_URL
+}
+
+# Wait for Rancher API to respond with "pong" at the given base URL.
+# Returns 0 once ready, 1 on timeout. Logs verbosely on each failure so
+# we can actually diagnose issues instead of silently retrying.
+_rancher_wait_ready() {
+    local base_url="$1"
+    local timeout="${2:-300}"
+    local interval=5
+    local elapsed=0
+
+    log "Waiting for Rancher API at ${base_url}..."
+    while [[ $elapsed -lt $timeout ]]; do
+        local response http_code body
+        response=$(curl -sk -w "\n__HTTP_CODE__:%{http_code}" \
+            --connect-timeout 5 --max-time 10 \
+            "${base_url}/ping" 2>&1) || true
+        http_code=$(echo "$response" | grep "^__HTTP_CODE__:" | sed 's/__HTTP_CODE__://')
+        body=$(echo "$response" | grep -v "^__HTTP_CODE__:")
+
+        if [[ "$http_code" == "200" ]] && [[ "$body" == *"pong"* ]]; then
+            log "Rancher API is responding ✓ (HTTP ${http_code}, ${elapsed}s)"
+            return 0
+        fi
+
+        debug "  [${elapsed}s/${timeout}s] not ready yet: HTTP=${http_code:-none} body='$(echo "${body:0:120}" | tr -d '\n')'"
+        sleep $interval
+        elapsed=$((elapsed + interval))
+    done
+
+    error "Rancher API did not become ready after ${timeout}s at ${base_url}"
+    error "Last response: HTTP=${http_code:-none}"
+    error "Body: $(echo "${body:0:500}" | tr -d '\n')"
+    error "Rancher pod state:"
+    kubectl -n cattle-system get pods -l app=rancher -o wide >&2 2>/dev/null || true
+    return 1
+}
+
+#===============================================================================
 # Configure Rancher API Settings (post-install)
-# Sets server-url and agent-tls-mode for Tailscale/LE cert connectivity
+# Sets server-url and agent-tls-mode for Tailscale/LE cert connectivity.
+# Uses port-forward (not external URL) for reliability.
 #===============================================================================
 configure_rancher_api() {
     if [[ "$PLATFORM" != "pi" ]]; then
@@ -1020,61 +1131,77 @@ configure_rancher_api() {
         return 0
     fi
 
-    local rancher_url="https://${RANCHER_HOSTNAME:?RANCHER_HOSTNAME must be set}"
-    log "Configuring Rancher API settings..."
+    if [[ -z "${RANCHER_BOOTSTRAP_PASSWORD:-}" ]]; then
+        warn "RANCHER_BOOTSTRAP_PASSWORD not set — skipping API config"
+        return 0
+    fi
 
-    # Wait for Rancher to respond
-    local attempts=0
-    while [[ $attempts -lt 30 ]]; do
-        if curl -sk --connect-timeout 3 "${rancher_url}/ping" 2>/dev/null | grep -q "pong"; then
-            break
+    log "Configuring Rancher API settings (via kubectl port-forward)..."
+
+    if ! _rancher_pf_start; then
+        warn "Could not establish port-forward to Rancher — skipping API config"
+        return 0
+    fi
+
+    # Public URL is what Rancher stores as its server-url so external
+    # clients (including cattle-cluster-agent on edge clusters) know
+    # where to connect back. The local URL is only for OUR API calls.
+    local public_url="https://${RANCHER_HOSTNAME}"
+    local local_url="${RANCHER_PF_URL}"
+
+    if ! _rancher_wait_ready "$local_url" 300; then
+        _rancher_pf_stop
+        warn "Rancher not responding via port-forward — skipping API config"
+        return 0
+    fi
+
+    # Login to Rancher and mint a session token
+    debug "Logging in as admin via port-forward..."
+    local login_resp login_code
+    login_resp=$(curl -sk -w "\n__HTTP__:%{http_code}" -X POST \
+        -H "Content-Type: application/json" \
+        -d "{\"username\":\"admin\",\"password\":\"${RANCHER_BOOTSTRAP_PASSWORD}\",\"responseType\":\"json\"}" \
+        "${local_url}/v3-public/localProviders/local?action=login" 2>&1)
+    login_code=$(echo "$login_resp" | grep "^__HTTP__:" | sed 's/__HTTP__://')
+    login_resp=$(echo "$login_resp" | grep -v "^__HTTP__:")
+
+    local session_token
+    session_token=$(echo "$login_resp" | jq -r '.token // empty' 2>/dev/null || true)
+    if [[ -z "$session_token" ]]; then
+        warn "Rancher login failed (HTTP ${login_code}). Response:"
+        warn "  $(echo "${login_resp:0:300}" | tr -d '\n')"
+        warn "Check that RANCHER_BOOTSTRAP_PASSWORD matches what Rancher was installed with"
+        _rancher_pf_stop
+        return 0
+    fi
+    debug "Logged in, session token obtained"
+
+    # Helper to PUT a Rancher setting
+    _cfg_put_setting() {
+        local setting="$1" value="$2"
+        local resp code
+        resp=$(curl -sk -w "\n__HTTP__:%{http_code}" -X PUT \
+            -H "Authorization: Bearer ${session_token}" \
+            -H "Content-Type: application/json" \
+            -d "{\"value\":\"${value}\"}" \
+            "${local_url}/v3/settings/${setting}" 2>&1)
+        code=$(echo "$resp" | grep "^__HTTP__:" | sed 's/__HTTP__://')
+        if [[ "$code" == "200" ]]; then
+            log "  ${setting} = ${value}"
+        else
+            warn "  ${setting}: HTTP ${code} — $(echo "$resp" | grep -v "^__HTTP__:" | head -c 150)"
         fi
-        attempts=$((attempts + 1))
-        sleep 10
-    done
+    }
 
-    if [[ $attempts -ge 30 ]]; then
-        warn "Rancher not responding at ${rancher_url} — skipping API config"
-        return 0
-    fi
+    _cfg_put_setting "server-url" "$public_url"
+    _cfg_put_setting "agent-tls-mode" "system-store"
+    _cfg_put_setting "cacerts" ""
 
-    # Get API token via bootstrap password
-    local login_response
-    login_response=$(curl -sk "${rancher_url}/v3-public/localProviders/local?action=login" \
-        -H "Content-Type: application/json" \
-        -d "{\"username\":\"admin\",\"password\":\"${RANCHER_BOOTSTRAP_PASSWORD}\"}" 2>/dev/null)
-    local api_token
-    api_token=$(echo "$login_response" | python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || echo "")
+    # Delete internal CA secrets (not needed with LE + system-store)
+    kubectl -n cattle-system delete secret tls-rancher-internal-ca tls-rancher-internal \
+        --ignore-not-found > /dev/null 2>&1 || true
 
-    if [[ -z "$api_token" ]]; then
-        warn "Could not authenticate to Rancher API — configure manually"
-        return 0
-    fi
-
-    # Set server-url to the public hostname
-    curl -sk "${rancher_url}/v3/settings/server-url" \
-        -H "Authorization: Bearer ${api_token}" \
-        -H "Content-Type: application/json" \
-        -X PUT -d "{\"value\":\"${rancher_url}\"}" > /dev/null 2>&1
-    log "  server-url = ${rancher_url}"
-
-    # Set agent-tls-mode to system-store (required for LE certs via Tailscale)
-    curl -sk "${rancher_url}/v3/settings/agent-tls-mode" \
-        -H "Authorization: Bearer ${api_token}" \
-        -H "Content-Type: application/json" \
-        -X PUT -d '{"value":"system-store"}' > /dev/null 2>&1
-    log "  agent-tls-mode = system-store"
-
-    # Clear cacerts (not needed with LE + system-store)
-    curl -sk "${rancher_url}/v3/settings/cacerts" \
-        -H "Authorization: Bearer ${api_token}" \
-        -H "Content-Type: application/json" \
-        -X PUT -d '{"value":""}' > /dev/null 2>&1
-    log "  cacerts cleared"
-
-    # Delete internal CA secrets (not needed with LE)
-    kubectl -n cattle-system delete secret tls-rancher-internal-ca tls-rancher-internal --ignore-not-found 2>/dev/null || true
-
+    _rancher_pf_stop
     log "Rancher API configuration complete ✓"
 }
 
@@ -1254,35 +1381,58 @@ inventory_edge_clusters() {
 # Get a Rancher API token by logging in with the bootstrap password.
 # Prints the token to stdout, or empty on failure.
 rancher_get_api_token() {
-    local rancher_url="https://${RANCHER_HOSTNAME:?RANCHER_HOSTNAME must be set}"
+    # Uses the caller's existing port-forward (via RANCHER_PF_URL) — caller
+    # is responsible for _rancher_pf_start/_rancher_pf_stop. This keeps one
+    # port-forward open across multiple API calls instead of spinning one
+    # up per call.
+    if [[ -z "${RANCHER_PF_URL:-}" ]]; then
+        error "rancher_get_api_token called without active port-forward"
+        return 1
+    fi
     if [[ -z "${RANCHER_BOOTSTRAP_PASSWORD:-}" ]]; then
-        return 0
+        error "RANCHER_BOOTSTRAP_PASSWORD not set"
+        return 1
     fi
 
-    local login_resp
-    login_resp=$(curl -sk -X POST \
+    local login_resp login_code
+    login_resp=$(curl -sk -w "\n__HTTP__:%{http_code}" -X POST \
         -H "Content-Type: application/json" \
         -d "{\"username\":\"admin\",\"password\":\"${RANCHER_BOOTSTRAP_PASSWORD}\",\"responseType\":\"json\"}" \
-        "${rancher_url}/v3-public/localProviders/local?action=login" 2>/dev/null)
+        "${RANCHER_PF_URL}/v3-public/localProviders/local?action=login" 2>&1)
+    login_code=$(echo "$login_resp" | grep "^__HTTP__:" | sed 's/__HTTP__://')
+    login_resp=$(echo "$login_resp" | grep -v "^__HTTP__:")
 
     local session_token
     session_token=$(echo "$login_resp" | jq -r '.token // empty' 2>/dev/null || true)
     if [[ -z "$session_token" ]]; then
-        return 0
+        error "Rancher login failed (HTTP ${login_code}): $(echo "${login_resp:0:200}" | tr -d '\n')"
+        return 1
     fi
 
     # Create a non-expiring API token for long-lived automation
-    local token_resp
-    token_resp=$(curl -sk -X POST \
+    local token_resp token_code
+    token_resp=$(curl -sk -w "\n__HTTP__:%{http_code}" -X POST \
         -H "Authorization: Bearer ${session_token}" \
         -H "Content-Type: application/json" \
         -d '{"type":"token","description":"kube-world bootstrap automation","ttl":0}' \
-        "${rancher_url}/v3/token" 2>/dev/null)
+        "${RANCHER_PF_URL}/v3/token" 2>&1)
+    token_code=$(echo "$token_resp" | grep "^__HTTP__:" | sed 's/__HTTP__://')
+    token_resp=$(echo "$token_resp" | grep -v "^__HTTP__:")
 
-    echo "$token_resp" | jq -r '.token // empty' 2>/dev/null || true
+    local api_token
+    api_token=$(echo "$token_resp" | jq -r '.token // empty' 2>/dev/null || true)
+    if [[ -z "$api_token" ]]; then
+        error "Token creation failed (HTTP ${token_code}): $(echo "${token_resp:0:200}" | tr -d '\n')"
+        return 1
+    fi
+    echo "$api_token"
 }
 
 # Auto-import edge clusters from inventory.ini into Rancher.
+# Uses port-forward for all API calls (reliable) but passes the PUBLIC
+# RANCHER_URL to import-cluster.sh so that the manifest Rancher generates
+# for the edge cluster embeds the correct external URL for cattle-agent
+# to connect back to.
 rancher_import_edge_clusters() {
     if [[ "$PLATFORM" != "pi" ]]; then
         return 0
@@ -1299,27 +1449,45 @@ rancher_import_edge_clusters() {
         return 0
     fi
 
-    log "Obtaining Rancher API token..."
-    local token
-    token=$(rancher_get_api_token)
-    if [[ -z "$token" ]]; then
-        warn "Could not obtain Rancher API token — skipping auto-import"
+    log "Obtaining Rancher API token (via port-forward)..."
+    if ! _rancher_pf_start; then
+        warn "Port-forward failed — skipping auto-import"
         warn "Import manually: RANCHER_TOKEN=<token> ./rancher/import-cluster.sh --name <name> --pi-ip <ip>"
         return 0
     fi
+    if ! _rancher_wait_ready "$RANCHER_PF_URL" 120; then
+        _rancher_pf_stop
+        warn "Rancher not responding via port-forward — skipping auto-import"
+        return 0
+    fi
+
+    local token
+    token=$(rancher_get_api_token) || token=""
+    if [[ -z "$token" ]]; then
+        warn "Could not obtain Rancher API token — skipping auto-import"
+        warn "Import manually: RANCHER_TOKEN=<token> ./rancher/import-cluster.sh --name <name> --pi-ip <ip>"
+        _rancher_pf_stop
+        return 0
+    fi
+    log "Rancher API token obtained ✓"
 
     log "Importing edge clusters into Rancher..."
     local name ip
     while IFS=' ' read -r name ip; do
         [[ -z "$name" || -z "$ip" ]] && continue
         log "  Importing ${name} (${ip})..."
-        if ! RANCHER_TOKEN="$token" RANCHER_URL="https://${RANCHER_HOSTNAME}" \
+        # import-cluster.sh uses RANCHER_URL for its API calls. Pass the
+        # port-forward URL so it doesn't depend on external DNS/routing.
+        # The server-url Rancher stores internally (set by configure_rancher_api)
+        # is the PUBLIC URL — that's what gets baked into the import manifest.
+        if ! RANCHER_TOKEN="$token" RANCHER_URL="$RANCHER_PF_URL" \
              DOMAIN="${DOMAIN}" \
              bash "${SCRIPT_DIR}/rancher/import-cluster.sh" --name "$name" --pi-ip "$ip"; then
             warn "Failed to import ${name} into Rancher — continue manually"
         fi
     done <<< "$clusters"
 
+    _rancher_pf_stop
     log "Edge cluster Rancher import complete ✓"
 }
 

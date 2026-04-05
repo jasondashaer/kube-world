@@ -723,6 +723,123 @@ ensure_tailscale_auth_key() {
     log "Bootstrap auth key created (reusable, tag:edge, 1h expiry)"
 }
 
+#===============================================================================
+# Fetch Tailscale MagicDNS suffix via API.
+#
+# Sets TAILNET_DNS_SUFFIX to the tailnet's DNS name (e.g., tailab53c1.ts.net)
+# so that cloudflare_ensure_cnames can build CNAME targets like
+# pi-central.<suffix>. The suffix is stable across wipes — it's tied to
+# your Tailscale account, not to any specific device.
+#===============================================================================
+tailscale_fetch_tailnet_suffix() {
+    if [[ -n "${TAILNET_DNS_SUFFIX:-}" ]]; then
+        debug "TAILNET_DNS_SUFFIX already set: ${TAILNET_DNS_SUFFIX}"
+        return 0
+    fi
+    if [[ -z "${TAILSCALE_API_TOKEN:-}" ]]; then
+        debug "TAILSCALE_API_TOKEN not set — cannot fetch tailnet suffix"
+        return 0
+    fi
+
+    # Pull the suffix from any existing device's DNSName. All devices in
+    # a tailnet share the same suffix so the first one works.
+    local suffix
+    suffix=$(curl -s -u "${TAILSCALE_API_TOKEN}:" \
+        "https://api.tailscale.com/api/v2/tailnet/-/devices" 2>/dev/null \
+        | jq -r '.devices[0].name // empty' 2>/dev/null \
+        | sed -E 's|^[^.]+\.||; s|\.$||' || true)
+
+    if [[ -n "$suffix" && "$suffix" == *.ts.net ]]; then
+        export TAILNET_DNS_SUFFIX="$suffix"
+        log "Detected Tailscale DNS suffix: ${TAILNET_DNS_SUFFIX}"
+    else
+        warn "Could not determine Tailscale DNS suffix from API"
+    fi
+}
+
+#===============================================================================
+# Prune stale Tailscale devices matching our Pi hostnames.
+#
+# When a Pi is wiped and re-joins the tailnet with hostname "pi-central",
+# if an OLD "pi-central" device still exists from a previous wipe cycle,
+# Tailscale gives the new device a numeric suffix (pi-central-1, -2, …).
+# The suffix is baked into its MagicDNS name, which means our CNAME
+# records (pointing at pi-central.<suffix>) stop resolving.
+#
+# Fix: delete any existing devices with the same hostnames before the
+# new Pi authenticates. The most-recently-seen device per hostname is
+# KEPT (so re-runs on a live cluster don't delete the current nodes);
+# everything else gets pruned.
+#
+# Also reclaims the canonical MagicDNS name via a post-delete rename
+# in case Tailscale's sticky naming left a suffix on the kept device.
+#===============================================================================
+tailscale_prune_stale_devices() {
+    if [[ -z "${TAILSCALE_API_TOKEN:-}" ]]; then
+        debug "TAILSCALE_API_TOKEN not set — skipping device prune"
+        return 0
+    fi
+
+    log "Pruning stale Tailscale devices with pi-* hostnames..."
+
+    local ts_api="https://api.tailscale.com/api/v2"
+    local all
+    all=$(curl -s -u "${TAILSCALE_API_TOKEN}:" "${ts_api}/tailnet/-/devices" 2>/dev/null)
+    if [[ -z "$all" ]] || ! echo "$all" | jq -e '.devices' >/dev/null 2>&1; then
+        warn "Could not list Tailscale devices — skipping prune"
+        return 0
+    fi
+
+    # For each hostname starting with "pi-", keep only the most recently
+    # seen device; delete the rest. Output: "nodeId hostname".
+    local stale
+    stale=$(echo "$all" | jq -r '
+        [.devices[] | select(.hostname | startswith("pi-"))]
+        | group_by(.hostname)
+        | map(sort_by(.lastSeen) | reverse | .[1:])
+        | flatten
+        | .[] | "\(.nodeId) \(.hostname)"
+    ')
+
+    local count=0
+    if [[ -n "$stale" ]]; then
+        while IFS=' ' read -r id hostname; do
+            [[ -z "$id" ]] && continue
+            local http_code
+            http_code=$(curl -s -w "%{http_code}" -u "${TAILSCALE_API_TOKEN}:" \
+                -X DELETE "${ts_api}/device/${id}" -o /dev/null 2>/dev/null)
+            if [[ "$http_code" == "200" ]]; then
+                debug "  deleted stale ${hostname} (${id})"
+                count=$((count + 1))
+            else
+                warn "  failed to delete ${hostname} (${id}): HTTP ${http_code}"
+            fi
+        done <<< "$stale"
+    fi
+    log "Pruned ${count} stale device(s)"
+
+    # Reclaim canonical names — even the kept devices may have sticky
+    # suffixes like pi-central-4 from prior conflicts. Rename them back
+    # to the base hostname. Tailscale API: POST /device/{id}/name
+    local kept
+    kept=$(echo "$all" | jq -r '
+        [.devices[] | select(.hostname | startswith("pi-"))]
+        | group_by(.hostname)
+        | map(sort_by(.lastSeen) | reverse | .[0])
+        | .[] | "\(.nodeId) \(.hostname)"
+    ')
+    if [[ -n "$kept" ]]; then
+        while IFS=' ' read -r id hostname; do
+            [[ -z "$id" ]] && continue
+            curl -s -u "${TAILSCALE_API_TOKEN}:" -X POST \
+                -H "Content-Type: application/json" \
+                -d "{\"name\":\"${hostname}\"}" \
+                "${ts_api}/device/${id}/name" > /dev/null 2>&1
+            debug "  reclaimed canonical name for ${hostname} (${id})"
+        done <<< "$kept"
+    fi
+}
+
 setup_pi_cluster() {
     log "Setting up K3s cluster on Raspberry Pi..."
 
@@ -1485,88 +1602,116 @@ cloudflare_force_edge_rebuild() {
     log "Cloudflare edge rebuild triggered ✓ (restored ssl=${current_ssl})"
 }
 
-# Create or update A records for the domain pointing to the central Pi's
-# Tailscale IP. This eliminates stale DNS from prior bootstraps.
-cloudflare_upsert_dns_records() {
+# Create/verify CNAME records for the domain pointing at the central Pi's
+# Tailscale MagicDNS name.
+#
+# Architecture: instead of managing A records with raw Tailscale IPs
+# (which drift on wipes, reboots, and auth key rotations), we create
+# ONE wildcard CNAME (*.${DOMAIN} → pi-central.<tailnet>.ts.net) and
+# one apex CNAME. Tailscale MagicDNS is the dynamic layer — whenever
+# the node's IP changes, it's automatically reflected.
+#
+# Requirements for clients: must be on the tailnet (to resolve .ts.net).
+# This is by design — kube-world is a private homelab.
+#
+# Prerequisites: tailscale_prune_stale_devices must have run so the
+# central Pi holds the canonical hostname (not pi-central-N).
+cloudflare_ensure_cnames() {
     if [[ -z "${CLOUDFLARE_API_TOKEN:-}" || -z "${DOMAIN:-}" ]]; then
-        debug "Skipping DNS record upsert (no token or domain)"
+        debug "Skipping CNAME ensure (no token or domain)"
         return 0
     fi
-    if [[ -z "${CENTRAL_TAILSCALE_IP:-}" ]]; then
-        warn "CENTRAL_TAILSCALE_IP not set — cannot update DNS A records"
-        warn "After bootstrap, update manually in Cloudflare or re-run with CENTRAL_TAILSCALE_IP set"
+    if [[ -z "${TAILNET_DNS_SUFFIX:-}" ]]; then
+        warn "TAILNET_DNS_SUFFIX not set — cannot create CNAMEs"
+        warn "Run tailscale_fetch_tailnet_suffix first"
         return 0
     fi
 
     local zone_id
     zone_id=$(cloudflare_get_zone_id)
     if [[ -z "$zone_id" ]]; then
-        warn "Could not find Cloudflare zone for ${DOMAIN} — skipping DNS upsert"
+        warn "Could not find Cloudflare zone for ${DOMAIN} — skipping CNAME ensure"
         return 0
     fi
 
-    log "Upserting DNS A records → ${CENTRAL_TAILSCALE_IP}..."
+    # Target: central Pi's canonical MagicDNS name.
+    # Device hostname is fixed in Ansible inventory (pi-central), so
+    # this resolves dynamically via Tailscale to whatever IP the node has.
+    local target="pi-central.${TAILNET_DNS_SUFFIX}"
 
-    # Records to create/update — apex, wildcard, and common service subdomains
-    local names=("${DOMAIN}" "*.${DOMAIN}" "rancher.${DOMAIN}" "gitlab.${DOMAIN}" "auth.${DOMAIN}" "ha.${DOMAIN}" "ntfy.${DOMAIN}")
+    log "Ensuring CNAME records → ${target}..."
+
+    # Two records cover everything:
+    #   ${DOMAIN}      — apex (via CF CNAME flattening)
+    #   *.${DOMAIN}    — wildcard catches all subdomains automatically
+    local names=("${DOMAIN}" "*.${DOMAIN}")
 
     for name in "${names[@]}"; do
-        # Check if record already exists
-        local existing_id
-        existing_id=$(curl -s -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records?type=A&name=${name}" \
-            2>/dev/null | jq -r '.result[0].id // empty' 2>/dev/null || true)
+        # Look for any existing record at this name (A or CNAME)
+        local existing
+        existing=$(curl -s -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records?name=${name}" \
+            2>/dev/null)
+        local existing_id existing_type existing_content
+        existing_id=$(echo "$existing" | jq -r '.result[0].id // empty' 2>/dev/null || true)
+        existing_type=$(echo "$existing" | jq -r '.result[0].type // empty' 2>/dev/null || true)
+        existing_content=$(echo "$existing" | jq -r '.result[0].content // empty' 2>/dev/null || true)
 
         local payload
-        payload="{\"type\":\"A\",\"name\":\"${name}\",\"content\":\"${CENTRAL_TAILSCALE_IP}\",\"ttl\":60,\"proxied\":false}"
+        payload=$(jq -n --arg name "$name" --arg content "$target" \
+            '{type:"CNAME", name:$name, content:$content, ttl:60, proxied:false}')
 
-        local result
         if [[ -n "$existing_id" ]]; then
+            # Existing record — skip if already correct, otherwise PUT replace.
+            if [[ "$existing_type" == "CNAME" && "$existing_content" == "$target" ]]; then
+                debug "  ${name}: already correct (CNAME → ${target})"
+                continue
+            fi
+            # Replace (PUT fully overwrites record including type)
+            local result
             result=$(curl -s -X PUT \
                 -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
                 -H "Content-Type: application/json" \
                 -d "$payload" \
                 "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records/${existing_id}" \
                 2>/dev/null | jq -r '.success' 2>/dev/null || echo "false")
-            debug "  ${name}: updated (${result})"
+            log "  ${name}: replaced ${existing_type}→CNAME (success=${result})"
         else
+            local result
             result=$(curl -s -X POST \
                 -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
                 -H "Content-Type: application/json" \
                 -d "$payload" \
                 "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records" \
                 2>/dev/null | jq -r '.success' 2>/dev/null || echo "false")
-            debug "  ${name}: created (${result})"
+            log "  ${name}: created CNAME (success=${result})"
         fi
     done
 
-    log "DNS records upserted ✓"
-}
-
-# Fetch central Pi's Tailscale IP via SSH. ALWAYS fetches fresh (never
-# trusts a pre-existing CENTRAL_TAILSCALE_IP from .env.bootstrap) because
-# Tailscale IPs change on fresh wipes and any stale cached value causes
-# DNS drift that breaks cert issuance + external access.
-fetch_central_tailscale_ip() {
-    if [[ -z "${PI_IP:-}" ]]; then
-        debug "PI_IP not set — cannot fetch Tailscale IP"
-        return 0
-    fi
-
-    local ip
-    ip=$(ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new \
-        "admin@${PI_IP}" "tailscale ip -4" 2>/dev/null | head -1 || true)
-
-    if [[ -n "$ip" && "$ip" =~ ^100\. ]]; then
-        if [[ -n "${CENTRAL_TAILSCALE_IP:-}" && "$CENTRAL_TAILSCALE_IP" != "$ip" ]]; then
-            warn "Central Pi Tailscale IP drifted: ${CENTRAL_TAILSCALE_IP} → ${ip}"
+    # Clean up any pre-existing per-service A records that are now redundant
+    # because the wildcard covers them. Keeps the Cloudflare dashboard tidy.
+    local stale_names=("rancher.${DOMAIN}" "gitlab.${DOMAIN}" "auth.${DOMAIN}" "ha.${DOMAIN}" "ntfy.${DOMAIN}")
+    for name in "${stale_names[@]}"; do
+        local stale_id
+        stale_id=$(curl -s -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records?type=A&name=${name}" \
+            2>/dev/null | jq -r '.result[0].id // empty' 2>/dev/null || true)
+        if [[ -n "$stale_id" ]]; then
+            curl -s -X DELETE -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records/${stale_id}" \
+                > /dev/null 2>&1
+            debug "  cleaned stale A record: ${name}"
         fi
-        export CENTRAL_TAILSCALE_IP="$ip"
-        log "Central Pi Tailscale IP: ${CENTRAL_TAILSCALE_IP}"
-    else
-        warn "Could not determine central Pi Tailscale IP via SSH"
-    fi
+    done
+
+    log "DNS CNAME records ensured ✓"
 }
+
+# NOTE: fetch_central_tailscale_ip has been removed as of the CNAME/MagicDNS
+# architecture. DNS no longer tracks raw Tailscale IPs — all routing goes
+# through CNAMEs → pi-central.<tailnet>.ts.net → Tailscale MagicDNS. If
+# you're looking for where the Pi's current IP is determined, the answer
+# is "it doesn't need to be" — Tailscale handles it dynamically.
 
 #===============================================================================
 # Secrets Creation (secrets needed before cert-manager and Flux can work)
@@ -2178,10 +2323,13 @@ main() {
     # Run preflight checks
     preflight_checks
     
-    # Ensure a Tailscale auth key exists before Ansible provisions the Pis.
-    # Safe no-op if TAILSCALE_AUTH_KEY is already set or API token isn't
-    # available. Must run before setup_pi_cluster.
+    # Pre-provisioning Tailscale setup:
+    #   1. Prune stale pi-* devices so new Pis get canonical hostnames
+    #      (not pi-central-N with a sticky suffix)
+    #   2. Ensure we have a bootstrap auth key for Ansible to register with
+    # Both are safe no-ops if TAILSCALE_API_TOKEN is not available.
     if [[ "$PLATFORM" == "pi" ]]; then
+        tailscale_prune_stale_devices
         ensure_tailscale_auth_key
     fi
 
@@ -2221,10 +2369,10 @@ main() {
             export RANCHER_HOSTNAME="${RANCHER_HOSTNAME:-}"
         fi
 
-        # Detect central Pi Tailscale IP and upsert Cloudflare DNS records
-        # before anything that depends on DNS resolution (cert issuance, etc.)
-        fetch_central_tailscale_ip
-        cloudflare_upsert_dns_records
+        # Ensure Cloudflare CNAMEs point at the central Pi's Tailscale
+        # MagicDNS name (stable across wipes). No IP tracking required.
+        tailscale_fetch_tailnet_suffix
+        cloudflare_ensure_cnames
 
         # Karmada stack: full infrastructure pipeline
         # Critical steps abort on failure; optional steps warn and continue
@@ -2246,17 +2394,6 @@ main() {
         setup_flux || { error "Flux setup failed — cannot continue"; exit 1; }
         setup_httproutes             # Best-effort: applies available routes
         deploy_tailscale_keys        # Optional: warns if TAILSCALE_API_TOKEN missing
-
-        # Final DNS sync — re-fetch Pi Tailscale IP and re-upsert A records.
-        # Catches any drift from mid-run K3s/Tailscale restarts (e.g., if
-        # Ansible or helm triggered a node reboot after the initial upsert).
-        log "Verifying DNS matches current Pi Tailscale IP..."
-        local previous_ts_ip="${CENTRAL_TAILSCALE_IP:-}"
-        fetch_central_tailscale_ip
-        if [[ "$previous_ts_ip" != "${CENTRAL_TAILSCALE_IP:-}" ]]; then
-            log "Tailscale IP drifted during bootstrap — re-upserting DNS"
-        fi
-        cloudflare_upsert_dns_records
     else
         # Legacy Fleet stack: Rancher -> Fleet -> Apps
         install_rancher

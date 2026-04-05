@@ -668,6 +668,61 @@ setup_mac_cluster() {
     log "Mac cluster setup complete ✓"
 }
 
+#===============================================================================
+# Ensure we have a Tailscale auth key before provisioning Pis.
+#
+# Chicken-and-egg: Ansible needs the auth key to `tailscale up --authkey=...`
+# the Pi nodes, but the cluster-side key rotation CronJobs that normally
+# mint keys don't run until after the cluster exists. This function fills
+# that gap by creating a temporary bootstrap key via the Tailscale API
+# if TAILSCALE_API_TOKEN is set and TAILSCALE_AUTH_KEY is empty.
+# The cluster-side rotation job will replace it with a tag-scoped one later.
+#===============================================================================
+ensure_tailscale_auth_key() {
+    if [[ -n "${TAILSCALE_AUTH_KEY:-}" ]]; then
+        debug "TAILSCALE_AUTH_KEY already set — skipping auto-create"
+        return 0
+    fi
+
+    if [[ -z "${TAILSCALE_API_TOKEN:-}" ]]; then
+        warn "Neither TAILSCALE_AUTH_KEY nor TAILSCALE_API_TOKEN set"
+        warn "Tailscale will not be authenticated on the Pi nodes"
+        return 0
+    fi
+
+    log "Creating bootstrap Tailscale auth key via API..."
+    local response
+    response=$(curl -s -u "${TAILSCALE_API_TOKEN}:" \
+        -X POST "https://api.tailscale.com/api/v2/tailnet/-/keys" \
+        -H "Content-Type: application/json" \
+        -d '{
+            "capabilities": {
+                "devices": {
+                    "create": {
+                        "reusable": true,
+                        "ephemeral": false,
+                        "preauthorized": true,
+                        "tags": ["tag:edge"]
+                    }
+                }
+            },
+            "expirySeconds": 3600,
+            "description": "kube-world-bootstrap"
+        }' 2>/dev/null || echo "")
+
+    local new_key
+    new_key=$(echo "$response" | jq -r '.key // empty' 2>/dev/null || echo "")
+
+    if [[ -z "$new_key" ]]; then
+        warn "Failed to create Tailscale auth key — Pis will not join the tailnet"
+        warn "Response: $(echo "$response" | head -c 200)"
+        return 0
+    fi
+
+    export TAILSCALE_AUTH_KEY="$new_key"
+    log "Bootstrap auth key created (reusable, tag:edge, 1h expiry)"
+}
+
 setup_pi_cluster() {
     log "Setting up K3s cluster on Raspberry Pi..."
 
@@ -1372,9 +1427,23 @@ cloudflare_force_edge_rebuild() {
         "https://api.cloudflare.com/client/v4/zones/${zone_id}/settings/ssl" 2>/dev/null)
 
     if ! echo "$resp" | jq -e '.success == true' >/dev/null 2>&1; then
-        warn "Cloudflare SSL toggle failed — token may lack Zone:SSL:Edit permission"
-        warn "If cert issuance is stuck, manually toggle SSL in the Cloudflare dashboard"
-        warn "  https://dash.cloudflare.com → ${DOMAIN} → SSL/TLS → change mode and back"
+        warn "Cloudflare SSL toggle failed — token lacks 'Zone:Zone Settings:Edit' permission"
+        warn "(this is a DIFFERENT permission from 'Zone:SSL and Certificates:Edit')"
+        warn ""
+        warn "Required CF API token permissions for full bootstrap automation:"
+        warn "  - Zone : DNS           : Edit"
+        warn "  - Zone : Zone          : Read"
+        warn "  - Zone : Zone Settings : Edit   ← this one is for the SSL mode endpoint"
+        warn ""
+        warn "Manual workaround: toggle SSL mode in the Cloudflare dashboard"
+        warn "  https://dash.cloudflare.com → ${DOMAIN} → SSL/TLS → Overview"
+        warn "  Change encryption mode (e.g. Full → Flexible → Full)"
+        warn ""
+        warn "After the toggle, cert-manager will reissue the cert automatically"
+        warn "within ~60s. You may need to restart cert-manager + coredns pods"
+        warn "to flush DNS negative cache:"
+        warn "  kubectl -n cert-manager rollout restart deploy/cert-manager"
+        warn "  kubectl -n kube-system rollout restart deploy/coredns"
         return 0
     fi
 
@@ -2067,6 +2136,13 @@ main() {
     # Run preflight checks
     preflight_checks
     
+    # Ensure a Tailscale auth key exists before Ansible provisions the Pis.
+    # Safe no-op if TAILSCALE_AUTH_KEY is already set or API token isn't
+    # available. Must run before setup_pi_cluster.
+    if [[ "$PLATFORM" == "pi" ]]; then
+        ensure_tailscale_auth_key
+    fi
+
     # Setup cluster based on platform
     case "$PLATFORM" in
         mac|mac-*)

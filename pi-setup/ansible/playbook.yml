@@ -349,6 +349,7 @@
     k3s_server_args: >-
       --cluster-init
       --disable=traefik
+      --disable=servicelb
       --write-kubeconfig-mode=0644
       --tls-san={{ ansible_host }}
       --tls-san={{ node_name | default(inventory_hostname) }}
@@ -495,6 +496,7 @@
   vars:
     k3s_edge_args: >-
       --disable=traefik
+      --disable=servicelb
       --write-kubeconfig-mode=0644
       --tls-san={{ ansible_host }}
       --tls-san={{ node_name | default(inventory_hostname) }}

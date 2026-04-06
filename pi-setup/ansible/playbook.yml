@@ -608,14 +608,20 @@
           echo "Could not resolve pi-central via Tailscale"
           exit 0
         fi
+        NEW_LINE="${CENTRAL_TS_IP} rancher.${DOMAIN} gitlab.${DOMAIN}"
         HOSTS=$(kubectl -n kube-system get configmap coredns -o jsonpath='{.data.NodeHosts}')
-        if echo "$HOSTS" | grep -q "$DOMAIN"; then
-          echo "Domain entries already present in CoreDNS"
+        # Check if domain entries exist WITH the correct IP. If the IP
+        # changed (Tailscale reassignment on re-auth), we must replace
+        # the old entry — not skip.
+        if echo "$HOSTS" | grep -q "${CENTRAL_TS_IP}.*${DOMAIN}"; then
+          echo "CoreDNS entries already correct (${CENTRAL_TS_IP})"
           exit 0
         fi
-        NEW_LINE="${CENTRAL_TS_IP} rancher.${DOMAIN} gitlab.${DOMAIN}"
+        # Remove any existing stale domain entries before adding the new one
+        CLEANED=$(echo "$HOSTS" | grep -v "$DOMAIN" || true)
         kubectl -n kube-system get configmap coredns -o json | \
-          jq --arg entry "$NEW_LINE" '.data.NodeHosts = (.data.NodeHosts | rtrimstr("\n") + "\n" + $entry + "\n")' | \
+          jq --arg hosts "$CLEANED" --arg entry "$NEW_LINE" \
+            '.data.NodeHosts = ($hosts | rtrimstr("\n") + "\n" + $entry + "\n")' | \
           kubectl apply -f -
         kubectl -n kube-system rollout restart deploy/coredns
         echo "CoreDNS updated with domain entries"

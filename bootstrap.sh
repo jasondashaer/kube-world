@@ -1970,8 +1970,62 @@ setup_cert_manager_le() {
         warn "Certificate file not found: ${cert_file}"
     fi
 
-    # Don't wait for cert — DNS propagation can take minutes
-    log "Certificate will be issued once DNS-01 challenge completes"
+    log "Certificate requested — wait_for_cert_ready will poll for issuance"
+}
+
+#===============================================================================
+# Wait for the wildcard TLS certificate to be Ready.
+#
+# The cattle-cluster-agent on edge clusters validates TLS when connecting
+# to Rancher. If we import before the cert is ready, Traefik serves its
+# default self-signed cert and the agent rejects it. This function polls
+# the Certificate resource until Ready=True (typically 1-3 min after the
+# Cloudflare edge rebuild).
+#
+# On timeout: logs a warning and continues. The import will still be
+# attempted but may fail on TLS (non-blocking).
+#===============================================================================
+wait_for_cert_ready() {
+    if [[ "$DRY_RUN" == "true" ]]; then
+        return 0
+    fi
+    if ! kubectl get certificate -n kube-system kubew-dev-wildcard &>/dev/null; then
+        debug "No wildcard certificate found — skipping wait"
+        return 0
+    fi
+
+    log "Waiting for wildcard TLS certificate to be Ready..."
+    local timeout=300  # 5 min — cert-manager + DNS propagation
+    local elapsed=0
+    local interval=10
+
+    while [[ $elapsed -lt $timeout ]]; do
+        local ready
+        ready=$(kubectl get certificate -n kube-system kubew-dev-wildcard \
+            -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "")
+        if [[ "$ready" == "True" ]]; then
+            log "Wildcard TLS certificate is Ready ✓ (${elapsed}s)"
+            return 0
+        fi
+
+        # Show progress with reason
+        local reason
+        reason=$(kubectl get certificate -n kube-system kubew-dev-wildcard \
+            -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}' 2>/dev/null \
+            | head -c 80 || echo "")
+        if (( elapsed % 30 == 0 )); then
+            debug "  [${elapsed}s/${timeout}s] ${reason}"
+        fi
+
+        sleep $interval
+        elapsed=$((elapsed + interval))
+    done
+
+    warn "TLS certificate not ready after ${timeout}s — continuing anyway"
+    warn "Edge cluster import may fail on TLS validation"
+    warn "The cert will eventually issue; re-run import afterward:"
+    warn "  RANCHER_TOKEN=<token> ./rancher/import-cluster.sh --name <name> --pi-ip <ip>"
+    return 0
 }
 
 #===============================================================================
@@ -2547,12 +2601,20 @@ main() {
         create_secrets               # Optional: warns if CLOUDFLARE_API_TOKEN missing
         install_rancher || { error "Rancher install failed — cannot continue"; exit 1; }
         # Apply Rancher HTTPRoute BEFORE anything tries to reach it via
-        # the external hostname — configure_rancher_api and
-        # rancher_import_edge_clusters both hit https://rancher.${DOMAIN}.
+        # the external hostname.
         apply_rancher_httproute
         configure_rancher_api        # Best-effort: warns and continues on failure
-        rancher_import_edge_clusters # Auto-import edge clusters into Rancher
-        setup_cert_manager_le        # Depends on create_secrets; warns if cert not issued
+        # Issue the LE wildcard cert BEFORE importing edge clusters.
+        # The cattle-cluster-agent on the edge Pi connects to
+        # https://rancher.kubew.dev and validates the TLS cert. If we
+        # import before the cert is ready, Traefik serves its default
+        # self-signed cert (*.traefik.default) and the agent rejects it
+        # with "x509: certificate is valid for *.traefik.default, not
+        # rancher.kubew.dev". By issuing the cert first and waiting for
+        # it, the edge agent gets a valid LE cert.
+        setup_cert_manager_le        # Depends on create_secrets
+        wait_for_cert_ready          # Polls until cert is Ready or timeout
+        rancher_import_edge_clusters # Now edge cattle-agent will get valid TLS
         # GitLab must come BEFORE Flux — Flux's GitRepository points at the
         # self-hosted GitLab, so the repo and credentials must exist first.
         install_gitlab_native        # Installs CE, pushes repo, creates gitlab-credentials secret

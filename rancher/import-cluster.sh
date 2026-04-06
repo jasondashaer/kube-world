@@ -319,6 +319,22 @@ wait_for_active() {
 
     warn "Cluster did not become active after ${timeout}s"
     warn "Current state: ${state}. Check Rancher UI for details."
+
+    # Diagnostic: show cattle-agent logs from the edge Pi to understand
+    # why it can't connect back to Rancher. This is the #1 failure mode.
+    if [[ -n "${CLUSTER_KUBECONFIG:-}" && -f "${CLUSTER_KUBECONFIG}" ]]; then
+        warn "cattle-cluster-agent logs from ${CLUSTER_NAME}:"
+        kubectl --kubeconfig="${CLUSTER_KUBECONFIG}" -n cattle-system \
+            logs deploy/cattle-cluster-agent --tail=5 2>&1 | while read -r line; do
+            warn "  ${line}"
+        done
+        warn "cattle-cluster-agent pod status:"
+        kubectl --kubeconfig="${CLUSTER_KUBECONFIG}" -n cattle-system \
+            get pods -l app=cattle-cluster-agent -o wide 2>&1 | while read -r line; do
+            warn "  ${line}"
+        done
+    fi
+
     return 1
 }
 

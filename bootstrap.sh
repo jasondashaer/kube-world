@@ -780,7 +780,7 @@ tailscale_prune_stale_devices() {
         return 0
     fi
 
-    log "Pruning stale Tailscale devices with pi-* hostnames..."
+    log "Pruning ALL Tailscale devices with pi-* hostnames..."
 
     local ts_api="https://api.tailscale.com/api/v2"
     local all
@@ -790,54 +790,40 @@ tailscale_prune_stale_devices() {
         return 0
     fi
 
-    # For each hostname starting with "pi-", keep only the most recently
-    # seen device; delete the rest. Output: "nodeId hostname".
-    local stale
-    stale=$(echo "$all" | jq -r '
+    # Delete ALL pi-* devices — not just duplicates. On fresh wipe, ALL
+    # existing entries are stale because Ansible is about to register
+    # brand-new devices with fresh IPs. If we kept the "most recent"
+    # old entry, the edge Pi's `tailscale ip -4 pi-central` would
+    # resolve the OLD IP instead of the new one, breaking CoreDNS
+    # entries and causing the Rancher import to stay pending forever.
+    #
+    # This is safe because:
+    #   1. Ansible runs immediately after and re-authenticates both Pis
+    #   2. The new devices get clean hostnames (no pi-central-N suffix)
+    #      since we deleted all competing entries
+    #   3. Non-Pi devices (Mac, iPhone) are untouched (no "pi-" prefix)
+    local to_delete
+    to_delete=$(echo "$all" | jq -r '
         [.devices[] | select(.hostname | startswith("pi-"))]
-        | group_by(.hostname)
-        | map(sort_by(.lastSeen) | reverse | .[1:])
-        | flatten
-        | .[] | "\(.nodeId) \(.hostname)"
+        | .[] | "\(.nodeId) \(.hostname) \(.addresses[0])"
     ')
 
     local count=0
-    if [[ -n "$stale" ]]; then
-        while IFS=' ' read -r id hostname; do
+    if [[ -n "$to_delete" ]]; then
+        while IFS=' ' read -r id hostname ip; do
             [[ -z "$id" ]] && continue
             local http_code
             http_code=$(curl -s -w "%{http_code}" -u "${TAILSCALE_API_TOKEN}:" \
                 -X DELETE "${ts_api}/device/${id}" -o /dev/null 2>/dev/null)
             if [[ "$http_code" == "200" ]]; then
-                debug "  deleted stale ${hostname} (${id})"
+                debug "  deleted ${hostname} (${id}, was ${ip})"
                 count=$((count + 1))
             else
                 warn "  failed to delete ${hostname} (${id}): HTTP ${http_code}"
             fi
-        done <<< "$stale"
+        done <<< "$to_delete"
     fi
-    log "Pruned ${count} stale device(s)"
-
-    # Reclaim canonical names — even the kept devices may have sticky
-    # suffixes like pi-central-4 from prior conflicts. Rename them back
-    # to the base hostname. Tailscale API: POST /device/{id}/name
-    local kept
-    kept=$(echo "$all" | jq -r '
-        [.devices[] | select(.hostname | startswith("pi-"))]
-        | group_by(.hostname)
-        | map(sort_by(.lastSeen) | reverse | .[0])
-        | .[] | "\(.nodeId) \(.hostname)"
-    ')
-    if [[ -n "$kept" ]]; then
-        while IFS=' ' read -r id hostname; do
-            [[ -z "$id" ]] && continue
-            curl -s -u "${TAILSCALE_API_TOKEN}:" -X POST \
-                -H "Content-Type: application/json" \
-                -d "{\"name\":\"${hostname}\"}" \
-                "${ts_api}/device/${id}/name" > /dev/null 2>&1
-            debug "  reclaimed canonical name for ${hostname} (${id})"
-        done <<< "$kept"
-    fi
+    log "Pruned ${count} pi-* device(s) — Ansible will re-register fresh ones"
 }
 
 setup_pi_cluster() {

@@ -218,6 +218,29 @@ install_gitlab() {
     log "Adding GitLab CE repository..."
     run_on_pi "curl -sS https://packages.gitlab.com/install/repositories/gitlab/gitlab-ce/script.deb.sh | sudo bash" 2>&1 | tail -5
 
+    # Pre-create the gitlab.rb config directory and write the pi-tuning
+    # config BEFORE the apt install. The gitlab-ce deb post-install script
+    # runs `gitlab-ctl reconfigure` which reads /etc/gitlab/gitlab.rb. If
+    # our tuning isn't in place at that point, the initial reconfigure
+    # tries to start node-exporter (Prometheus monitoring) which crashes
+    # on resource-constrained Pis and fails the entire install.
+    log "Pre-creating Pi-optimized config (applied during initial reconfigure)..."
+    run_on_pi "sudo mkdir -p /etc/gitlab/gitlab.rb.d"
+    # Write a minimal pre-install tuning file that disables services known
+    # to crash during initial install. Full tuning is applied in configure_gitlab.
+    run_on_pi "sudo tee /etc/gitlab/gitlab.rb.d/00-pre-install.rb > /dev/null" <<'PREINSTALL'
+# Minimal pre-install config to prevent crashes during initial reconfigure.
+# Full Pi tuning is applied by configure_gitlab (pi-tuning.rb) afterward.
+prometheus_monitoring['enable'] = false
+registry['enable'] = false
+gitlab_pages['enable'] = false
+mattermost['enable'] = false
+PREINSTALL
+    # Create gitlab.rb with the .d include if it doesn't exist yet
+    run_on_pi "sudo test -f /etc/gitlab/gitlab.rb || echo 'Dir[\"/etc/gitlab/gitlab.rb.d/*.rb\"].each { |f| eval(File.read(f)) }' | sudo tee /etc/gitlab/gitlab.rb > /dev/null"
+    # Also ensure the .d include line exists (idempotent)
+    run_on_pi "sudo grep -q 'gitlab.rb.d' /etc/gitlab/gitlab.rb || echo 'Dir[\"/etc/gitlab/gitlab.rb.d/*.rb\"].each { |f| eval(File.read(f)) }' | sudo tee -a /etc/gitlab/gitlab.rb > /dev/null"
+
     log "Installing GitLab CE package (this takes 5-10 minutes on Pi)..."
     run_on_pi "sudo EXTERNAL_URL='${external_url}' apt-get install -y gitlab-ce" 2>&1 | tail -20
 

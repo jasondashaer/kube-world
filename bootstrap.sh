@@ -1929,6 +1929,34 @@ setup_cert_manager_le() {
         return 0
     fi
 
+    # Clean up stale _acme-challenge TXT records from previous bootstrap
+    # cycles. cert-manager's cleanup fails silently (empty zone ID bug in
+    # its Cloudflare solver), so TXT records accumulate. Having 5+ stale
+    # records confuses Let's Encrypt validation. Start each bootstrap with
+    # a clean slate.
+    if [[ -n "${CLOUDFLARE_API_TOKEN:-}" && -n "${DOMAIN:-}" ]]; then
+        local zone_id
+        zone_id=$(cloudflare_get_zone_id)
+        if [[ -n "$zone_id" ]]; then
+            local stale_ids
+            stale_ids=$(curl -s -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records?type=TXT&name=_acme-challenge.${DOMAIN}" \
+                2>/dev/null | jq -r '.result[].id' 2>/dev/null || true)
+            local cleaned=0
+            if [[ -n "$stale_ids" ]]; then
+                while IFS= read -r rid; do
+                    [[ -z "$rid" ]] && continue
+                    curl -s -X DELETE -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                        "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records/${rid}" \
+                        > /dev/null 2>&1 && cleaned=$((cleaned + 1))
+                done <<< "$stale_ids"
+            fi
+            if [[ $cleaned -gt 0 ]]; then
+                log "Cleaned ${cleaned} stale _acme-challenge TXT record(s)"
+            fi
+        fi
+    fi
+
     # Apply ClusterIssuer (Let's Encrypt + Cloudflare DNS-01)
     local issuer_file="${SCRIPT_DIR}/infrastructure/cert-manager/clusterissuer.yaml"
     if [[ -f "$issuer_file" ]]; then

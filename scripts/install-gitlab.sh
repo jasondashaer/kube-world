@@ -216,7 +216,15 @@ install_gitlab() {
     # Wait for any existing apt/dpkg locks and fix interrupted dpkg state
     log "Waiting for apt lock..."
     run_on_pi "while sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do sleep 5; done" 2>&1
-    # Fix any half-configured packages from a previous failed install
+    # Fix any half-configured/broken packages from a previous failed install.
+    # If gitlab-ce is in iF/iU state but binaries were removed, dpkg --configure
+    # fails because the post-inst script references missing files. Force-purge first.
+    local pkg_state
+    pkg_state=$(run_on_pi "dpkg -l gitlab-ce 2>/dev/null | tail -1 | awk '{print \$1}'" || echo "")
+    if [[ "$pkg_state" == "iF" || "$pkg_state" == "iU" || "$pkg_state" == "rc" ]]; then
+        log "Purging broken gitlab-ce package state (${pkg_state})..."
+        run_on_pi "sudo dpkg --purge --force-remove-reinstreq gitlab-ce 2>/dev/null" 2>&1 | tail -3 || true
+    fi
     run_on_pi "sudo dpkg --configure -a 2>/dev/null" 2>&1 | tail -3 || true
 
     log "Installing dependencies..."

@@ -242,7 +242,25 @@ PREINSTALL
     run_on_pi "sudo grep -q 'gitlab.rb.d' /etc/gitlab/gitlab.rb || echo 'Dir[\"/etc/gitlab/gitlab.rb.d/*.rb\"].each { |f| eval(File.read(f)) }' | sudo tee -a /etc/gitlab/gitlab.rb > /dev/null"
 
     log "Installing GitLab CE package (this takes 5-10 minutes on Pi)..."
-    run_on_pi "sudo EXTERNAL_URL='${external_url}' apt-get install -y gitlab-ce" 2>&1 | tail -20
+    # The apt install may fail with exit 1 because of a systemd race condition:
+    # gitlab-runsvdir.service tries to start before dpkg finishes extracting
+    # /opt/gitlab/embedded/bin/runsvdir-start → "No such file or directory" →
+    # hits restart limit → post-inst reconfigure can't start services → dpkg
+    # reports error. The fix: tolerate the apt error, reset the service, and
+    # re-run reconfigure ourselves.
+    run_on_pi "sudo EXTERNAL_URL='${external_url}' apt-get install -y gitlab-ce" 2>&1 | tail -20 || true
+
+    # Fix the systemd race: reset the failed runsvdir service and start it
+    log "Ensuring gitlab-runsvdir service is running..."
+    run_on_pi "sudo systemctl reset-failed gitlab-runsvdir 2>/dev/null; sudo systemctl start gitlab-runsvdir 2>/dev/null; sleep 3; sudo systemctl is-active gitlab-runsvdir 2>&1" 2>&1
+
+    # If dpkg left the package half-configured, fix it
+    local dpkg_state
+    dpkg_state=$(run_on_pi "dpkg -l gitlab-ce 2>/dev/null | tail -1 | awk '{print \$1}'" 2>&1 || echo "")
+    if [[ "$dpkg_state" == "iF" || "$dpkg_state" == "iU" ]]; then
+        log "GitLab package half-configured — running dpkg --configure..."
+        run_on_pi "sudo dpkg --configure gitlab-ce" 2>&1 | tail -10
+    fi
 
     log "GitLab CE package installed"
 }

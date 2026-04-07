@@ -1995,7 +1995,7 @@ wait_for_cert_ready() {
     fi
 
     log "Waiting for wildcard TLS certificate to be Ready..."
-    local timeout=300  # 5 min — cert-manager + DNS propagation
+    local timeout=600  # 10 min — edge rebuild + DNS propagation + LE validation
     local elapsed=0
     local interval=10
 

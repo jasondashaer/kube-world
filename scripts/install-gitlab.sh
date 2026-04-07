@@ -213,9 +213,11 @@ install_gitlab() {
 
     log "Installing GitLab CE on ${PI_IP}..."
 
-    # Wait for any existing apt/dpkg locks (e.g., unattended-upgrades on fresh boot)
+    # Wait for any existing apt/dpkg locks and fix interrupted dpkg state
     log "Waiting for apt lock..."
     run_on_pi "while sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do sleep 5; done" 2>&1
+    # Fix any half-configured packages from a previous failed install
+    run_on_pi "sudo dpkg --configure -a 2>/dev/null" 2>&1 | tail -3 || true
 
     log "Installing dependencies..."
     run_on_pi "sudo apt-get update -qq && sudo apt-get install -y -qq curl openssh-server ca-certificates tzdata perl postfix" 2>&1 | tail -5

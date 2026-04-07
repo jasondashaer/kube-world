@@ -1929,11 +1929,6 @@ setup_cert_manager_le() {
         return 0
     fi
 
-    # Force Cloudflare edge DNS rebuild before issuing the cert. New zones
-    # have a known bug where underscore-prefixed TXT records don't propagate
-    # until an SSL setting change forces a rebuild. This is idempotent.
-    cloudflare_force_edge_rebuild
-
     # Apply ClusterIssuer (Let's Encrypt + Cloudflare DNS-01)
     local issuer_file="${SCRIPT_DIR}/infrastructure/cert-manager/clusterissuer.yaml"
     if [[ -f "$issuer_file" ]]; then
@@ -1998,6 +1993,7 @@ wait_for_cert_ready() {
     local timeout=600  # 10 min — edge rebuild + DNS propagation + LE validation
     local elapsed=0
     local interval=10
+    local edge_rebuild_done=false
 
     while [[ $elapsed -lt $timeout ]]; do
         local ready
@@ -2006,6 +2002,16 @@ wait_for_cert_ready() {
         if [[ "$ready" == "True" ]]; then
             log "Wildcard TLS certificate is Ready ✓ (${elapsed}s)"
             return 0
+        fi
+
+        # After 30s, cert-manager should have created the ACME challenge TXT
+        # record. Trigger the Cloudflare edge rebuild NOW so the TXT propagates.
+        # Doing it earlier (before the Certificate exists) doesn't help because
+        # the TXT record doesn't exist yet.
+        if [[ "$edge_rebuild_done" == "false" && $elapsed -ge 30 ]]; then
+            log "  Triggering Cloudflare edge rebuild (TXT record should exist now)..."
+            cloudflare_force_edge_rebuild
+            edge_rebuild_done=true
         fi
 
         # Show progress with reason

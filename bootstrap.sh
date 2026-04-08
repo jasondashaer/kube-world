@@ -2379,6 +2379,26 @@ install_gitlab_native() {
         gitlab_args+=(--domain "$DOMAIN")
     fi
 
+    # Pass Zitadel OIDC credentials if available (from seed-zitadel.sh).
+    # This enables SSO login on GitLab from first boot.
+    local zitadel_state="/tmp/zitadel-seed.state"
+    if [[ -f "$zitadel_state" ]]; then
+        local gl_client_id gl_client_secret gl_issuer
+        gl_client_id=$(jq -r '.gitlab_client_id // empty' "$zitadel_state" 2>/dev/null || echo "")
+        gl_issuer=$(jq -r '.issuer_url // empty' "$zitadel_state" 2>/dev/null || echo "")
+        # Client secret is in K8s, not the state file
+        gl_client_secret=$(kubectl -n zitadel get secret zitadel-oidc-gitlab \
+            -o jsonpath='{.data.clientSecret}' 2>/dev/null | base64 -d || echo "")
+        if [[ -n "$gl_client_id" && -n "$gl_client_secret" ]]; then
+            gitlab_args+=(
+                --oidc-client-id "$gl_client_id"
+                --oidc-client-secret "$gl_client_secret"
+                --oidc-issuer "$gl_issuer"
+            )
+            log "  OIDC credentials available — GitLab will have SSO from first boot"
+        fi
+    fi
+
     log "Running install-gitlab.sh (this takes 10-15 min on first run)..."
     if ! bash "$gitlab_script" "${gitlab_args[@]}"; then
         warn "GitLab install failed — Flux will not be able to sync from GitLab"

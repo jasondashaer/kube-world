@@ -266,56 +266,76 @@ PREINSTALL
     run_on_pi "nohup sudo EXTERNAL_URL='${external_url}' apt-get install -y gitlab-ce > /tmp/gitlab-install.log 2>&1 &"
     log "  apt-get running in background on Pi, polling for completion..."
 
-    local max_polls=60  # 30 min max (60 * 30s)
-    local poll=0
-    while [[ $poll -lt $max_polls ]]; do
-        sleep 30
-        poll=$((poll + 1))
-
-        # Check dpkg state
-        local state
-        state=$(run_on_pi "dpkg -l gitlab-ce 2>/dev/null | tail -1 | awk '{print \$1}'" 2>&1 || echo "")
-
-        case "$state" in
-            ii)
-                log "  GitLab CE package fully installed ✓ ($((poll * 30))s)"
-                break
-                ;;
-            iF|iU)
-                # Half-configured = runsvdir race condition. Fix it.
-                log "  Package half-configured ($state) — fixing runsvdir + reconfiguring..."
-                run_on_pi "sudo systemctl reset-failed gitlab-runsvdir 2>/dev/null; sudo systemctl start gitlab-runsvdir" 2>&1 || true
-                sleep 5
-                run_on_pi "sudo dpkg --configure gitlab-ce" 2>&1 | tail -5 || true
-                # Re-check after fix attempt
-                state=$(run_on_pi "dpkg -l gitlab-ce 2>/dev/null | tail -1 | awk '{print \$1}'" 2>&1 || echo "")
-                if [[ "$state" == "ii" ]]; then
-                    log "  GitLab CE package fixed and fully installed ✓"
-                    break
-                fi
-                ;;
-            *)
-                # Still installing (dpkg state is un/rc or apt still running)
-                if (( poll % 4 == 0 )); then
-                    debug "  [$((poll * 30))s] still installing (dpkg state: ${state:-not yet installed})..."
-                fi
-                ;;
-        esac
+    # Phase 2a: Wait for apt to finish extracting the package. The nohup'd
+    # apt-get unpacks files then runs the post-inst script (gitlab-ctl
+    # reconfigure). The reconfigure usually fails due to the runsvdir race.
+    # We wait for apt to exit (success or failure), then handle the rest.
+    local max_wait=600  # 10 min for package extraction (reconfigure may fail)
+    local waited=0
+    while [[ $waited -lt $max_wait ]]; do
+        sleep 15
+        waited=$((waited + 15))
+        local apt_running
+        apt_running=$(run_on_pi "pgrep -c 'apt-get' 2>/dev/null" 2>&1 || echo "0")
+        if [[ "$apt_running" == "0" ]]; then
+            log "  apt-get finished ($((waited))s)"
+            break
+        fi
+        if (( waited % 60 == 0 )); then
+            debug "  [${waited}s] apt-get still running..."
+        fi
     done
 
-    if [[ "$state" != "ii" ]]; then
-        # Last resort: check if apt is still running
-        local apt_running
-        apt_running=$(run_on_pi "pgrep -c 'apt-get\|dpkg' 2>/dev/null" 2>&1 || echo "0")
-        if [[ "$apt_running" != "0" ]]; then
-            warn "GitLab install still running after 30 min — apt/dpkg processes active"
-            warn "The install may complete in the background. Check with:"
-            warn "  ssh admin@${PI_IP} 'dpkg -l gitlab-ce | tail -1'"
+    # Phase 2b: Check dpkg state and handle the runsvdir race condition.
+    local state
+    state=$(run_on_pi "dpkg -l gitlab-ce 2>/dev/null | tail -1 | awk '{print \$1}'" 2>&1 || echo "")
+
+    if [[ "$state" == "ii" ]]; then
+        log "  GitLab CE package fully installed ✓"
+    elif [[ "$state" == "iF" || "$state" == "iU" ]]; then
+        # Half-configured = runsvdir race. Fix runsvdir ONCE and run
+        # gitlab-ctl reconfigure directly (not dpkg --configure, which
+        # restarts the full post-inst from scratch each time).
+        log "  Package half-configured ($state) — fixing runsvdir..."
+
+        # Fix runsvdir: reset failed state, start, and VERIFY it stays up
+        local rsv_attempts=0
+        while [[ $rsv_attempts -lt 5 ]]; do
+            run_on_pi "sudo systemctl reset-failed gitlab-runsvdir 2>/dev/null; sudo systemctl start gitlab-runsvdir" 2>&1 || true
+            sleep 5
+            local rsv_active
+            rsv_active=$(run_on_pi "sudo systemctl is-active gitlab-runsvdir 2>&1" || echo "failed")
+            if [[ "$rsv_active" == "active" ]]; then
+                log "  gitlab-runsvdir service running ✓"
+                break
+            fi
+            rsv_attempts=$((rsv_attempts + 1))
+            debug "  runsvdir not ready yet, retrying ($rsv_attempts/5)..."
+            sleep 10
+        done
+
+        # Run gitlab-ctl reconfigure directly. This is idempotent and picks
+        # up where the failed post-inst reconfigure left off. Much more
+        # efficient than dpkg --configure which restarts the full post-inst.
+        log "  Running gitlab-ctl reconfigure (10-20 min on Pi)..."
+        run_on_pi "sudo gitlab-ctl reconfigure" 2>&1 | tail -5 || true
+
+        # Now mark the package as fully configured in dpkg
+        log "  Finalizing dpkg state..."
+        run_on_pi "sudo dpkg --configure gitlab-ce" 2>&1 | tail -3 || true
+
+        state=$(run_on_pi "dpkg -l gitlab-ce 2>/dev/null | tail -1 | awk '{print \$1}'" 2>&1 || echo "")
+        if [[ "$state" == "ii" ]]; then
+            log "  GitLab CE package fixed and fully installed ✓"
         else
-            error "GitLab CE install failed after 30 min. Last dpkg state: ${state}"
-            error "Check /tmp/gitlab-install.log on the Pi for details"
+            error "GitLab CE still in state '${state}' after reconfigure"
+            error "Check: ssh admin@${PI_IP} 'sudo gitlab-ctl reconfigure'"
             return 1
         fi
+    else
+        error "GitLab CE install failed. dpkg state: ${state:-unknown}"
+        error "Check /tmp/gitlab-install.log on the Pi for details"
+        return 1
     fi
 
     log "GitLab CE package installed"

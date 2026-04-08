@@ -1940,9 +1940,11 @@ setup_cert_manager_le() {
     # with the real LE cert when DNS-01 completes.
     if ! kubectl -n kube-system get secret kube-world-tls &>/dev/null; then
         log "Creating placeholder TLS cert for Gateway..."
+        # Must include SANs — Go 1.15+ rejects certs with only CN
         openssl req -x509 -newkey rsa:2048 -keyout /tmp/tls-placeholder.key \
             -out /tmp/tls-placeholder.crt -days 1 -nodes \
-            -subj "/CN=*.${DOMAIN:-kubew.dev}" 2>/dev/null
+            -subj "/CN=*.${DOMAIN:-kubew.dev}" \
+            -addext "subjectAltName=DNS:*.${DOMAIN:-kubew.dev},DNS:${DOMAIN:-kubew.dev}" 2>/dev/null
         kubectl -n kube-system create secret tls kube-world-tls \
             --cert=/tmp/tls-placeholder.crt --key=/tmp/tls-placeholder.key \
             > /dev/null 2>&1

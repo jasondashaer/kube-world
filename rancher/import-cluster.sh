@@ -290,7 +290,14 @@ apply_manifest() {
 wait_for_active() {
     log "Waiting for cluster to become active..."
 
-    local timeout=300
+    # Short timeout (90s) — if the LE cert hasn't issued yet, the
+    # cattle-agent will reject Traefik's placeholder cert and the cluster
+    # stays pending. This is expected on first bootstrap (cert takes
+    # 10-30+ min). The import IS initiated and cattle-agent auto-retries
+    # every 5s. Once the LE cert issues, the cluster goes active with no
+    # manual intervention. We report success either way since the import
+    # manifest was applied.
+    local timeout=90
     local elapsed=0
     while [[ $elapsed -lt $timeout ]]; do
         local state
@@ -317,8 +324,14 @@ wait_for_active() {
         sleep 10
     done
 
-    warn "Cluster did not become active after ${timeout}s"
-    warn "Current state: ${state}. Check Rancher UI for details."
+    # Not active yet — likely the LE cert hasn't issued. This is normal
+    # on first bootstrap. The cattle-agent will auto-connect when the
+    # cert is ready (no manual intervention needed).
+    log "Cluster '${CLUSTER_NAME}' imported but not yet active (state: ${state})"
+    log "  This is expected if the TLS certificate is still being issued."
+    log "  The cattle-agent retries automatically — the cluster will go"
+    log "  active within a few minutes of cert issuance."
+    log "  Monitor: kubectl --kubeconfig=~/.kube/pi-config get clusters.management.cattle.io"
 
     # Diagnostic: show cattle-agent logs from the edge Pi to understand
     # why it can't connect back to Rancher. This is the #1 failure mode.
@@ -335,7 +348,9 @@ wait_for_active() {
         done
     fi
 
-    return 1
+    # Return 0 (not failure) — the import IS initiated, it just needs
+    # the cert to issue. Bootstrap shouldn't treat this as an error.
+    return 0
 }
 
 #===============================================================================

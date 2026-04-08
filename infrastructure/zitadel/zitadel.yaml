@@ -23,6 +23,7 @@ spec:
   chart:
     spec:
       chart: zitadel
+      # Requires K8s >= 1.30 (we use K3s 1.34+)
       version: "9.*"
       sourceRef:
         kind: HelmRepository

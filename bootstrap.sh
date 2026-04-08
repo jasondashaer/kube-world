@@ -31,19 +31,23 @@ CONFIG_FILE="${SCRIPT_DIR}/config.yaml"
 # Load versions from config.yaml if available, otherwise use defaults
 load_config_versions() {
     if [[ -f "$CONFIG_FILE" ]] && command -v yq &>/dev/null; then
-        K3S_VERSION="${K3S_VERSION:-$(yq eval '.deployment.versions.k3s // "v1.29.0+k3s1"' "$CONFIG_FILE")}"
-        RANCHER_VERSION="${RANCHER_VERSION:-$(yq eval '.deployment.versions.rancher // "2.13.1"' "$CONFIG_FILE")}"
-        HELM_VERSION="${HELM_VERSION:-$(yq eval '.deployment.versions.helm // "3.14.0"' "$CONFIG_FILE")}"
-        KARMADA_VERSION="${KARMADA_VERSION:-$(yq eval '.deployment.versions.karmada // "1.12.0"' "$CONFIG_FILE")}"
-        FLUX_VERSION="${FLUX_VERSION:-$(yq eval '.deployment.versions.flux // "2.4.0"' "$CONFIG_FILE")}"
-    else
-        # Fallback to hardcoded defaults if config.yaml not available
-        K3S_VERSION="${K3S_VERSION:-v1.29.0+k3s1}"
-        RANCHER_VERSION="${RANCHER_VERSION:-2.13.1}"
-        HELM_VERSION="${HELM_VERSION:-3.14.0}"
-        KARMADA_VERSION="${KARMADA_VERSION:-1.12.0}"
-        FLUX_VERSION="${FLUX_VERSION:-2.4.0}"
+        # Read from config.yaml, overwriting the initial defaults set at
+        # script load time. Use plain assignment (not ${:-}) so config.yaml
+        # values take precedence over the hardcoded fallbacks in lines 50-54.
+        local v
+        v=$(yq eval '.deployment.versions.k3s // ""' "$CONFIG_FILE" 2>/dev/null)
+        [[ -n "$v" ]] && K3S_VERSION="$v"
+        v=$(yq eval '.deployment.versions.rancher // ""' "$CONFIG_FILE" 2>/dev/null)
+        [[ -n "$v" ]] && RANCHER_VERSION="$v"
+        v=$(yq eval '.deployment.versions.helm // ""' "$CONFIG_FILE" 2>/dev/null)
+        [[ -n "$v" ]] && HELM_VERSION="$v"
+        v=$(yq eval '.deployment.versions.karmada // ""' "$CONFIG_FILE" 2>/dev/null)
+        [[ -n "$v" ]] && KARMADA_VERSION="$v"
+        v=$(yq eval '.deployment.versions.flux // ""' "$CONFIG_FILE" 2>/dev/null)
+        [[ -n "$v" ]] && FLUX_VERSION="$v"
     fi
+    # If config.yaml wasn't available or yq not installed, the defaults
+    # from lines 50-54 remain in effect.
 }
 
 # Initialize with defaults - will be overwritten by load_config_versions() after yq is installed
@@ -2136,7 +2140,9 @@ install_zitadel() {
     if ! kubectl -n zitadel get secret zitadel-masterkey &>/dev/null; then
         kubectl create namespace zitadel --dry-run=client -o yaml | kubectl apply -f -
         local masterkey
-        masterkey=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 32)
+        # LC_ALL=C required on macOS — without it, tr fails with
+        # "Illegal byte sequence" because /dev/urandom outputs non-UTF8
+        masterkey=$(LC_ALL=C tr -dc A-Za-z0-9 </dev/urandom | head -c 32)
         kubectl create secret generic zitadel-masterkey \
             --namespace=zitadel \
             --from-literal=masterkey="$masterkey" \

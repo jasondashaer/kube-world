@@ -72,10 +72,15 @@ _api() {
     local method="$1"
     local path="$2"
     local data="${3:-}"
+    # Zitadel routes requests by hostname (multi-instance support).
+    # When using port-forward, the actual Host is localhost:PORT but
+    # Zitadel expects its ExternalDomain. Pass it explicitly.
+    local host_header="auth.${DOMAIN:-kubew.dev}"
     local args=(-sk -X "$method" \
         -H "Authorization: Bearer ${PAT}" \
         -H "Content-Type: application/json" \
-        -H "Accept: application/json")
+        -H "Accept: application/json" \
+        -H "Host: ${host_header}")
     if [[ -n "$data" ]]; then
         args+=(-d "$data")
     fi
@@ -84,7 +89,12 @@ _api() {
 
 # Port-forward lifecycle
 _pf_start() {
+    # Find a free port (avoid collisions with previous runs)
     local port=18080
+    while lsof -iTCP:${port} -sTCP:LISTEN 2>/dev/null | grep -q LISTEN; do
+        port=$((port + 1))
+        [[ $port -gt 18100 ]] && { error "No free port for Zitadel PF"; return 1; }
+    done
     kubectl -n zitadel port-forward svc/zitadel ${port}:8080 > /tmp/zitadel-pf.log 2>&1 &
     PF_PID=$!
     local waited=0
@@ -115,14 +125,9 @@ _pf_stop() {
 #===============================================================================
 get_pat() {
     log "Reading machine user PAT from K8s secret..."
+    # The Zitadel Helm chart stores the PAT under key "pat" (not "token")
     PAT=$(kubectl -n zitadel get secret iam-admin-pat \
-        -o jsonpath='{.data.token}' 2>/dev/null | base64 -d || echo "")
-
-    if [[ -z "$PAT" ]]; then
-        # Try alternative secret name patterns
-        PAT=$(kubectl -n zitadel get secret -l app.kubernetes.io/name=zitadel \
-            -o jsonpath='{.items[0].data.token}' 2>/dev/null | base64 -d || echo "")
-    fi
+        -o jsonpath='{.data.pat}' 2>/dev/null | base64 -d || echo "")
 
     if [[ -z "$PAT" ]]; then
         error "Could not find Zitadel machine user PAT secret"
@@ -154,8 +159,21 @@ create_project() {
             '{"name":"infrastructure","projectRoleAssertion":true,"projectRoleCheck":true}')
         PROJECT_ID=$(echo "$resp" | jq -r '.id // empty' 2>/dev/null || echo "")
         if [[ -z "$PROJECT_ID" ]]; then
-            error "Failed to create project: $(echo "$resp" | head -c 200)"
-            return 1
+            # Might be "already exists" from a previous partial run — re-search
+            if echo "$resp" | grep -qi "already exists"; then
+                PROJECT_ID=$(_api POST "/management/v1/projects/_search" \
+                    '{"queries":[{"nameQuery":{"name":"infrastructure","method":"TEXT_QUERY_METHOD_EQUALS"}}]}' \
+                    | jq -r '.result[0].id // empty' 2>/dev/null || echo "")
+                if [[ -n "$PROJECT_ID" ]]; then
+                    log "  Project already existed: ${PROJECT_ID}"
+                else
+                    error "Failed to create or find project: $(echo "$resp" | head -c 200)"
+                    return 1
+                fi
+            else
+                error "Failed to create project: $(echo "$resp" | head -c 200)"
+                return 1
+            fi
         fi
         log "  Project created: ${PROJECT_ID}"
     fi
@@ -203,7 +221,7 @@ create_admin_user() {
                 \"email\": \"${ADMIN_EMAIL}\",
                 \"isEmailVerified\": true
             },
-            \"password\": \"${ADMIN_PASSWORD}\",
+            \"password\": \"${ADMIN_PASSWORD}!\",
             \"passwordChangeRequired\": false
         }")
         ADMIN_USER_ID=$(echo "$resp" | jq -r '.userId // empty' 2>/dev/null || echo "")

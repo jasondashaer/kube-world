@@ -1933,6 +1933,23 @@ setup_cert_manager_le() {
         return 0
     fi
 
+    # Create a placeholder self-signed TLS cert so the Gateway's HTTPS
+    # listener is accepted immediately. Without this, the Gateway is
+    # rejected ("secret not found") and NO HTTPRoutes work until the LE
+    # cert issues (10-30 min). cert-manager will overwrite this secret
+    # with the real LE cert when DNS-01 completes.
+    if ! kubectl -n kube-system get secret kube-world-tls &>/dev/null; then
+        log "Creating placeholder TLS cert for Gateway..."
+        openssl req -x509 -newkey rsa:2048 -keyout /tmp/tls-placeholder.key \
+            -out /tmp/tls-placeholder.crt -days 1 -nodes \
+            -subj "/CN=*.${DOMAIN:-kubew.dev}" 2>/dev/null
+        kubectl -n kube-system create secret tls kube-world-tls \
+            --cert=/tmp/tls-placeholder.crt --key=/tmp/tls-placeholder.key \
+            > /dev/null 2>&1
+        rm -f /tmp/tls-placeholder.key /tmp/tls-placeholder.crt
+        log "Placeholder cert created (LE cert will replace it)"
+    fi
+
     # Clean up stale _acme-challenge TXT records from previous bootstrap
     # cycles. cert-manager's cleanup fails silently (empty zone ID bug in
     # its Cloudflare solver), so TXT records accumulate. Having 5+ stale

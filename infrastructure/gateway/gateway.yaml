@@ -4,8 +4,14 @@
 # implementations (e.g., Traefik → Istio), change gatewayClassName
 # here — no changes needed on individual HTTPRoutes.
 #
-# Gateway API is the Kubernetes-native standard (GA v1.1.0+)
-# supported by Traefik, Istio, Cilium, Nginx, and others.
+# Listener ports must match Traefik's actual entrypoint ports:
+#   - With hostNetwork: true → ports are 80 and 443
+#   - Without hostNetwork (svclb) → ports would be 8000 and 8443
+#
+# The certificateRefs point at the kube-world-tls secret which holds
+# the Let's Encrypt wildcard cert. Bootstrap creates a placeholder
+# self-signed cert at this name so the Gateway is accepted immediately;
+# cert-manager replaces it with the real LE cert once DNS-01 completes.
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
@@ -15,17 +21,16 @@ metadata:
   labels:
     app.kubernetes.io/part-of: kube-world
 spec:
-  # Change to "istio" when migrating to Istio
   gatewayClassName: traefik
   listeners:
     - name: http
-      port: 8000
+      port: 80
       protocol: HTTP
       allowedRoutes:
         namespaces:
           from: All
     - name: https
-      port: 8443
+      port: 443
       protocol: HTTPS
       tls:
         mode: Terminate

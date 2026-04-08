@@ -2140,9 +2140,9 @@ install_zitadel() {
     if ! kubectl -n zitadel get secret zitadel-masterkey &>/dev/null; then
         kubectl create namespace zitadel --dry-run=client -o yaml | kubectl apply -f -
         local masterkey
-        # LC_ALL=C required on macOS — without it, tr fails with
-        # "Illegal byte sequence" because /dev/urandom outputs non-UTF8
-        masterkey=$(LC_ALL=C tr -dc A-Za-z0-9 </dev/urandom | head -c 32)
+        # Use openssl instead of tr </dev/urandom — the latter causes SIGPIPE
+        # on macOS (head closes pipe → tr gets killed → pipefail exits script)
+        masterkey=$(openssl rand -base64 48 | tr -d '/+=\n' | head -c 32)
         kubectl create secret generic zitadel-masterkey \
             --namespace=zitadel \
             --from-literal=masterkey="$masterkey" \
@@ -2886,17 +2886,11 @@ main() {
         # the external hostname.
         apply_rancher_httproute
         configure_rancher_api        # Best-effort: warns and continues on failure
-        # Issue the LE wildcard cert BEFORE importing edge clusters.
-        # The cattle-cluster-agent on the edge Pi connects to
-        # https://rancher.kubew.dev and validates the TLS cert. If we
-        # import before the cert is ready, Traefik serves its default
-        # self-signed cert (*.traefik.default) and the agent rejects it
-        # with "x509: certificate is valid for *.traefik.default, not
-        # rancher.kubew.dev". By issuing the cert first and waiting for
-        # it, the edge agent gets a valid LE cert.
-        setup_cert_manager_le        # Depends on create_secrets
-        wait_for_cert_ready          # Polls until cert is Ready or timeout
-        rancher_import_edge_clusters # Now edge cattle-agent will get valid TLS
+        # Request the LE wildcard cert early. The DNS-01 challenge + cert
+        # issuance runs IN PARALLEL with subsequent steps (Zitadel, GitLab,
+        # Flux). By the time we reach rancher_import_edge_clusters at the
+        # END of the pipeline, the cert should be ready (~15-20 min later).
+        setup_cert_manager_le        # Depends on create_secrets; starts ACME flow
         # Identity provider BEFORE GitLab so GitLab can boot with OIDC
         # config from the start (OIDC client ID/secret baked into gitlab.rb)
         install_zitadel              # Helm install + seed identity config
@@ -2905,6 +2899,12 @@ main() {
         # self-hosted GitLab, so the repo and credentials must exist first.
         install_gitlab_native        # Installs CE, pushes repo, creates gitlab-credentials secret
         setup_flux || { error "Flux setup failed — cannot continue"; exit 1; }
+        # Import edge clusters LAST — by now the LE cert has had ~20 min
+        # to issue (Zitadel + GitLab + Flux all ran while cert-manager
+        # was doing the DNS-01 challenge in the background). This avoids
+        # the x509 error where cattle-agent gets Traefik's default cert.
+        wait_for_cert_ready          # Verify cert is Ready before importing
+        rancher_import_edge_clusters # Edge cattle-agent should get valid TLS
         setup_httproutes             # Best-effort: applies available routes
         deploy_tailscale_keys        # Optional: warns if TAILSCALE_API_TOKEN missing
     else

@@ -1,0 +1,32 @@
+# Flux Kustomization for Zitadel identity infrastructure.
+#
+# Deploys to the HOST cluster (not Karmada) because Zitadel is
+# infrastructure — it serves OIDC for all apps across all clusters.
+# No kubeConfig.secretRef means Flux applies to the local cluster.
+#
+# This differs from apps/* kustomizations which target the Karmada API.
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: identity-zitadel
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./infrastructure/zitadel
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: kube-world
+  # No kubeConfig → applies to host cluster (where Traefik runs)
+  # HelmRelease resources trigger the helm-controller to install charts
+  healthChecks:
+    - apiVersion: helm.toolkit.fluxcd.io/v2
+      kind: HelmRelease
+      name: zitadel
+      namespace: zitadel
+    - apiVersion: helm.toolkit.fluxcd.io/v2
+      kind: HelmRelease
+      name: zitadel-postgresql
+      namespace: zitadel
+  timeout: 15m

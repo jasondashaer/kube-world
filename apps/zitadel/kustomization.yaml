@@ -1,0 +1,12 @@
+# Zitadel app kustomization — intentionally empty for Flux → Karmada.
+#
+# Zitadel is infrastructure (runs on the host cluster, not propagated
+# via Karmada). Its deployment is managed by the identity-zitadel Flux
+# Kustomization which applies infrastructure/zitadel/ HelmReleases.
+#
+# The HTTPRoute (gateway.yaml) is applied by bootstrap.sh
+# setup_httproutes to the host cluster directly.
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources: []

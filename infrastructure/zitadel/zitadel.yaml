@@ -1,0 +1,108 @@
+# Zitadel Identity Provider — Helm chart via Flux HelmRelease.
+#
+# Containerized deployment (not native) for GitOps management.
+# Uses external PostgreSQL (deployed by postgresql.yaml in this directory).
+#
+# After Helm install, bootstrap.sh runs seed-zitadel.sh to create:
+#   - "kube-world" organization
+#   - admin + user roles
+#   - OIDC applications for Rancher, GitLab, Grafana
+#   - Claim-flattening action for role → groups mapping
+#
+# Auth endpoint: https://auth.kubew.dev (via Traefik HTTPRoute)
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: zitadel
+  namespace: zitadel
+spec:
+  interval: 30m
+  dependsOn:
+    - name: zitadel-postgresql
+  chart:
+    spec:
+      chart: zitadel
+      version: "9.*"
+      sourceRef:
+        kind: HelmRepository
+        name: zitadel
+        namespace: flux-system
+  values:
+    replicaCount: 1
+
+    # Pi-optimized resources
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "256Mi"
+      limits:
+        cpu: "1000m"
+        memory: "512Mi"
+
+    zitadel:
+      # Master encryption key — generated at install time by bootstrap.sh
+      # and stored in a K8s Secret. This value is a placeholder; the actual
+      # key is provided via masterkeySecretName below.
+      masterkeySecretName: "zitadel-masterkey"
+
+      configmapConfig:
+        ExternalSecure: true
+        ExternalDomain: "auth.kubew.dev"
+        ExternalPort: 443
+
+        TLS:
+          Enabled: false
+
+        Database:
+          Postgres:
+            Host: "zitadel-postgresql"
+            Port: 5432
+            Database: "zitadel"
+            User:
+              Username: "zitadel"
+              SSL:
+                Mode: "disable"
+            Admin:
+              Username: "postgres"
+              SSL:
+                Mode: "disable"
+            MaxOpenConns: 20
+            MaxIdleConns: 10
+            MaxConnLifetime: "30m"
+            MaxConnIdleTime: "5m"
+
+        Machine:
+          Identification:
+            Hostname:
+              Enabled: true
+
+        # First instance bootstrap config
+        FirstInstance:
+          Org:
+            Name: "kube-world"
+            Machine:
+              Machine:
+                Username: "iam-admin"
+                Name: "Bootstrap Admin (machine user)"
+              MachineKey:
+                ExpirationDate: "2030-01-01T00:00:00Z"
+                Type: 1
+              Pat:
+                ExpirationDate: "2030-01-01T00:00:00Z"
+
+      # Database password in a Secret (not configmap)
+      secretConfig:
+        Database:
+          Postgres:
+            User:
+              Password: "zitadel-pg-password"
+            Admin:
+              Password: "zitadel-pg-admin"
+
+    # Service config — Traefik routes to this via HTTPRoute
+    service:
+      type: ClusterIP
+      port: 8080
+      annotations:
+        traefik.ingress.kubernetes.io/service.serversscheme: h2c

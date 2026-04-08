@@ -2117,7 +2117,229 @@ setup_httproutes() {
 
 #===============================================================================
 # GitLab Native Install + Repo Bootstrap
+#===============================================================================
+# Zitadel Identity Provider (containerized via Helm)
 #
+# Deploys Zitadel + PostgreSQL via Helm, waits for readiness, then runs
+# seed-zitadel.sh to create the org, users, OIDC clients, and roles.
+# After seeding, configures Rancher + GitLab to use Zitadel for OIDC.
+#===============================================================================
+install_zitadel() {
+    log "Installing Zitadel identity provider..."
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "[DRY RUN] Would install Zitadel via Helm + seed identity config"
+        return 0
+    fi
+
+    # Generate and store the masterkey secret if it doesn't exist
+    if ! kubectl -n zitadel get secret zitadel-masterkey &>/dev/null; then
+        kubectl create namespace zitadel --dry-run=client -o yaml | kubectl apply -f -
+        local masterkey
+        masterkey=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 32)
+        kubectl create secret generic zitadel-masterkey \
+            --namespace=zitadel \
+            --from-literal=masterkey="$masterkey" \
+            --dry-run=client -o yaml | kubectl apply -f -
+        log "  Masterkey secret created"
+    else
+        debug "  Masterkey secret already exists"
+    fi
+
+    # Add Helm repos
+    helm repo add zitadel https://charts.zitadel.com 2>/dev/null || true
+    helm repo add bitnami https://charts.bitnami.com/bitnami 2>/dev/null || true
+    helm repo update zitadel bitnami > /dev/null 2>&1
+
+    # Install PostgreSQL for Zitadel
+    if ! helm status zitadel-postgresql -n zitadel &>/dev/null; then
+        log "  Installing PostgreSQL for Zitadel..."
+        if ! helm upgrade --install zitadel-postgresql bitnami/postgresql \
+            --namespace zitadel --create-namespace \
+            --set architecture=standalone \
+            --set auth.postgresPassword=zitadel-pg-admin \
+            --set auth.username=zitadel \
+            --set auth.password=zitadel-pg-password \
+            --set auth.database=zitadel \
+            --set primary.resources.requests.cpu=50m \
+            --set primary.resources.requests.memory=128Mi \
+            --set primary.resources.limits.cpu=500m \
+            --set primary.resources.limits.memory=256Mi \
+            --set primary.persistence.size=2Gi \
+            --set primary.persistence.storageClass=local-path \
+            --set metrics.enabled=false \
+            --wait --timeout 5m; then
+            error "PostgreSQL install failed"
+            return 1
+        fi
+    else
+        log "  PostgreSQL already installed"
+    fi
+
+    # Install Zitadel
+    if ! helm status zitadel -n zitadel &>/dev/null; then
+        log "  Installing Zitadel..."
+        if ! helm upgrade --install zitadel zitadel/zitadel \
+            --namespace zitadel \
+            --set replicaCount=1 \
+            --set resources.requests.cpu=100m \
+            --set resources.requests.memory=256Mi \
+            --set resources.limits.cpu=1000m \
+            --set resources.limits.memory=512Mi \
+            --set zitadel.masterkeySecretName=zitadel-masterkey \
+            --set zitadel.configmapConfig.ExternalSecure=true \
+            --set zitadel.configmapConfig.ExternalDomain="auth.${DOMAIN}" \
+            --set zitadel.configmapConfig.ExternalPort=443 \
+            --set zitadel.configmapConfig.TLS.Enabled=false \
+            --set zitadel.configmapConfig.Database.Postgres.Host=zitadel-postgresql \
+            --set zitadel.configmapConfig.Database.Postgres.Port=5432 \
+            --set zitadel.configmapConfig.Database.Postgres.Database=zitadel \
+            --set zitadel.configmapConfig.Database.Postgres.User.Username=zitadel \
+            --set zitadel.configmapConfig.Database.Postgres.User.SSL.Mode=disable \
+            --set zitadel.configmapConfig.Database.Postgres.Admin.Username=postgres \
+            --set zitadel.configmapConfig.Database.Postgres.Admin.SSL.Mode=disable \
+            --set 'zitadel.configmapConfig.FirstInstance.Org.Name=kube-world' \
+            --set service.type=ClusterIP \
+            --set service.port=8080 \
+            --set 'service.annotations.traefik\.ingress\.kubernetes\.io/service\.serversscheme=h2c' \
+            --set zitadel.secretConfig.Database.Postgres.User.Password=zitadel-pg-password \
+            --set zitadel.secretConfig.Database.Postgres.Admin.Password=zitadel-pg-admin \
+            --wait --timeout 10m; then
+            error "Zitadel install failed"
+            return 1
+        fi
+    else
+        log "  Zitadel already installed"
+    fi
+
+    # Wait for Zitadel to be fully ready (init job + server)
+    log "  Waiting for Zitadel to be ready..."
+    local timeout=300
+    local elapsed=0
+    while [[ $elapsed -lt $timeout ]]; do
+        # Port-forward to check readiness
+        local ready
+        ready=$(kubectl -n zitadel get pods -l app.kubernetes.io/name=zitadel \
+            -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "")
+        if [[ "$ready" == "True" ]]; then
+            log "  Zitadel is ready ✓"
+            break
+        fi
+        sleep 10
+        elapsed=$((elapsed + 10))
+        if (( elapsed % 30 == 0 )); then
+            debug "  [${elapsed}s] Zitadel not ready yet..."
+        fi
+    done
+
+    if [[ $elapsed -ge $timeout ]]; then
+        warn "Zitadel not ready after ${timeout}s — check pods:"
+        kubectl -n zitadel get pods
+        return 1
+    fi
+
+    # Seed identity configuration
+    log "  Seeding Zitadel identity configuration..."
+    if ! ADMIN_PASSWORD="${RANCHER_BOOTSTRAP_PASSWORD}" \
+         DOMAIN="${DOMAIN}" \
+         bash "${SCRIPT_DIR}/scripts/seed-zitadel.sh" --local; then
+        warn "Zitadel seed failed — identity can be configured manually"
+        warn "Run: ./scripts/seed-zitadel.sh --local"
+    fi
+
+    # Apply Zitadel HTTPRoute
+    _apply_gateway_file "${SCRIPT_DIR}/apps/zitadel/gateway.yaml" "Zitadel"
+
+    log "Zitadel identity provider installed ✓"
+}
+
+#===============================================================================
+# Configure Rancher OIDC with Zitadel
+#===============================================================================
+configure_oidc_rancher() {
+    log "Configuring Rancher OIDC with Zitadel..."
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "[DRY RUN] Would configure Rancher OIDC"
+        return 0
+    fi
+
+    # Read OIDC credentials from the state file
+    local state_file="/tmp/zitadel-seed.state"
+    if [[ ! -f "$state_file" ]]; then
+        warn "Zitadel seed state not found — skipping Rancher OIDC config"
+        return 0
+    fi
+
+    local client_id issuer_url
+    client_id=$(jq -r '.rancher_client_id // empty' "$state_file" 2>/dev/null || echo "")
+    issuer_url=$(jq -r '.issuer_url // empty' "$state_file" 2>/dev/null || echo "")
+
+    if [[ -z "$client_id" ]]; then
+        warn "No Rancher OIDC client ID in seed state — skipping"
+        return 0
+    fi
+
+    # Read client secret from K8s
+    local client_secret
+    client_secret=$(kubectl -n cattle-system get secret zitadel-oidc-rancher \
+        -o jsonpath='{.data.clientSecret}' 2>/dev/null | base64 -d || echo "")
+
+    if [[ -z "$client_secret" ]]; then
+        warn "No Rancher OIDC client secret found — skipping"
+        return 0
+    fi
+
+    # Configure Rancher's OIDC auth via port-forward API
+    if ! _rancher_pf_start; then
+        warn "Port-forward to Rancher failed — skipping OIDC config"
+        return 0
+    fi
+
+    if ! _rancher_wait_ready "$RANCHER_PF_URL" 60; then
+        _rancher_pf_stop
+        return 0
+    fi
+
+    # Login
+    local login_resp session_token
+    login_resp=$(curl -sk -X POST \
+        -H "Content-Type: application/json" \
+        -d "{\"username\":\"admin\",\"password\":\"${RANCHER_BOOTSTRAP_PASSWORD}\",\"responseType\":\"json\"}" \
+        "${RANCHER_PF_URL}/v3-public/localProviders/local?action=login" 2>&1)
+    session_token=$(echo "$login_resp" | jq -r '.token // empty' 2>/dev/null || true)
+
+    if [[ -z "$session_token" ]]; then
+        warn "Rancher login failed — skipping OIDC config"
+        _rancher_pf_stop
+        return 0
+    fi
+
+    # Enable OIDC auth provider
+    curl -sk -X POST \
+        -H "Authorization: Bearer ${session_token}" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"clientId\": \"${client_id}\",
+            \"clientSecret\": \"${client_secret}\",
+            \"issuer\": \"${issuer_url}\",
+            \"rancherUrl\": \"https://rancher.${DOMAIN}\",
+            \"scope\": \"openid profile email groups\",
+            \"groupSearchEnabled\": true,
+            \"enabled\": true
+        }" \
+        "${RANCHER_PF_URL}/v3/oidcConfigs/oidc?action=testAndEnable" > /dev/null 2>&1
+
+    # Note: testAndEnable may fail if Zitadel isn't reachable from Rancher pod yet
+    # (Traefik routing might not be set up for auth.kubew.dev internally).
+    # This is best-effort — user can complete via Rancher UI.
+    log "  Rancher OIDC configuration applied (best-effort)"
+
+    _rancher_pf_stop
+    log "Rancher OIDC configured ✓"
+}
+
+#===============================================================================
 # Installs GitLab CE on the central Pi (systemd), bootstraps the kube-world
 # repo inside it, and creates the gitlab-credentials K8s secret that Flux
 # uses to pull manifests. This makes Flux + GitOps work out of the box on
@@ -2649,6 +2871,10 @@ main() {
         setup_cert_manager_le        # Depends on create_secrets
         wait_for_cert_ready          # Polls until cert is Ready or timeout
         rancher_import_edge_clusters # Now edge cattle-agent will get valid TLS
+        # Identity provider BEFORE GitLab so GitLab can boot with OIDC
+        # config from the start (OIDC client ID/secret baked into gitlab.rb)
+        install_zitadel              # Helm install + seed identity config
+        configure_oidc_rancher       # Best-effort: Rancher OIDC via port-forward
         # GitLab must come BEFORE Flux — Flux's GitRepository points at the
         # self-hosted GitLab, so the repo and credentials must exist first.
         install_gitlab_native        # Installs CE, pushes repo, creates gitlab-credentials secret

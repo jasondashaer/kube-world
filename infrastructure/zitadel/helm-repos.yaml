@@ -1,0 +1,20 @@
+# Helm repositories for Zitadel and its PostgreSQL dependency.
+# Flux's source-controller fetches chart metadata from these repos.
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: zitadel
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: https://charts.zitadel.com
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: bitnami
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: https://charts.bitnami.com/bitnami

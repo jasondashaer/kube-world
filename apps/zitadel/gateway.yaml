@@ -1,10 +1,12 @@
 # Zitadel HTTPRoute via Gateway API
-# Routes external traffic to Zitadel identity provider
+# Routes external traffic to the Zitadel identity provider
 #
 # Zitadel must be accessible from:
 #   - Browsers (SSO login flows)
-#   - Cloud providers (SAML/OIDC federation token validation)
-#   - K8s API servers (OIDC token verification)
+#   - Other apps in the cluster (OIDC token validation)
+#   - Edge cluster cattle-agents (via Tailscale → Traefik)
+#
+# Zitadel uses HTTP/2 (h2c) on port 8080 for both REST and gRPC.
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -27,4 +29,4 @@ spec:
             value: /
       backendRefs:
         - name: zitadel
-          port: 80
+          port: 8080

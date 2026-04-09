@@ -70,7 +70,7 @@ spec:
 
       containers:
         - name: companion
-          image: ghcr.io/bitfocus/companion:3.4.2
+          image: ghcr.io/bitfocus/companion/companion:latest
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

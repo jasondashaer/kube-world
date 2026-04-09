@@ -2068,24 +2068,28 @@ install_central_external_dns() {
     fi
 
     # Central manages the root domain but excludes edge subdomains
-    local exclude_args=""
-    local clusters
+    local -a helm_args=(
+        -n external-dns
+        -f "${SCRIPT_DIR}/infrastructure/external-dns/values.yaml"
+        --set "domainFilters[0]=${DOMAIN}"
+        --set "txtOwnerId=pi-central"
+    )
+    local clusters idx=0
     clusters=$(inventory_edge_clusters)
     if [[ -n "$clusters" ]]; then
         while IFS=' ' read -r cname cip; do
             [[ -z "$cname" ]] && continue
             local sub
             sub=$(get_edge_subdomain "$cname")
-            [[ -n "$sub" ]] && exclude_args="${exclude_args} --set excludeDomains[0]=${sub}.${DOMAIN}"
+            if [[ -n "$sub" ]]; then
+                helm_args+=(--set "excludeDomains[${idx}]=${sub}.${DOMAIN}")
+                idx=$((idx + 1))
+            fi
         done <<< "$clusters"
     fi
 
     helm install external-dns external-dns/external-dns \
-        -n external-dns \
-        -f "${SCRIPT_DIR}/infrastructure/external-dns/values.yaml" \
-        --set "domainFilters[0]=${DOMAIN}" \
-        --set "txtOwnerId=pi-central" \
-        ${exclude_args} \
+        "${helm_args[@]}" \
         --wait --timeout 120s 2>&1 | tail -3
 
     log "ExternalDNS installed on central ✓"

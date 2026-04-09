@@ -38,6 +38,7 @@ spec:
     deployment:
       replicas: 1
     hostNetwork: true
+    dnsPolicy: ClusterFirstWithHostNet
     securityContext:
       capabilities:
         drop: [ALL]

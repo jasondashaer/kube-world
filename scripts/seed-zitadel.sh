@@ -324,6 +324,11 @@ create_oidc_apps() {
         "[\"https://grafana.${DOMAIN}/login/generic_oauth\"]" \
         "[\"https://grafana.${DOMAIN}\"]" \
         "GRAFANA"
+
+    create_oidc_app "homeassistant" \
+        "[\"https://ha.edge1.${DOMAIN}/oauth2/callback\"]" \
+        "[\"https://ha.edge1.${DOMAIN}\"]" \
+        "HOMEASSISTANT"
 }
 
 #===============================================================================
@@ -415,6 +420,18 @@ store_oidc_secrets() {
         log "  gitlab OIDC secret → zitadel"
     fi
 
+    # Home Assistant OIDC secret (for oauth2-proxy on edge cluster)
+    if [[ -n "${HOMEASSISTANT_CLIENT_ID:-}" ]]; then
+        kubectl create namespace home-assistant --dry-run=client -o yaml | kubectl apply -f - 2>/dev/null
+        kubectl create secret generic zitadel-oidc-homeassistant \
+            --namespace=home-assistant \
+            --from-literal=client-id="${HOMEASSISTANT_CLIENT_ID}" \
+            --from-literal=client-secret="${HOMEASSISTANT_CLIENT_SECRET}" \
+            --from-literal=cookie-secret="$(openssl rand -base64 32 | head -c 32)" \
+            --dry-run=client -o yaml | kubectl apply -f -
+        log "  homeassistant OIDC secret → home-assistant"
+    fi
+
     # Grafana OIDC secret (pre-created for Phase 5)
     if [[ -n "${GRAFANA_CLIENT_ID:-}" ]]; then
         kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f - 2>/dev/null
@@ -441,6 +458,7 @@ write_state() {
   "rancher_client_id": "${RANCHER_CLIENT_ID:-}",
   "gitlab_client_id": "${GITLAB_CLIENT_ID:-}",
   "grafana_client_id": "${GRAFANA_CLIENT_ID:-}",
+  "homeassistant_client_id": "${HOMEASSISTANT_CLIENT_ID:-}",
   "issuer_url": "https://auth.${DOMAIN}",
   "seeded_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }

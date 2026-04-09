@@ -1,0 +1,48 @@
+# Home Assistant configuration managed via GitOps.
+# Mounted as /config/configuration.yaml via subPath (PVC holds .storage/ state).
+# Changes here → git push → Flux syncs → Karmada propagates → pod restarts.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: home-assistant-config
+  namespace: home-assistant
+  labels:
+    app.kubernetes.io/name: home-assistant
+    app.kubernetes.io/part-of: kube-world
+data:
+  configuration.yaml: |
+    # Loads default set of integrations. Do not remove.
+    default_config:
+
+    # HTTP — reverse proxy support for Traefik
+    http:
+      use_x_forwarded_for: true
+      trusted_proxies:
+        - 10.42.0.0/16      # K3s pod CIDR
+        - 10.43.0.0/16      # K3s service CIDR
+        - 10.0.0.0/8        # LAN (covers any home network)
+        - 100.64.0.0/10     # Tailscale CGNAT range
+        - 127.0.0.1
+
+    # Frontend themes
+    frontend:
+      themes: !include_dir_merge_named themes
+
+    # SSO via reverse proxy (oauth2-proxy sets X-Forwarded-User header)
+    # Requires hass-auth-header custom component installed in /config
+    # auth_header:
+    #   username_header: X-Forwarded-User
+
+    # Include files for automations, scripts, scenes
+    automation: !include automations.yaml
+    script: !include scripts.yaml
+    scene: !include scenes.yaml
+
+    # Packages — organized config by area/function
+    # homeassistant:
+    #   packages: !include_dir_named packages/
+
+  automations.yaml: "[]"
+  scripts.yaml: ""
+  scenes.yaml: "[]"

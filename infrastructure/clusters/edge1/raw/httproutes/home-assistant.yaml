@@ -1,7 +1,52 @@
-# Home Assistant HTTPRoute — edge1-specific hostname
+# Home Assistant routing — edge1-specific hostname with Zitadel SSO
+#
+# Uses Traefik IngressRoute (not Gateway API HTTPRoute) because we need
+# ForwardAuth middleware for oauth2-proxy, which Gateway API doesn't support.
+# The /oauth2/ path goes directly to oauth2-proxy for callbacks.
+# All other paths go through ForwardAuth → HA.
 ---
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: oauth2-forwardauth
+  namespace: home-assistant
+  labels:
+    app.kubernetes.io/part-of: kube-world
+spec:
+  forwardAuth:
+    address: http://oauth2-proxy.home-assistant.svc.cluster.local:4180/oauth2/auth
+    trustForwardHeader: true
+    authResponseHeaders:
+      - X-Auth-Request-User
+      - X-Auth-Request-Email
+      - X-Forwarded-User
+
+---
+# oauth2-proxy callback/auth endpoints (no middleware needed)
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: home-assistant-oauth2
+  namespace: home-assistant
+  labels:
+    app.kubernetes.io/name: home-assistant
+    app.kubernetes.io/part-of: kube-world
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`ha.edge1.kubew.dev`) && PathPrefix(`/oauth2/`)
+      kind: Rule
+      services:
+        - name: oauth2-proxy
+          port: 4180
+  tls:
+    secretName: kube-world-tls
+
+---
+# Home Assistant — protected by ForwardAuth
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
 metadata:
   name: home-assistant
   namespace: home-assistant
@@ -9,16 +54,21 @@ metadata:
     app.kubernetes.io/name: home-assistant
     app.kubernetes.io/part-of: kube-world
 spec:
-  parentRefs:
-    - name: kube-world-gateway
-      namespace: kube-system
-  hostnames:
-    - "ha.edge1.kubew.dev"
-  rules:
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /
-      backendRefs:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`ha.edge1.kubew.dev`) && !PathPrefix(`/oauth2/`) && !PathPrefix(`/api/`)
+      kind: Rule
+      middlewares:
+        - name: oauth2-forwardauth
+      services:
         - name: home-assistant
           port: 8123
+    # HA API endpoints — no auth middleware (for mobile app, integrations)
+    - match: Host(`ha.edge1.kubew.dev`) && PathPrefix(`/api/`)
+      kind: Rule
+      services:
+        - name: home-assistant
+          port: 8123
+  tls:
+    secretName: kube-world-tls

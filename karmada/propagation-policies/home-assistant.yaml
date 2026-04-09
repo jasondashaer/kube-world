@@ -23,6 +23,12 @@ spec:
     - apiVersion: v1
       kind: Service
       name: home-assistant
+    - apiVersion: v1
+      kind: ConfigMap
+      name: udev-rules
+    - apiVersion: apps/v1
+      kind: DaemonSet
+      name: udev-rules-deployer
 
   placement:
     clusterAffinity:

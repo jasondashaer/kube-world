@@ -1,0 +1,25 @@
+# Companion HTTPRoute via Gateway API
+# Routes external traffic to Companion web UI on port 8000
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: companion
+  namespace: companion
+  labels:
+    app.kubernetes.io/name: companion
+    app.kubernetes.io/part-of: kube-world
+spec:
+  parentRefs:
+    - name: kube-world-gateway
+      namespace: kube-system
+  hostnames:
+    - "companion.kubew.dev"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: companion
+          port: 8000

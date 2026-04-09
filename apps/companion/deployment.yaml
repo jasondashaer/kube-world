@@ -1,0 +1,141 @@
+# Bitfocus Companion — production control surface for streaming/AV
+# Deploys on edge Pi alongside Home Assistant
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: companion
+  labels:
+    app.kubernetes.io/name: companion
+    app.kubernetes.io/part-of: kube-world
+    workload-type: iot
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: companion-data
+  namespace: companion
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: companion
+  namespace: companion
+  labels:
+    app.kubernetes.io/name: companion
+    app.kubernetes.io/part-of: kube-world
+    app.kubernetes.io/component: core
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: companion
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: companion
+    spec:
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: workload-type
+                    operator: In
+                    values:
+                      - iot
+            - weight: 80
+              preference:
+                matchExpressions:
+                  - key: topology.kubernetes.io/zone
+                    operator: In
+                    values:
+                      - edge
+
+      # hostNetwork for LAN device discovery (multicast/mDNS)
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+
+      containers:
+        - name: companion
+          image: ghcr.io/bitfocus/companion:3.4.2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+            - name: satellite
+              containerPort: 16622
+              protocol: TCP
+          env:
+            - name: COMPANION_CONFIG_DIRECTORY
+              value: "/companion/data"
+          volumeMounts:
+            - name: data
+              mountPath: /companion/data
+          resources:
+            requests:
+              memory: "384Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8000
+            initialDelaySeconds: 90
+            periodSeconds: 30
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 10
+
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: companion-data
+
+      tolerations:
+        - key: "iot-only"
+          operator: "Equal"
+          value: "true"
+          effect: "NoSchedule"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: companion
+  namespace: companion
+  labels:
+    app.kubernetes.io/name: companion
+    app.kubernetes.io/part-of: kube-world
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8000
+      targetPort: 8000
+      protocol: TCP
+      name: http
+    - port: 16622
+      targetPort: 16622
+      protocol: TCP
+      name: satellite
+  selector:
+    app.kubernetes.io/name: companion

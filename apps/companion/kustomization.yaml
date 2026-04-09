@@ -1,0 +1,9 @@
+# Companion kustomization.
+#
+# The HTTPRoute (gateway.yaml) is a HOST-cluster concern (Traefik lives
+# on the central Pi) and is applied separately — NOT by this kustomization.
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - deployment.yaml

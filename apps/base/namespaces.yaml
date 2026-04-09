@@ -30,6 +30,15 @@ metadata:
 apiVersion: v1
 kind: Namespace
 metadata:
+  name: companion
+  labels:
+    app.kubernetes.io/name: companion
+    app.kubernetes.io/part-of: kube-world
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
   name: monitoring
   labels:
     app.kubernetes.io/name: monitoring

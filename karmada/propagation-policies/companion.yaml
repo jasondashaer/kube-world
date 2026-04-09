@@ -1,0 +1,32 @@
+# Karmada PropagationPolicy for Bitfocus Companion
+# Schedules Companion on edge/IoT clusters alongside Home Assistant
+---
+apiVersion: policy.karmada.io/v1alpha1
+kind: PropagationPolicy
+metadata:
+  name: companion
+  namespace: companion
+spec:
+  resourceSelectors:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: companion
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      name: companion-data
+    - apiVersion: v1
+      kind: Service
+      name: companion
+
+  placement:
+    clusterAffinity:
+      labelSelector:
+        matchExpressions:
+          - key: workload-type
+            operator: In
+            values:
+              - iot
+    spreadConstraints:
+      - spreadByField: cluster
+        maxGroups: 1
+        minGroups: 1

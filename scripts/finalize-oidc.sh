@@ -159,7 +159,7 @@ echo ""
 
 log "Global role bindings:"
 curl -sk -H "Authorization: Bearer ${TOKEN}" "${RANCHER_URL}/v3/globalRoleBindings" 2>/dev/null | \
-    jq -r '.data[] | select(.groupPrincipalId | test("genericoidc")) | "  \(.groupPrincipalId) → \(.globalRoleId)"' 2>/dev/null
+    jq -r '.data[] | select(.groupPrincipalId != null) | select(.groupPrincipalId | test("genericoidc")) | "  \(.groupPrincipalId) → \(.globalRoleId)"' 2>/dev/null || true
 
 echo ""
 log "=============================================="

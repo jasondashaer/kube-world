@@ -2134,6 +2134,8 @@ setup_httproutes() {
     # HTTPRoute is applied by apply_rancher_httproute immediately after
     # install_rancher, before configure_rancher_api needs it.
     _apply_gateway_file "${SCRIPT_DIR}/apps/gitlab/gateway.yaml" "GitLab"
+    _apply_gateway_file "${SCRIPT_DIR}/apps/home-assistant/gateway.yaml" "Home Assistant"
+    _apply_gateway_file "${SCRIPT_DIR}/apps/companion/gateway.yaml" "Companion"
 
     kubectl get httproute -A 2>/dev/null || true
 }

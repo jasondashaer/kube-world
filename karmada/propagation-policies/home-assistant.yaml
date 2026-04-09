@@ -26,12 +26,6 @@ spec:
     - apiVersion: v1
       kind: ConfigMap
       name: home-assistant-config
-    - apiVersion: apps/v1
-      kind: Deployment
-      name: oauth2-proxy
-    - apiVersion: v1
-      kind: Service
-      name: oauth2-proxy
     - apiVersion: v1
       kind: ConfigMap
       name: udev-rules

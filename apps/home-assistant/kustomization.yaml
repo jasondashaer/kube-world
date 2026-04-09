@@ -14,5 +14,4 @@ kind: Kustomization
 resources:
   - deployment.yaml
   - config.yaml
-  - oauth2-proxy.yaml
   - udev-rules.yaml

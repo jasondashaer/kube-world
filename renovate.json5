@@ -1,0 +1,69 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "docker:enableMajor",
+    ":separateMajorReleases",
+    ":prHourlyLimitNone"
+  ],
+  "labels": ["dependencies", "renovate"],
+  "timezone": "America/New_York",
+  "schedule": ["before 6am on Monday"],
+
+  // Pin digests for reproducibility
+  "pinDigests": true,
+
+  // Group Kubernetes-related updates together
+  "packageRules": [
+    {
+      "description": "Group Kubernetes manifest image updates",
+      "matchDatasources": ["docker"],
+      "matchFileNames": ["apps/**", "infrastructure/**"],
+      "groupName": "k8s-images",
+      "groupSlug": "k8s-images"
+    },
+    {
+      "description": "Group Helm chart updates",
+      "matchDatasources": ["helm"],
+      "groupName": "helm-charts",
+      "groupSlug": "helm-charts"
+    },
+    {
+      "description": "Automerge patch updates for trusted images",
+      "matchDatasources": ["docker"],
+      "matchUpdateTypes": ["patch", "digest"],
+      "matchPackagePatterns": [
+        "^ghcr\\.io/home-assistant/",
+        "^ghcr\\.io/bitfocus/",
+        "^registry\\.k8s\\.io/"
+      ],
+      "automerge": true,
+      "automergeType": "pr"
+    },
+    {
+      "description": "Hold Rancher at v2.13.x — v2.14.0 has TLS issues",
+      "matchPackagePatterns": ["rancher"],
+      "allowedVersions": "<2.14.0"
+    }
+  ],
+
+  // Detect container images in Kubernetes YAML and shell scripts
+  "kubernetes": {
+    "fileMatch": ["apps/.+\\.yaml$", "infrastructure/.+\\.yaml$"]
+  },
+
+  // Detect Helm chart versions in HelmRelease manifests
+  "flux": {
+    "fileMatch": ["infrastructure/.+\\.yaml$", "flux/.+\\.yaml$"]
+  },
+
+  // Detect image references in shell scripts (bootstrap.sh, etc.)
+  "regexManagers": [
+    {
+      "fileMatch": ["\\.sh$", "config\\.yaml$"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+?) depName=(?<depName>\\S+?)\\s+\\w+=[\"]?(?<currentValue>[\\w.+-]+)"
+      ]
+    }
+  ]
+}

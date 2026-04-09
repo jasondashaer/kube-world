@@ -35,10 +35,15 @@ deployment:
 
   # Kubernetes distribution versions
   versions:
+    # renovate: datasource=github-releases depName=k3s-io/k3s
     k3s: "v1.34.6+k3s1"
+    # renovate: datasource=helm depName=rancher registryUrl=https://releases.rancher.com/server-charts/stable
     rancher: "2.13.1"
+    # renovate: datasource=github-releases depName=helm/helm
     helm: "3.14.0"
+    # renovate: datasource=github-releases depName=karmada-io/karmada
     karmada: "1.17.0"
+    # renovate: datasource=github-releases depName=fluxcd/flux2
     flux: "2.4.0"
 
   # Feature flags

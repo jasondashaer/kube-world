@@ -29,6 +29,7 @@ metadata:
   namespace: flux-system
 spec:
   interval: 10m
+  retryInterval: 30s
   path: ./infrastructure/clusters/edge1/raw
   prune: true
   sourceRef:

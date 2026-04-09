@@ -2034,6 +2034,16 @@ prepare_edge_for_flux() {
         fi
 
         export KUBECONFIG="$SAVE_KUBECONFIG"
+
+        # 4. Apply the Flux Kustomization for this edge cluster's infrastructure
+        local flux_kust="${SCRIPT_DIR}/flux/kustomizations/infrastructure-${subdomain}.yaml"
+        if [[ -f "$flux_kust" ]]; then
+            kubectl apply -f "$flux_kust" 2>/dev/null
+            log "    Flux Kustomization applied: infrastructure-${subdomain}"
+        else
+            warn "    Flux Kustomization not found: ${flux_kust}"
+        fi
+
         log "  ${cname}: ready for Flux ✓"
     done <<< "$clusters"
 
@@ -3192,16 +3202,16 @@ main() {
         # self-hosted GitLab, so the repo and credentials must exist first.
         install_gitlab_native        # Installs CE, pushes repo, creates gitlab-credentials secret
         setup_flux || { error "Flux setup failed — cannot continue"; exit 1; }
-        install_central_external_dns # Auto-manage DNS for central services
+        install_central_external_dns || warn "Central ExternalDNS install failed — non-critical, continuing"
         # Import edge clusters LAST — by now the LE cert has had ~20 min
         # to issue (Zitadel + GitLab + Flux all ran while cert-manager
         # was doing the DNS-01 challenge in the background). This avoids
         # the x509 error where cattle-agent gets Traefik's default cert.
         wait_for_cert_ready          # Verify cert is Ready before importing
         rancher_import_edge_clusters # Edge cattle-agent should get valid TLS
-        prepare_edge_for_flux        # Kubeconfig + Cloudflare secrets; Flux handles the rest
+        prepare_edge_for_flux || warn "Edge preparation had issues — Flux may need manual reconciliation"
         setup_httproutes             # Central-only routes (GitLab, etc.)
-        deploy_tailscale_keys        # Optional: warns if TAILSCALE_API_TOKEN missing
+        deploy_tailscale_keys || true  # Optional: warns if TAILSCALE_API_TOKEN missing
     else
         # Legacy Fleet stack: Rancher -> Fleet -> Apps
         install_rancher

@@ -17,12 +17,15 @@ spec:
   sourceRef:
     kind: GitRepository
     name: kube-world
-  # Use Karmada API server kubeconfig
-  # This requires a Secret with the Karmada kubeconfig
   kubeConfig:
     secretRef:
       name: karmada-kubeconfig
       key: value
+  # Namespaces (companion, home-assistant) must exist in Karmada API
+  # before namespace-scoped PropagationPolicies can be created.
+  # apps-base creates these namespaces.
+  dependsOn:
+    - name: apps-base
 
 ---
 apiVersion: kustomize.toolkit.fluxcd.io/v1
@@ -41,3 +44,5 @@ spec:
     secretRef:
       name: karmada-kubeconfig
       key: value
+  dependsOn:
+    - name: apps-base

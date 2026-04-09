@@ -1873,7 +1873,281 @@ cloudflare_ensure_cnames() {
         fi
     done
 
+    # Per-edge-cluster wildcard CNAMEs: *.edge1.kubew.dev → pi-edge-1.<tailnet>
+    # DNS wildcards only match one label, so *.kubew.dev does NOT cover
+    # *.edge1.kubew.dev. Each edge cluster needs its own wildcard.
+    local clusters
+    clusters=$(inventory_edge_clusters)
+    if [[ -n "$clusters" ]]; then
+        while IFS=' ' read -r cname cip; do
+            [[ -z "$cname" ]] && continue
+            local subdomain
+            subdomain=$(get_edge_subdomain "$cname")
+            [[ -z "$subdomain" ]] && continue
+
+            local edge_target="${cname}.${TAILNET_DNS_SUFFIX}"
+            local edge_wildcard="*.${subdomain}.${DOMAIN}"
+
+            local existing
+            existing=$(curl -s -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records?name=${edge_wildcard}" \
+                2>/dev/null)
+            local existing_id existing_content
+            existing_id=$(echo "$existing" | jq -r '.result[0].id // empty' 2>/dev/null || true)
+            existing_content=$(echo "$existing" | jq -r '.result[0].content // empty' 2>/dev/null || true)
+
+            if [[ -n "$existing_id" && "$existing_content" == "$edge_target" ]]; then
+                debug "  ${edge_wildcard}: already correct"
+                continue
+            fi
+
+            local payload
+            payload=$(jq -n --arg name "$edge_wildcard" --arg content "$edge_target" \
+                '{type:"CNAME", name:$name, content:$content, ttl:60, proxied:false}')
+
+            if [[ -n "$existing_id" ]]; then
+                curl -s -X PUT -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                    -H "Content-Type: application/json" -d "$payload" \
+                    "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records/${existing_id}" \
+                    > /dev/null 2>&1
+                log "  ${edge_wildcard}: updated → ${edge_target}"
+            else
+                curl -s -X POST -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                    -H "Content-Type: application/json" -d "$payload" \
+                    "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records" \
+                    > /dev/null 2>&1
+                log "  ${edge_wildcard}: created → ${edge_target}"
+            fi
+        done <<< "$clusters"
+    fi
+
     log "DNS CNAME records ensured ✓"
+}
+
+# Map edge cluster name → subdomain (e.g., pi-edge-1 → edge1).
+# Reads from config.yaml if available, falls back to stripping "pi-" prefix.
+get_edge_subdomain() {
+    local cluster_name="$1"
+    if command -v yq &>/dev/null && [[ -f "$CONFIG_FILE" ]]; then
+        local sub
+        sub=$(yq eval ".karmada.clusters[] | select(.name == \"${cluster_name}\") | .subdomain // \"\"" \
+            "$CONFIG_FILE" 2>/dev/null || echo "")
+        if [[ -n "$sub" ]]; then
+            echo "$sub"
+            return
+        fi
+    fi
+    # Fallback: pi-edge-1 → edge1, pi-edge-2 → edge2
+    echo "${cluster_name}" | sed 's/^pi-//'
+}
+
+#===============================================================================
+# Edge Cluster Ingress Stack
+#
+# Installs Traefik + Gateway API + cert-manager + ExternalDNS on each
+# edge cluster so they handle their own traffic directly. Each edge
+# cluster gets:
+#   - Traefik (hostNetwork, Gateway API provider)
+#   - Gateway resource (HTTPS listener with wildcard cert)
+#   - cert-manager (Let's Encrypt DNS-01 via Cloudflare)
+#   - ExternalDNS (auto-creates Cloudflare records from HTTPRoutes)
+#   - Wildcard TLS cert for *.{subdomain}.{domain}
+#   - HTTPRoutes for apps deployed to that cluster
+#===============================================================================
+setup_edge_ingress_stack() {
+    log "Setting up ingress stack on edge clusters..."
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "[DRY RUN] Would install Traefik+Gateway+cert-manager+ExternalDNS on edge clusters"
+        return 0
+    fi
+
+    local clusters
+    clusters=$(inventory_edge_clusters)
+    if [[ -z "$clusters" ]]; then
+        debug "No edge clusters — skipping edge ingress"
+        return 0
+    fi
+
+    while IFS=' ' read -r cname cip; do
+        [[ -z "$cname" ]] && continue
+        local subdomain
+        subdomain=$(get_edge_subdomain "$cname")
+        local edge_domain="${subdomain}.${DOMAIN}"
+        local edge_kubeconfig="${HOME}/.kube/${cname}-config"
+
+        if [[ ! -f "$edge_kubeconfig" ]]; then
+            warn "  ${cname}: kubeconfig not found at ${edge_kubeconfig} — skipping"
+            continue
+        fi
+
+        log "  ${cname}: installing ingress stack (${edge_domain})..."
+        local SAVE_KUBECONFIG="$KUBECONFIG"
+        export KUBECONFIG="$edge_kubeconfig"
+
+        # 1. Install Traefik via Helm
+        if ! helm list -n kube-system 2>/dev/null | grep -q traefik; then
+            log "    Installing Traefik..."
+            helm repo add traefik https://traefik.github.io/charts 2>/dev/null || true
+            helm repo update traefik 2>/dev/null || true
+            helm install traefik traefik/traefik \
+                -n kube-system \
+                -f "${SCRIPT_DIR}/infrastructure/traefik/values.yaml" \
+                --wait --timeout 120s 2>&1 | tail -5
+        else
+            log "    Traefik already installed"
+        fi
+        kubectl -n kube-system wait --for=condition=available deploy/traefik --timeout=60s 2>/dev/null || true
+
+        # 2. Create placeholder TLS cert + apply Gateway
+        if ! kubectl -n kube-system get secret kube-world-tls &>/dev/null; then
+            openssl req -x509 -newkey rsa:2048 -keyout /tmp/tls-edge.key \
+                -out /tmp/tls-edge.crt -days 1 -nodes \
+                -subj "/CN=*.${edge_domain}" \
+                -addext "subjectAltName=DNS:*.${edge_domain}" 2>/dev/null
+            kubectl -n kube-system create secret tls kube-world-tls \
+                --cert=/tmp/tls-edge.crt --key=/tmp/tls-edge.key > /dev/null 2>&1
+            rm -f /tmp/tls-edge.key /tmp/tls-edge.crt
+        fi
+        kubectl apply -f "${SCRIPT_DIR}/infrastructure/gateway/gateway.yaml" 2>/dev/null || true
+
+        # 3. Install cert-manager
+        if ! kubectl get ns cert-manager &>/dev/null; then
+            log "    Installing cert-manager..."
+            helm repo add jetstack https://charts.jetstack.io 2>/dev/null || true
+            helm repo update jetstack 2>/dev/null || true
+            helm install cert-manager jetstack/cert-manager \
+                -n cert-manager --create-namespace \
+                --set crds.enabled=true \
+                --set resources.requests.cpu=50m \
+                --set resources.requests.memory=64Mi \
+                --wait --timeout 120s 2>&1 | tail -3
+        else
+            log "    cert-manager already installed"
+        fi
+
+        # 4. Create Cloudflare secret + ClusterIssuer + Certificate
+        if [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+            kubectl create secret generic cloudflare-api-token \
+                --from-literal=api-token="${CLOUDFLARE_API_TOKEN}" \
+                -n cert-manager --dry-run=client -o yaml | kubectl apply -f - 2>/dev/null
+
+            # ClusterIssuer (same as central)
+            local issuer_file="${SCRIPT_DIR}/infrastructure/cert-manager/clusterissuer.yaml"
+            if [[ -f "$issuer_file" ]]; then
+                sed "s/kubew\\.dev/${DOMAIN}/g" "$issuer_file" | kubectl apply -f - 2>/dev/null
+            fi
+
+            # Edge-specific wildcard certificate
+            local cert_template="${SCRIPT_DIR}/infrastructure/cert-manager/certificate-edge.yaml"
+            if [[ -f "$cert_template" ]]; then
+                sed "s/EDGE_SUBDOMAIN/${subdomain}/g; s/kubew\\.dev/${DOMAIN}/g" \
+                    "$cert_template" | kubectl apply -f - 2>/dev/null
+                log "    Certificate requested: *.${edge_domain}"
+            fi
+        fi
+
+        # 5. Install ExternalDNS
+        if ! helm list -n external-dns 2>/dev/null | grep -q external-dns; then
+            log "    Installing ExternalDNS..."
+            helm repo add external-dns https://kubernetes-sigs.github.io/external-dns/ 2>/dev/null || true
+            helm repo update external-dns 2>/dev/null || true
+
+            # Create Cloudflare secret for ExternalDNS
+            kubectl create namespace external-dns 2>/dev/null || true
+            if [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+                kubectl create secret generic cloudflare-api-token \
+                    --from-literal=api-token="${CLOUDFLARE_API_TOKEN}" \
+                    -n external-dns --dry-run=client -o yaml | kubectl apply -f - 2>/dev/null
+            fi
+
+            helm install external-dns external-dns/external-dns \
+                -n external-dns \
+                -f "${SCRIPT_DIR}/infrastructure/external-dns/values.yaml" \
+                --set "domainFilters[0]=${edge_domain}" \
+                --set "txtOwnerId=${cname}" \
+                --wait --timeout 120s 2>&1 | tail -3
+        else
+            log "    ExternalDNS already installed"
+        fi
+
+        # 6. Apply HTTPRoutes with edge-specific hostnames
+        # sed replaces kubew.dev → edge1.kubew.dev in hostnames
+        for gw_file in "${SCRIPT_DIR}"/apps/*/gateway.yaml; do
+            [[ ! -f "$gw_file" ]] && continue
+            local app_dir
+            app_dir=$(basename "$(dirname "$gw_file")")
+            # Only apply routes for apps targeted at this cluster type
+            # (HA and Companion go to edge/iot clusters)
+            case "$app_dir" in
+                home-assistant|companion)
+                    local app_ns="$app_dir"
+                    [[ "$app_dir" == "home-assistant" ]] && app_ns="home-assistant"
+                    kubectl create namespace "$app_ns" 2>/dev/null || true
+                    sed "s/${DOMAIN}/${edge_domain}/g" "$gw_file" | kubectl apply -f - 2>/dev/null
+                    local hostname
+                    hostname=$(grep -oP '"\K[^"]+(?=\.'"${DOMAIN//./\\.}"')' "$gw_file" || echo "$app_dir")
+                    log "    HTTPRoute: ${hostname}.${edge_domain}"
+                    ;;
+            esac
+        done
+
+        export KUBECONFIG="$SAVE_KUBECONFIG"
+        log "  ${cname}: ingress stack ready ✓"
+    done <<< "$clusters"
+
+    log "Edge ingress stacks configured ✓"
+}
+
+#===============================================================================
+# ExternalDNS on the central cluster for management services.
+# Auto-creates Cloudflare records for rancher.kubew.dev, auth.kubew.dev, etc.
+#===============================================================================
+install_central_external_dns() {
+    log "Installing ExternalDNS on central cluster..."
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "[DRY RUN] Would install ExternalDNS on central"
+        return 0
+    fi
+
+    if helm list -n external-dns 2>/dev/null | grep -q external-dns; then
+        log "ExternalDNS already installed on central"
+        return 0
+    fi
+
+    helm repo add external-dns https://kubernetes-sigs.github.io/external-dns/ 2>/dev/null || true
+    helm repo update external-dns 2>/dev/null || true
+
+    kubectl create namespace external-dns 2>/dev/null || true
+    if [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+        kubectl create secret generic cloudflare-api-token \
+            --from-literal=api-token="${CLOUDFLARE_API_TOKEN}" \
+            -n external-dns --dry-run=client -o yaml | kubectl apply -f - 2>/dev/null
+    fi
+
+    # Central manages the root domain but excludes edge subdomains
+    local exclude_args=""
+    local clusters
+    clusters=$(inventory_edge_clusters)
+    if [[ -n "$clusters" ]]; then
+        while IFS=' ' read -r cname cip; do
+            [[ -z "$cname" ]] && continue
+            local sub
+            sub=$(get_edge_subdomain "$cname")
+            [[ -n "$sub" ]] && exclude_args="${exclude_args} --set excludeDomains[0]=${sub}.${DOMAIN}"
+        done <<< "$clusters"
+    fi
+
+    helm install external-dns external-dns/external-dns \
+        -n external-dns \
+        -f "${SCRIPT_DIR}/infrastructure/external-dns/values.yaml" \
+        --set "domainFilters[0]=${DOMAIN}" \
+        --set "txtOwnerId=pi-central" \
+        ${exclude_args} \
+        --wait --timeout 120s 2>&1 | tail -3
+
+    log "ExternalDNS installed on central ✓"
 }
 
 # NOTE: fetch_central_tailscale_ip has been removed as of the CNAME/MagicDNS
@@ -2160,86 +2434,21 @@ apply_rancher_httproute() {
 }
 
 setup_httproutes() {
-    log "Applying remaining HTTPRoutes..."
+    log "Applying central cluster HTTPRoutes..."
 
     if [[ "$DRY_RUN" == "true" ]]; then
-        log "[DRY RUN] Would apply HTTPRoutes"
+        log "[DRY RUN] Would apply central HTTPRoutes"
         return 0
     fi
 
-    # GitLab HTTPRoute (Service/Endpoints are applied by install_gitlab_native
-    # earlier in main() with the correct templated Pi IP). The Rancher
-    # HTTPRoute is applied by apply_rancher_httproute immediately after
-    # install_rancher, before configure_rancher_api needs it.
+    # Central cluster routes only — management services that live on pi-central.
+    # GitLab HTTPRoute (Service/Endpoints applied by install_gitlab_native).
+    # Rancher HTTPRoute applied by apply_rancher_httproute earlier.
+    # Zitadel HTTPRoute applied by install_zitadel.
+    #
+    # Edge app routes (HA, Companion) are applied by setup_edge_ingress_stack
+    # directly to each edge cluster with cluster-specific hostnames.
     _apply_gateway_file "${SCRIPT_DIR}/apps/gitlab/gateway.yaml" "GitLab"
-
-    # HA and Companion run on the EDGE Pi (via Karmada), but the Gateway/Traefik
-    # lives on the CENTRAL Pi. Create proxy Services + Endpoints on the central
-    # cluster pointing to the edge Pi's hostNetwork IP so the HTTPRoutes work.
-    local edge_ip="${PI_EDGE_IP:-}"
-    if [[ -z "$edge_ip" ]]; then
-        edge_ip=$(grep 'pi-edge-1' "${SCRIPT_DIR}/pi-setup/inventory.ini" 2>/dev/null \
-            | grep -oP 'ansible_host=\K[0-9.]+' || echo "")
-    fi
-    if [[ -z "$edge_ip" ]]; then
-        warn "PI_EDGE_IP not set and not found in inventory — skipping HA/Companion HTTPRoutes"
-        return 0
-    fi
-    log "Edge Pi IP for proxy services: ${edge_ip}"
-
-    # Home Assistant proxy (port 8123)
-    kubectl create namespace home-assistant 2>/dev/null || true
-    kubectl -n home-assistant apply -f - <<EOF
-apiVersion: v1
-kind: Endpoints
-metadata:
-  name: home-assistant
-subsets:
-  - addresses:
-      - ip: ${edge_ip}
-    ports:
-      - port: 8123
-        name: http
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: home-assistant
-spec:
-  type: ClusterIP
-  ports:
-    - port: 8123
-      targetPort: 8123
-      name: http
-EOF
-    _apply_gateway_file "${SCRIPT_DIR}/apps/home-assistant/gateway.yaml" "Home Assistant"
-
-    # Companion proxy (port 8000)
-    kubectl create namespace companion 2>/dev/null || true
-    kubectl -n companion apply -f - <<EOF
-apiVersion: v1
-kind: Endpoints
-metadata:
-  name: companion
-subsets:
-  - addresses:
-      - ip: ${edge_ip}
-    ports:
-      - port: 8000
-        name: http
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: companion
-spec:
-  type: ClusterIP
-  ports:
-    - port: 8000
-      targetPort: 8000
-      name: http
-EOF
-    _apply_gateway_file "${SCRIPT_DIR}/apps/companion/gateway.yaml" "Companion"
 
     kubectl get httproute -A 2>/dev/null || true
 }
@@ -3038,13 +3247,15 @@ main() {
         # self-hosted GitLab, so the repo and credentials must exist first.
         install_gitlab_native        # Installs CE, pushes repo, creates gitlab-credentials secret
         setup_flux || { error "Flux setup failed — cannot continue"; exit 1; }
+        install_central_external_dns # Auto-manage DNS for central services
         # Import edge clusters LAST — by now the LE cert has had ~20 min
         # to issue (Zitadel + GitLab + Flux all ran while cert-manager
         # was doing the DNS-01 challenge in the background). This avoids
         # the x509 error where cattle-agent gets Traefik's default cert.
         wait_for_cert_ready          # Verify cert is Ready before importing
         rancher_import_edge_clusters # Edge cattle-agent should get valid TLS
-        setup_httproutes             # Best-effort: applies available routes
+        setup_edge_ingress_stack     # Traefik+Gateway+cert-manager+ExternalDNS on each edge
+        setup_httproutes             # Central-only routes (GitLab, etc.)
         deploy_tailscale_keys        # Optional: warns if TAILSCALE_API_TOKEN missing
     else
         # Legacy Fleet stack: Rancher -> Fleet -> Apps

@@ -1,0 +1,22 @@
+# Wildcard TLS certificate for edge clusters
+#
+# Template — bootstrap.sh replaces EDGE_SUBDOMAIN with the cluster's
+# subdomain (e.g., edge1) at apply time:
+#   sed "s/EDGE_SUBDOMAIN/edge1/g" | kubectl apply -f -
+#
+# Each edge cluster gets its own wildcard cert for *.edgeN.kubew.dev.
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: edge-wildcard
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/part-of: kube-world
+spec:
+  secretName: kube-world-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - "*.EDGE_SUBDOMAIN.kubew.dev"

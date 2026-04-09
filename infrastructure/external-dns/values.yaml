@@ -1,0 +1,49 @@
+# ExternalDNS Helm values for Cloudflare + Gateway API
+# Deployed per-cluster with cluster-specific overrides via --set
+#
+# Per-cluster overrides (set at install time):
+#   --set domainFilters[0]=edge1.kubew.dev
+#   --set txtOwnerId=pi-edge-1
+---
+provider:
+  name: cloudflare
+
+sources:
+  - gateway-httproute
+
+# Overridden per cluster — controls which DNS zone this instance manages
+domainFilters: []
+
+# Overridden per cluster — prevents clusters from fighting over records
+txtOwnerId: ""
+
+# sync = create + delete records when HTTPRoutes are added/removed
+policy: sync
+
+# How often to scan for changes
+interval: 1m
+
+# TXT record registry for ownership tracking
+registry: txt
+txtPrefix: "_externaldns."
+
+# Cloudflare API token from K8s secret
+env:
+  - name: CF_API_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: cloudflare-api-token
+        key: api-token
+
+# Pi-appropriate resources
+resources:
+  requests:
+    cpu: 25m
+    memory: 64Mi
+  limits:
+    cpu: 100m
+    memory: 128Mi
+
+# Log level
+logLevel: info
+logFormat: text

@@ -71,14 +71,21 @@ karmada:
     data_dir: "~/.karmada"
 
   # Cluster registration
+  # Each edge cluster gets a subdomain: *.{subdomain}.kubew.dev
+  # A wildcard CNAME is created in Cloudflare pointing to the cluster's
+  # Tailscale MagicDNS name. Apps deployed to the cluster use hostnames
+  # like ha.edge1.kubew.dev. ExternalDNS auto-creates DNS records from
+  # HTTPRoute resources.
   clusters:
-    - name: "kube-world-kind"
-      type: management
+    - name: "pi-central"
+      type: central
+      subdomain: ""
       labels:
         topology.kubernetes.io/zone: local
-        workload-type: development
-    - name: "pi-cluster"
+        workload-type: management
+    - name: "pi-edge-1"
       type: edge
+      subdomain: "edge1"
       labels:
         topology.kubernetes.io/zone: edge
         hardware: raspberry-pi

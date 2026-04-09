@@ -2229,6 +2229,7 @@ install_zitadel() {
             --set 'service.annotations.traefik\.ingress\.kubernetes\.io/service\.serversscheme=h2c' \
             --set zitadel.secretConfig.Database.Postgres.User.Password=zitadel-pg-password \
             --set zitadel.secretConfig.Database.Postgres.Admin.Password=zitadel-pg-admin \
+            --set login.service.appProtocol="" \
             --wait --timeout 10m; then
             error "Zitadel install failed"
             return 1
@@ -2345,25 +2346,35 @@ configure_oidc_rancher() {
     # (user must login via IdP to prove it works). We can't automate
     # that step. Instead, we set up the CRD so the user just needs to
     # complete the setup in the Rancher UI with one click.
+    # Pre-configure the Generic OIDC auth config with enabled=false.
+    # Fields are pre-filled so the user only needs to paste the client
+    # secret (Rancher never displays stored secrets) and click Enable.
     kubectl patch authconfig genericoidc --type=merge -p "{
-        \"enabled\": true,
+        \"enabled\": false,
         \"clientId\": \"${client_id}\",
         \"clientSecret\": \"${client_secret}\",
         \"issuer\": \"${issuer_url}\",
-        \"rancherUrl\": \"https://rancher.${DOMAIN}\",
+        \"rancherUrl\": \"https://rancher.${DOMAIN}/verify-auth\",
         \"scope\": \"openid profile email\",
-        \"authEndpoint\": \"${issuer_url}/oauth/v2/authorize\"
+        \"authEndpoint\": \"${issuer_url}/oauth/v2/authorize\",
+        \"accessMode\": \"unrestricted\"
     }" > /dev/null 2>&1 || warn "  kubectl patch failed"
 
     _rancher_pf_stop
 
     log "Rancher OIDC pre-configured ✓"
     log ""
-    log "  To complete Rancher SSO setup:"
-    log "  1. Open https://rancher.${DOMAIN} → Users & Authentication → Auth Provider"
-    log "  2. Select 'Generic OIDC' → credentials are pre-filled"
-    log "  3. Click 'Enable' → login via Zitadel when redirected"
-    log "  4. Done — SSO login active for all users"
+    log "  ┌─────────────────────────────────────────────────────┐"
+    log "  │  ONE-TIME STEP: Complete Rancher SSO                │"
+    log "  │                                                     │"
+    log "  │  1. Login locally at https://rancher.${DOMAIN}      │"
+    log "  │  2. ☰ → Users & Authentication → Auth Provider      │"
+    log "  │  3. Select 'Generic OIDC'                           │"
+    log "  │  4. Paste Client Secret:                            │"
+    log "  │     ${client_secret}                                │"
+    log "  │  5. Switch Endpoints from 'Generate' to 'Specify'   │"
+    log "  │  6. Click 'Enable' → login via Zitadel              │"
+    log "  └─────────────────────────────────────────────────────┘"
     log ""
 }
 

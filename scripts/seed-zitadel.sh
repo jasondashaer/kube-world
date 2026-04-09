@@ -221,7 +221,7 @@ create_admin_user() {
                 \"email\": \"${ADMIN_EMAIL}\",
                 \"isEmailVerified\": true
             },
-            \"password\": \"${ADMIN_PASSWORD}!\",
+            \"password\": \"${ADMIN_PASSWORD}!Kw1\",
             \"passwordChangeRequired\": false
         }")
         ADMIN_USER_ID=$(echo "$resp" | jq -r '.userId // empty' 2>/dev/null || echo "")

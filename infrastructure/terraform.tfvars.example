@@ -1,0 +1,30 @@
+# kube-world Terraform Variables
+#
+# Copy to terraform.tfvars and fill in values.
+# Sensitive values can also be set via environment variables:
+#   export TF_VAR_cloudflare_api_token="..."
+#   export TF_VAR_tailscale_api_key="..."
+
+# Cloudflare
+cloudflare_api_token = ""  # Or set TF_VAR_cloudflare_api_token
+domain               = "kubew.dev"
+
+# Tailscale
+tailscale_api_key  = ""  # Or set TF_VAR_tailscale_api_key
+tailnet            = ""  # Your tailnet name (e.g., user@github)
+tailnet_dns_suffix = "tailab53c1.ts.net"
+
+# Central node
+central_hostname = "pi-central"
+
+# Edge clusters — add entries as you provision new Pis
+edge_clusters = {
+  pi-edge-1 = {
+    subdomain          = "edge1"
+    tailscale_hostname = "pi-edge-1"
+  }
+  # pi-edge-2 = {
+  #   subdomain          = "edge2"
+  #   tailscale_hostname = "pi-edge-2"
+  # }
+}

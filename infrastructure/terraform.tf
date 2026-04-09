@@ -1,94 +1,43 @@
 # Terraform Configuration for kube-world
-# Supports AWS, GCP, Azure, and local (MinIO) backends
+#
+# Manages external resources that live OUTSIDE Kubernetes:
+#   - Cloudflare: DNS zone, wildcard CNAMEs per cluster
+#   - Tailscale: Auth keys for new node provisioning
+#   - Future: Cloud provider infra (VPCs, EKS/GKE clusters)
+#
+# Everything INSIDE Kubernetes is managed by Flux (not Terraform).
+#
+# State backend: GitLab-managed Terraform state
+#   terraform init \
+#     -backend-config="address=http://gitlab.kubew.dev/api/v4/projects/1/terraform/state/kube-world" \
+#     -backend-config="lock_address=http://gitlab.kubew.dev/api/v4/projects/1/terraform/state/kube-world/lock" \
+#     -backend-config="unlock_address=http://gitlab.kubew.dev/api/v4/projects/1/terraform/state/kube-world/lock" \
+#     -backend-config="username=root" \
+#     -backend-config="password=$GITLAB_TOKEN"
 
 terraform {
   required_version = ">= 1.6.0"
-  
-  required_providers {
-    # AWS Provider
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
-    }
-    
-    # Google Cloud Provider
-    google = {
-      source  = "hashicorp/google"
-      version = "~> 5.0"
-    }
-    
-    # Azure Provider
-    azurerm = {
-      source  = "hashicorp/azurerm"
-      version = "~> 3.0"
-    }
-    
-    # Kubernetes Provider (for in-cluster resources)
-    kubernetes = {
-      source  = "hashicorp/kubernetes"
-      version = "~> 2.25"
-    }
-    
-    # Helm Provider
-    helm = {
-      source  = "hashicorp/helm"
-      version = "~> 2.12"
-    }
-    
-    # Random (for unique naming)
-    random = {
-      source  = "hashicorp/random"
-      version = "~> 3.6"
-    }
 
-    # Cloudflare (DNS, Tunnels)
+  required_providers {
     cloudflare = {
       source  = "cloudflare/cloudflare"
       version = "~> 4.0"
     }
-  }
-  
-  # Backend configuration - override in environments
-  # backend "s3" {}      # For AWS
-  # backend "gcs" {}     # For GCP
-  # backend "azurerm" {} # For Azure
-}
-
-# Configure providers based on selected cloud
-provider "aws" {
-  region = var.cloud_provider == "aws" ? var.aws_region : "us-east-1"
-  
-  default_tags {
-    tags = {
-      Project     = "kube-world"
-      Environment = var.environment
-      ManagedBy   = "terraform"
+    tailscale = {
+      source  = "tailscale/tailscale"
+      version = "~> 0.17"
     }
   }
-  
-  # Skip if not using AWS
-  skip_credentials_validation = var.cloud_provider != "aws"
-  skip_metadata_api_check     = var.cloud_provider != "aws"
-  skip_requesting_account_id  = var.cloud_provider != "aws"
+
+  # GitLab-managed state — configure via -backend-config at init time
+  backend "http" {}
 }
 
-provider "google" {
-  project = var.cloud_provider == "gcp" ? var.gcp_project : null
-  region  = var.cloud_provider == "gcp" ? var.gcp_region : "us-central1"
+provider "cloudflare" {
+  api_token = var.cloudflare_api_token
 }
 
-provider "azurerm" {
-  features {}
-  skip_provider_registration = var.cloud_provider != "azure"
-}
-
-provider "kubernetes" {
-  # Configuration will be provided by cluster setup
-  config_path = var.kubeconfig_path
-}
-
-provider "helm" {
-  kubernetes {
-    config_path = var.kubeconfig_path
-  }
+provider "tailscale" {
+  api_key = var.tailscale_api_key
+  tailnet = var.tailnet
 }

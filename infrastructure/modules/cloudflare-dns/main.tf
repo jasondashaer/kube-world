@@ -1,13 +1,13 @@
 # Cloudflare DNS Module for kube-world
 #
-# Manages the kubew.dev domain zone and DNS records on Cloudflare.
-# Domain registration is done via Cloudflare dashboard (not Terraform).
-# This module manages the zone and records after registration.
+# Manages the kubew.dev zone's DNS records on Cloudflare.
+# Uses CNAME records pointing to Tailscale MagicDNS names so records
+# never need updating when IPs change.
 #
-# Split DNS strategy:
-#   - Cloudflare manages public kubew.dev zone
-#   - Tailscale MagicDNS resolves *.kubew.dev to Tailscale IPs within tailnet
-#   - Cloudflare Tunnels expose specific services publicly when needed
+# Architecture:
+#   *.kubew.dev         CNAME → pi-central.<tailnet>.ts.net  (central services)
+#   *.edge1.kubew.dev   CNAME → pi-edge-1.<tailnet>.ts.net   (edge1 apps)
+#   *.edge2.kubew.dev   CNAME → pi-edge-2.<tailnet>.ts.net   (edge2 apps)
 
 terraform {
   required_providers {
@@ -19,7 +19,7 @@ terraform {
 }
 
 variable "cloudflare_api_token" {
-  description = "Cloudflare API token with Zone:Edit permissions"
+  description = "Cloudflare API token with Zone:DNS:Edit permissions"
   type        = string
   sensitive   = true
 }
@@ -30,110 +30,74 @@ variable "domain" {
   default     = "kubew.dev"
 }
 
-variable "cloudflare_account_id" {
-  description = "Cloudflare account ID"
+variable "tailnet_dns_suffix" {
+  description = "Tailscale tailnet DNS suffix (e.g., tailab53c1.ts.net)"
   type        = string
 }
 
-variable "tailscale_pi_ip" {
-  description = "Tailscale IP of the central Pi node"
+variable "central_hostname" {
+  description = "Tailscale hostname of the central management node"
   type        = string
-  default     = "100.124.136.58"
+  default     = "pi-central"
 }
 
-variable "tailscale_mac_ip" {
-  description = "Tailscale IP of the Mac workstation"
-  type        = string
-  default     = "100.92.128.19"
-}
-
-variable "services" {
-  description = "Map of service subdomains to target Tailscale IPs"
+variable "edge_clusters" {
+  description = "Map of edge cluster name → configuration"
   type = map(object({
-    target      = string
-    description = string
-    proxied     = bool
+    subdomain          = string
+    tailscale_hostname = string
   }))
-  default = {
-    gitlab = {
-      target      = "pi"
-      description = "GitLab CE (self-hosted on central Pi)"
-      proxied     = false
-    }
-    rancher = {
-      target      = "pi"
-      description = "Rancher management UI"
-      proxied     = false
-    }
-    auth = {
-      target      = "pi"
-      description = "Zitadel identity provider"
-      proxied     = false
-    }
-    ntfy = {
-      target      = "pi"
-      description = "ntfy push notification server"
-      proxied     = false
-    }
-    ha = {
-      target      = "pi"
-      description = "Home Assistant (future, on edge Pi)"
-      proxied     = false
-    }
-  }
+  default = {}
 }
 
 #===============================================================================
-# Zone (assumes domain is already registered on Cloudflare)
+# Zone lookup (assumes domain is already registered on Cloudflare)
 #===============================================================================
 data "cloudflare_zone" "main" {
   name = var.domain
 }
 
 #===============================================================================
-# DNS Records — Tailscale split DNS
-# These records resolve to Tailscale IPs, only accessible from the tailnet.
-# For public access, use Cloudflare Tunnels instead of A records.
+# Central cluster DNS — two CNAMEs cover all management services
 #===============================================================================
-locals {
-  target_ips = {
-    pi  = var.tailscale_pi_ip
-    mac = var.tailscale_mac_ip
-  }
-}
 
-resource "cloudflare_record" "services" {
-  for_each = var.services
-
-  zone_id = data.cloudflare_zone.main.id
-  name    = each.key
-  content = local.target_ips[each.value.target]
-  type    = "A"
-  ttl     = 300
-  proxied = each.value.proxied
-  comment = each.value.description
-}
-
-# Wildcard record for any undefined subdomains → central Pi
-resource "cloudflare_record" "wildcard" {
-  zone_id = data.cloudflare_zone.main.id
-  name    = "*"
-  content = var.tailscale_pi_ip
-  type    = "A"
-  ttl     = 300
-  proxied = false
-  comment = "Wildcard fallback to central Pi via Tailscale"
-}
-
-# Root domain → central Pi
+# Root domain → central Pi via Tailscale MagicDNS
 resource "cloudflare_record" "root" {
   zone_id = data.cloudflare_zone.main.id
   name    = "@"
-  content = var.tailscale_pi_ip
-  type    = "A"
-  ttl     = 300
+  content = "${var.central_hostname}.${var.tailnet_dns_suffix}"
+  type    = "CNAME"
+  ttl     = 60
   proxied = false
-  comment = "Root domain to central Pi via Tailscale"
+  comment = "Root domain → central Pi (Tailscale MagicDNS)"
+}
+
+# Wildcard *.kubew.dev → central Pi (catches rancher, auth, gitlab, etc.)
+resource "cloudflare_record" "wildcard" {
+  zone_id = data.cloudflare_zone.main.id
+  name    = "*"
+  content = "${var.central_hostname}.${var.tailnet_dns_suffix}"
+  type    = "CNAME"
+  ttl     = 60
+  proxied = false
+  comment = "Wildcard → central Pi for management services"
+}
+
+#===============================================================================
+# Per-edge-cluster wildcard DNS
+# DNS wildcards match one label only, so *.kubew.dev does NOT cover
+# *.edge1.kubew.dev. Each edge cluster gets its own wildcard CNAME.
+#===============================================================================
+resource "cloudflare_record" "edge_wildcard" {
+  for_each = var.edge_clusters
+
+  zone_id = data.cloudflare_zone.main.id
+  name    = "*.${each.value.subdomain}"
+  content = "${each.value.tailscale_hostname}.${var.tailnet_dns_suffix}"
+  type    = "CNAME"
+  ttl     = 60
+  proxied = false
+  comment = "Edge cluster ${each.key}: *.${each.value.subdomain}.${var.domain}"
 }
 
 #===============================================================================
@@ -149,11 +113,16 @@ output "domain" {
   value       = var.domain
 }
 
-output "service_records" {
-  description = "Created DNS records"
+output "central_cname_target" {
+  description = "Central Pi CNAME target"
+  value       = "${var.central_hostname}.${var.tailnet_dns_suffix}"
+}
+
+output "edge_cname_targets" {
+  description = "Edge cluster CNAME targets"
   value = {
-    for name, record in cloudflare_record.services :
-    name => "${name}.${var.domain} → ${record.content}"
+    for name, config in var.edge_clusters :
+    name => "*.${config.subdomain}.${var.domain} → ${config.tailscale_hostname}.${var.tailnet_dns_suffix}"
   }
 }
 

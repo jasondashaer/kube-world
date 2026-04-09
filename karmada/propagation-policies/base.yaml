@@ -16,6 +16,9 @@ spec:
     - apiVersion: v1
       kind: Namespace
       name: home-assistant
+    - apiVersion: v1
+      kind: Namespace
+      name: companion
 
   placement:
     clusterAffinity:

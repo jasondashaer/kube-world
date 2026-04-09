@@ -2552,6 +2552,51 @@ install_zitadel() {
 #===============================================================================
 # Configure Rancher OIDC with Zitadel
 #===============================================================================
+#===============================================================================
+# Patch HA ConfigMap with dynamic Zitadel OIDC client ID.
+# The ConfigMap template has HA_OIDC_CLIENT_ID and DOMAIN placeholders.
+# After Zitadel seeds, we read the actual client_id from the state file
+# and patch the ConfigMap in the Karmada API so it propagates to edge.
+#===============================================================================
+patch_ha_oidc_client_id() {
+    local state_file="/tmp/zitadel-seed.state"
+    if [[ ! -f "$state_file" ]]; then
+        debug "No Zitadel seed state — skipping HA OIDC patch"
+        return 0
+    fi
+
+    local ha_client_id
+    ha_client_id=$(jq -r '.homeassistant_client_id // empty' "$state_file" 2>/dev/null || echo "")
+    if [[ -z "$ha_client_id" ]]; then
+        debug "No HA OIDC client ID in seed state — skipping"
+        return 0
+    fi
+
+    local karmada_config="${HOME}/.karmada/karmada-apiserver.config"
+    if [[ ! -f "$karmada_config" ]]; then
+        debug "Karmada kubeconfig not found — skipping HA OIDC patch"
+        return 0
+    fi
+
+    log "Patching HA ConfigMap with Zitadel client ID: ${ha_client_id}"
+
+    # Get the current ConfigMap from Karmada API and patch it
+    local current_yaml
+    current_yaml=$(kubectl --kubeconfig="$karmada_config" -n home-assistant \
+        get configmap home-assistant-config -o yaml 2>/dev/null || echo "")
+
+    if [[ -z "$current_yaml" ]]; then
+        debug "HA ConfigMap not yet in Karmada — will be patched on next Flux reconcile"
+        return 0
+    fi
+
+    # Patch the placeholders
+    echo "$current_yaml" | \
+        sed "s/HA_OIDC_CLIENT_ID/${ha_client_id}/g; s/auth\.DOMAIN/auth.${DOMAIN}/g" | \
+        kubectl --kubeconfig="$karmada_config" apply -f - 2>/dev/null
+    log "HA ConfigMap patched with OIDC client ID ✓"
+}
+
 configure_oidc_rancher() {
     log "Configuring Rancher OIDC with Zitadel..."
 
@@ -3197,6 +3242,7 @@ main() {
         # Identity provider BEFORE GitLab so GitLab can boot with OIDC
         # config from the start (OIDC client ID/secret baked into gitlab.rb)
         install_zitadel              # Helm install + seed identity config
+        patch_ha_oidc_client_id      # Inject dynamic Zitadel client ID into HA config
         configure_oidc_rancher       # Best-effort: Rancher OIDC via port-forward
         # GitLab must come BEFORE Flux — Flux's GitRepository points at the
         # self-hosted GitLab, so the repo and credentials must exist first.

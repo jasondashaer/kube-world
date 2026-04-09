@@ -32,17 +32,18 @@ spec:
             - --provider=oidc
             - --oidc-issuer-url=https://auth.kubew.dev
             - --redirect-url=https://ha.edge1.kubew.dev/oauth2/callback
-            - --upstream=static://202
+            - --upstream=http://home-assistant.home-assistant.svc.cluster.local:8123
             - --http-address=0.0.0.0:4180
             - --email-domain=*
             - --cookie-secure=true
             - --cookie-domain=.kubew.dev
-            - --set-xauthrequest=true
-            - --set-authorization-header=true
+            - --pass-host-header=true
             - --pass-user-headers=true
+            - --set-xauthrequest=true
             - --scope=openid profile email
             - --skip-provider-button=true
             - --code-challenge-method=S256
+            - --reverse-proxy=true
           env:
             - name: OAUTH2_PROXY_CLIENT_ID
               valueFrom:

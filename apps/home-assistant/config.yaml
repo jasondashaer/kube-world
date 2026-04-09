@@ -30,11 +30,8 @@ data:
       themes: !include_dir_merge_named themes
 
     # SSO via native OIDC (hass-oidc-auth custom component)
-    # Users see a "Login with Zitadel" button on the HA login page.
+    # Configured through HA UI: Settings → Integrations → Add → OpenID Connect
     # Requires custom_components/auth_oidc/ installed on the PVC.
-    auth_oidc:
-      client_id: "367875862353149992"
-      discovery_url: "https://auth.kubew.dev/.well-known/openid-configuration"
 
     # Include files for automations, scripts, scenes
     automation: !include automations.yaml

@@ -99,8 +99,24 @@ write_files:
         git clone https://github.com/jasondashaer/kube-world.git /opt/kube-world/repo
       fi
 
-      echo "=== First-boot setup complete at $(date) ==="
-      echo "Run Ansible playbook from management machine to complete K3s installation."
+      # Source provisioning environment (auth keys, node role, etc.)
+      if [ -f /etc/kube-world/env ]; then
+        . /etc/kube-world/env
+      fi
+
+      # If TAILSCALE_AUTH_KEY is available, run self-provisioning
+      # (installs Tailscale + K3s without needing Ansible from a remote machine)
+      if [ -n "${TAILSCALE_AUTH_KEY:-}" ] && [ -f /opt/kube-world/repo/pi-setup/scripts/self-provision.sh ]; then
+        echo "=== Running self-provisioning ==="
+        NODE_NAME="${NODE_NAME:-$(hostname)}" \
+        NODE_ROLE="${NODE_ROLE:-edge}" \
+        TAILSCALE_AUTH_KEY="$TAILSCALE_AUTH_KEY" \
+        /opt/kube-world/repo/pi-setup/scripts/self-provision.sh
+      else
+        echo "=== First-boot setup complete at $(date) ==="
+        echo "Run Ansible playbook from management machine to complete K3s installation."
+        echo "Or set TAILSCALE_AUTH_KEY in /etc/kube-world/env for self-provisioning."
+      fi
 
 # Run commands
 runcmd:

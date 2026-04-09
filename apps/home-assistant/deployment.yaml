@@ -75,6 +75,38 @@ spec:
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
 
+      initContainers:
+        # Install hass-oidc-auth custom component for Zitadel SSO.
+        # Clones the component into the PVC, then patches injection.js
+        # with our simplified version from the ConfigMap.
+        - name: install-oidc-component
+          image: docker.io/library/alpine:3.21
+          command:
+            - sh
+            - -c
+            - |
+              apk add --no-cache git >/dev/null 2>&1
+              COMP_DIR="/config/custom_components/auth_oidc"
+              if [ ! -f "$COMP_DIR/manifest.json" ]; then
+                echo "Installing hass-oidc-auth..."
+                cd /tmp
+                git clone --depth 1 https://github.com/christiaangoossens/hass-oidc-auth.git
+                mkdir -p /config/custom_components
+                cp -r hass-oidc-auth/custom_components/auth_oidc "$COMP_DIR"
+                rm -rf hass-oidc-auth
+              else
+                echo "hass-oidc-auth already installed"
+              fi
+              echo "Patching injection.js..."
+              cp /config-patches/injection.js "$COMP_DIR/static/injection.js"
+              echo "Done"
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: config-yaml
+              mountPath: /config-patches/injection.js
+              subPath: injection.js
+
       containers:
         - name: home-assistant
           image: ghcr.io/home-assistant/home-assistant:2025.4.2

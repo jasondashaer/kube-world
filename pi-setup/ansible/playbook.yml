@@ -675,6 +675,40 @@
       delay: 10
       until: helm_install is success or helm_install is skipped
 
+    - name: Look up central Pi Tailscale IP for CoreDNS
+      command: tailscale ip -4
+      register: central_ts_ip
+      failed_when: false
+      changed_when: false
+
+    - name: Add domain entries to central CoreDNS NodeHosts
+      shell: |
+        set -euo pipefail
+        CENTRAL_TS_IP="{{ central_ts_ip.stdout | default('') | trim }}"
+        DOMAIN="{{ domain | default('kubew.dev') }}"
+        if [ -z "$CENTRAL_TS_IP" ]; then
+          echo "No Tailscale IP — skipping"
+          exit 0
+        fi
+        NEW_LINE="${CENTRAL_TS_IP} rancher.${DOMAIN} gitlab.${DOMAIN} auth.${DOMAIN}"
+        HOSTS=$(kubectl -n kube-system get configmap coredns -o jsonpath='{.data.NodeHosts}')
+        if echo "$HOSTS" | grep -q "${CENTRAL_TS_IP}.*${DOMAIN}"; then
+          echo "CoreDNS entries already correct"
+          exit 0
+        fi
+        CLEANED=$(echo "$HOSTS" | grep -v "$DOMAIN" || true)
+        kubectl -n kube-system get configmap coredns -o json | \
+          jq --arg hosts "$CLEANED" --arg entry "$NEW_LINE" \
+            '.data.NodeHosts = ($hosts | rtrimstr("\n") + "\n" + $entry + "\n")' | \
+          kubectl apply -f -
+        kubectl -n kube-system rollout restart deploy/coredns
+        echo "CoreDNS updated with domain entries"
+      args:
+        executable: /bin/bash
+      when: central_ts_ip.rc == 0 and central_ts_ip.stdout | trim | length > 0
+      register: central_coredns
+      changed_when: "'updated' in (central_coredns.stdout | default(''))"
+
     - name: Create namespaces
       shell: kubectl create namespace {{ item }} --dry-run=client -o yaml | kubectl apply -f -
       loop:

@@ -2340,28 +2340,31 @@ configure_oidc_rancher() {
         return 0
     fi
 
-    # Enable OIDC auth provider
-    curl -sk -X POST \
-        -H "Authorization: Bearer ${session_token}" \
-        -H "Content-Type: application/json" \
-        -d "{
-            \"clientId\": \"${client_id}\",
-            \"clientSecret\": \"${client_secret}\",
-            \"issuer\": \"${issuer_url}\",
-            \"rancherUrl\": \"https://rancher.${DOMAIN}\",
-            \"scope\": \"openid profile email groups\",
-            \"groupSearchEnabled\": true,
-            \"enabled\": true
-        }" \
-        "${RANCHER_PF_URL}/v3/oidcConfigs/oidc?action=testAndEnable" > /dev/null 2>&1
-
-    # Note: testAndEnable may fail if Zitadel isn't reachable from Rancher pod yet
-    # (Traefik routing might not be set up for auth.kubew.dev internally).
-    # This is best-effort — user can complete via Rancher UI.
-    log "  Rancher OIDC configuration applied (best-effort)"
+    # Pre-configure the Generic OIDC auth config via kubectl. Rancher's
+    # API requires a browser-based testAndApply flow to fully enable OIDC
+    # (user must login via IdP to prove it works). We can't automate
+    # that step. Instead, we set up the CRD so the user just needs to
+    # complete the setup in the Rancher UI with one click.
+    kubectl patch authconfig genericoidc --type=merge -p "{
+        \"enabled\": true,
+        \"clientId\": \"${client_id}\",
+        \"clientSecret\": \"${client_secret}\",
+        \"issuer\": \"${issuer_url}\",
+        \"rancherUrl\": \"https://rancher.${DOMAIN}\",
+        \"scope\": \"openid profile email\",
+        \"authEndpoint\": \"${issuer_url}/oauth/v2/authorize\"
+    }" > /dev/null 2>&1 || warn "  kubectl patch failed"
 
     _rancher_pf_stop
-    log "Rancher OIDC configured ✓"
+
+    log "Rancher OIDC pre-configured ✓"
+    log ""
+    log "  To complete Rancher SSO setup:"
+    log "  1. Open https://rancher.${DOMAIN} → Users & Authentication → Auth Provider"
+    log "  2. Select 'Generic OIDC' → credentials are pre-filled"
+    log "  3. Click 'Enable' → login via Zitadel when redirected"
+    log "  4. Done — SSO login active for all users"
+    log ""
 }
 
 #===============================================================================

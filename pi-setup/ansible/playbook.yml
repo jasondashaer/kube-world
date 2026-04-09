@@ -335,7 +335,7 @@
       lineinfile:
         path: /etc/hosts
         regexp: '.*{{ domain | default("kubew.dev") }}'
-        line: "{{ central_ts_ip_lookup.stdout | trim }} rancher.{{ domain | default('kubew.dev') }} gitlab.{{ domain | default('kubew.dev') }}"
+        line: "{{ central_ts_ip_lookup.stdout | trim }} rancher.{{ domain | default('kubew.dev') }} gitlab.{{ domain | default('kubew.dev') }} auth.{{ domain | default('kubew.dev') }}"
         state: present
       when:
         - central_ts_ip_lookup.stdout | trim | length > 0
@@ -608,7 +608,7 @@
           echo "Could not resolve pi-central via Tailscale"
           exit 0
         fi
-        NEW_LINE="${CENTRAL_TS_IP} rancher.${DOMAIN} gitlab.${DOMAIN}"
+        NEW_LINE="${CENTRAL_TS_IP} rancher.${DOMAIN} gitlab.${DOMAIN} auth.${DOMAIN}"
         HOSTS=$(kubectl -n kube-system get configmap coredns -o jsonpath='{.data.NodeHosts}')
         # Check if domain entries exist WITH the correct IP. If the IP
         # changed (Tailscale reassignment on re-auth), we must replace

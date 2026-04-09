@@ -29,10 +29,12 @@ data:
     frontend:
       themes: !include_dir_merge_named themes
 
-    # SSO via reverse proxy (oauth2-proxy sets X-Forwarded-User header)
-    # Requires hass-auth-header custom component installed in /config
-    # auth_header:
-    #   username_header: X-Forwarded-User
+    # SSO via native OIDC (hass-oidc-auth custom component)
+    # Users see a "Login with Zitadel" button on the HA login page.
+    # Requires custom_components/auth_oidc/ installed on the PVC.
+    auth_oidc:
+      client_id: "367875862353149992"
+      discovery_url: "https://auth.kubew.dev/.well-known/openid-configuration"
 
     # Include files for automations, scripts, scenes
     automation: !include automations.yaml

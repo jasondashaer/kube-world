@@ -1,43 +1,5 @@
-# Home Assistant routing — edge1-specific hostname with Zitadel SSO
-#
-# oauth2-proxy sits in front of HA as a full reverse proxy (not ForwardAuth).
-# It handles the complete OIDC flow: unauthenticated users are redirected
-# to Zitadel login, then proxied to HA after authentication.
-#
-# /api/* bypasses SSO (needed for mobile app, webhooks, integrations).
-# Everything else goes through oauth2-proxy → HA.
----
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: home-assistant-api
-  namespace: home-assistant
-  labels:
-    app.kubernetes.io/name: home-assistant
-    app.kubernetes.io/part-of: kube-world
-spec:
-  parentRefs:
-    - name: kube-world-gateway
-      namespace: kube-system
-  hostnames:
-    - "ha.edge1.kubew.dev"
-  rules:
-    # HA API — direct access, no SSO (mobile app, webhooks, integrations)
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /api/
-      backendRefs:
-        - name: home-assistant
-          port: 8123
-    # HA local auth endpoint — direct access
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /auth/
-      backendRefs:
-        - name: home-assistant
-          port: 8123
+# Home Assistant HTTPRoute — edge1-specific hostname
+# SSO handled natively by HA via hass-oidc-auth component (no proxy needed).
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -54,11 +16,10 @@ spec:
   hostnames:
     - "ha.edge1.kubew.dev"
   rules:
-    # Everything else → oauth2-proxy (handles SSO + proxies to HA)
     - matches:
         - path:
             type: PathPrefix
             value: /
       backendRefs:
-        - name: oauth2-proxy
-          port: 4180
+        - name: home-assistant
+          port: 8123

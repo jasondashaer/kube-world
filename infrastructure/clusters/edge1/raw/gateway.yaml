@@ -1,0 +1,29 @@
+# Gateway resource for edge1 — structurally identical to central
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: kube-world-gateway
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/part-of: kube-world
+spec:
+  gatewayClassName: traefik
+  listeners:
+    - name: http
+      port: 80
+      protocol: HTTP
+      allowedRoutes:
+        namespaces:
+          from: All
+    - name: https
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: kube-world-tls
+            kind: Secret
+      allowedRoutes:
+        namespaces:
+          from: All

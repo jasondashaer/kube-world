@@ -1,0 +1,43 @@
+# Edge1 infrastructure — Flux-managed
+#
+# Two Kustomizations because HelmRelease CRDs are processed by
+# helm-controller on the central cluster, while raw K8s resources
+# (Gateway, Certificate, HTTPRoutes) are applied directly to edge1.
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: infra-edge1-helm
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./infrastructure/clusters/edge1/helm
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: kube-world
+  # No kubeConfig — HelmRelease CRDs stay on central cluster
+  # Each HelmRelease has its own kubeConfig targeting edge1
+  timeout: 15m
+
+---
+# Raw K8s resources applied directly to the edge cluster
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: infra-edge1-raw
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./infrastructure/clusters/edge1/raw
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: kube-world
+  kubeConfig:
+    secretRef:
+      name: pi-edge-1-kubeconfig
+      key: value
+  dependsOn:
+    - name: infra-edge1-helm
+  timeout: 10m

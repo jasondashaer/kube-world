@@ -1,0 +1,30 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cert-manager
+  labels:
+    app.kubernetes.io/part-of: kube-world
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: external-dns
+  labels:
+    app.kubernetes.io/part-of: kube-world
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: home-assistant
+  labels:
+    app.kubernetes.io/part-of: kube-world
+    workload-type: iot
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: companion
+  labels:
+    app.kubernetes.io/part-of: kube-world
+    workload-type: iot

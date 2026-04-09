@@ -1,0 +1,16 @@
+# Wildcard TLS certificate for *.edge1.kubew.dev
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: edge-wildcard
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/part-of: kube-world
+spec:
+  secretName: kube-world-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - "*.edge1.kubew.dev"

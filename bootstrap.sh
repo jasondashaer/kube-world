@@ -2074,6 +2074,44 @@ wait_for_cert_ready() {
             debug "  [${elapsed}s/${timeout}s] ${reason}"
         fi
 
+        # At 5 min, check for stuck challenges (stale Cloudflare record IDs
+        # cause cert-manager to loop on cleanup errors). Delete stuck challenges
+        # and stale TXT records, then delete the order to force a clean retry.
+        if [[ $elapsed -eq 300 ]]; then
+            local stuck_challenges
+            stuck_challenges=$(kubectl get challenges -n kube-system -o name 2>/dev/null || true)
+            if [[ -n "$stuck_challenges" ]]; then
+                warn "Cert still not ready at 5min — clearing stuck challenges for clean retry"
+                kubectl delete challenges -n kube-system --all 2>/dev/null || true
+                kubectl delete orders -n kube-system --all 2>/dev/null || true
+                # Clean stale TXT records from Cloudflare
+                if [[ -n "${CLOUDFLARE_API_TOKEN:-}" && -n "${DOMAIN:-}" ]]; then
+                    local zone_id
+                    zone_id=$(cloudflare_get_zone_id 2>/dev/null || echo "")
+                    if [[ -n "$zone_id" ]]; then
+                        local stale_ids
+                        stale_ids=$(curl -s -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                            "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records?type=TXT&name=_acme-challenge.${DOMAIN}" \
+                            2>/dev/null | jq -r '.result[].id' 2>/dev/null || true)
+                        for rid in $stale_ids; do
+                            [[ -z "$rid" ]] && continue
+                            curl -s -X DELETE -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                                "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records/${rid}" \
+                                > /dev/null 2>&1
+                        done
+                    fi
+                fi
+                # Delete and recreate the certificate to trigger fresh issuance
+                kubectl delete certificate -n kube-system kubew-dev-wildcard 2>/dev/null || true
+                sleep 3
+                local cert_file="${SCRIPT_DIR}/infrastructure/cert-manager/certificate.yaml"
+                if [[ -f "$cert_file" ]]; then
+                    sed "s/kubew\\.dev/${DOMAIN}/g" "$cert_file" | kubectl apply -f - 2>/dev/null || true
+                fi
+                log "  Challenges cleared, certificate recreated — retrying"
+            fi
+        fi
+
         sleep $interval
         elapsed=$((elapsed + interval))
     done
@@ -2125,7 +2163,7 @@ setup_httproutes() {
     log "Applying remaining HTTPRoutes..."
 
     if [[ "$DRY_RUN" == "true" ]]; then
-        log "[DRY RUN] Would apply GitLab HTTPRoute"
+        log "[DRY RUN] Would apply HTTPRoutes"
         return 0
     fi
 
@@ -2134,7 +2172,73 @@ setup_httproutes() {
     # HTTPRoute is applied by apply_rancher_httproute immediately after
     # install_rancher, before configure_rancher_api needs it.
     _apply_gateway_file "${SCRIPT_DIR}/apps/gitlab/gateway.yaml" "GitLab"
+
+    # HA and Companion run on the EDGE Pi (via Karmada), but the Gateway/Traefik
+    # lives on the CENTRAL Pi. Create proxy Services + Endpoints on the central
+    # cluster pointing to the edge Pi's hostNetwork IP so the HTTPRoutes work.
+    local edge_ip="${PI_EDGE_IP:-}"
+    if [[ -z "$edge_ip" ]]; then
+        edge_ip=$(grep 'pi-edge-1' "${SCRIPT_DIR}/pi-setup/inventory.ini" 2>/dev/null \
+            | grep -oP 'ansible_host=\K[0-9.]+' || echo "")
+    fi
+    if [[ -z "$edge_ip" ]]; then
+        warn "PI_EDGE_IP not set and not found in inventory — skipping HA/Companion HTTPRoutes"
+        return 0
+    fi
+    log "Edge Pi IP for proxy services: ${edge_ip}"
+
+    # Home Assistant proxy (port 8123)
+    kubectl create namespace home-assistant 2>/dev/null || true
+    kubectl -n home-assistant apply -f - <<EOF
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: home-assistant
+subsets:
+  - addresses:
+      - ip: ${edge_ip}
+    ports:
+      - port: 8123
+        name: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: home-assistant
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8123
+      targetPort: 8123
+      name: http
+EOF
     _apply_gateway_file "${SCRIPT_DIR}/apps/home-assistant/gateway.yaml" "Home Assistant"
+
+    # Companion proxy (port 8000)
+    kubectl create namespace companion 2>/dev/null || true
+    kubectl -n companion apply -f - <<EOF
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: companion
+subsets:
+  - addresses:
+      - ip: ${edge_ip}
+    ports:
+      - port: 8000
+        name: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: companion
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8000
+      targetPort: 8000
+      name: http
+EOF
     _apply_gateway_file "${SCRIPT_DIR}/apps/companion/gateway.yaml" "Companion"
 
     kubectl get httproute -A 2>/dev/null || true

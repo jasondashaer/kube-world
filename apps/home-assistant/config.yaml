@@ -34,8 +34,6 @@ data:
     auth_oidc:
       client_id: "367875862353149992"
       discovery_url: "https://auth.kubew.dev/.well-known/openid-configuration"
-      features:
-        disable_frontend_injection: true
 
     # Include files for automations, scripts, scenes
     automation: !include automations.yaml

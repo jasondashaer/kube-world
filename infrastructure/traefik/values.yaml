@@ -32,14 +32,13 @@ resources:
 # Single replica (single-node cluster)
 deployment:
   replicas: 1
+  # Use cluster DNS even with hostNetwork so Traefik can resolve
+  # cluster-internal service names (needed for ForwardAuth middleware).
+  dnsPolicy: ClusterFirstWithHostNet
 
 # hostNetwork puts the Traefik pod directly on the node's network stack.
 # With this, the ports below bind to 0.0.0.0 on the host (all interfaces).
 hostNetwork: true
-
-# Use cluster DNS even with hostNetwork so Traefik can resolve
-# cluster-internal service names (needed for ForwardAuth middleware).
-dnsPolicy: ClusterFirstWithHostNet
 
 # Run as root so we can bind privileged ports (80, 443) with hostNetwork.
 # NET_BIND_SERVICE as a non-root ambient capability doesn't work with the

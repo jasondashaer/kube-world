@@ -37,8 +37,8 @@ spec:
         memory: "256Mi"
     deployment:
       replicas: 1
+      dnsPolicy: ClusterFirstWithHostNet
     hostNetwork: true
-    dnsPolicy: ClusterFirstWithHostNet
     securityContext:
       capabilities:
         drop: [ALL]

@@ -311,7 +311,7 @@ create_oidc_app() {
 
 create_oidc_apps() {
     create_oidc_app "rancher" \
-        "[\"https://rancher.${DOMAIN}\", \"https://rancher.${DOMAIN}/verify-auth\"]" \
+        "[\"https://rancher.${DOMAIN}/dashboard/auth/verify\", \"https://rancher.${DOMAIN}\", \"https://rancher.${DOMAIN}/verify-auth\"]" \
         "[\"https://rancher.${DOMAIN}\"]" \
         "RANCHER"
 

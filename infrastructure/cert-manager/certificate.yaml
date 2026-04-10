@@ -1,5 +1,10 @@
 # Wildcard TLS certificate for *.kubew.dev
 #
+# Only requests the wildcard — NOT the apex. Including both causes
+# concurrent DNS-01 challenges at the same TXT record name which
+# race each other in cert-manager's Cloudflare cleanup code and
+# leave one challenge stuck. We don't use the apex anywhere.
+#
 # cert-manager automatically requests and renews this certificate
 # via Let's Encrypt using DNS-01 challenge (Cloudflare).
 #
@@ -20,4 +25,3 @@ spec:
     kind: ClusterIssuer
   dnsNames:
     - "*.kubew.dev"
-    - kubew.dev

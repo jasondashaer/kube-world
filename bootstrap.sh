@@ -2719,7 +2719,7 @@ configure_oidc_rancher() {
         \"clientId\": \"${client_id}\",
         \"clientSecret\": \"${client_secret}\",
         \"issuer\": \"${issuer_url}\",
-        \"rancherUrl\": \"https://rancher.${DOMAIN}\",
+        \"rancherUrl\": \"https://rancher.${DOMAIN}/dashboard/auth/verify\",
         \"scope\": \"openid profile email\",
         \"authEndpoint\": \"${issuer_url}/oauth/v2/authorize\",
         \"tokenEndpoint\": \"${issuer_url}/oauth/v2/token\",

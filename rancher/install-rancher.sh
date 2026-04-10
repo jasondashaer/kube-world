@@ -22,7 +22,7 @@ set -euo pipefail
 
 # Configuration
 RANCHER_VERSION="${RANCHER_VERSION:-2.13.1}"
-CERT_MANAGER_VERSION="${CERT_MANAGER_VERSION:-v1.14.0}"
+CERT_MANAGER_VERSION="${CERT_MANAGER_VERSION:-v1.20.1}"
 RANCHER_REPLICAS="${RANCHER_REPLICAS:-1}"
 
 #===============================================================================

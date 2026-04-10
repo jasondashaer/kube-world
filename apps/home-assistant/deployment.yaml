@@ -88,6 +88,12 @@ spec:
                   name: ha-oidc-config
                   key: client-id
                   optional: true
+            - name: HA_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: ha-oidc-config
+                  key: client-secret
+                  optional: true
             - name: HA_DOMAIN
               valueFrom:
                 secretKeyRef:
@@ -200,6 +206,7 @@ spec:
               # The ha-oidc-config Secret (created by bootstrap) provides the real values.
               if [ -n "${HA_OIDC_CLIENT_ID:-}" ] && [ -n "${HA_DOMAIN:-}" ]; then
                 sed -i "s/HA_OIDC_CLIENT_ID/${HA_OIDC_CLIENT_ID}/g" /config/configuration.yaml
+                sed -i "s/HA_OIDC_CLIENT_SECRET/${HA_OIDC_CLIENT_SECRET:-none}/g" /config/configuration.yaml
                 sed -i "s/auth\.DOMAIN/auth.${HA_DOMAIN}/g" /config/configuration.yaml
                 echo "OIDC config patched: client_id=${HA_OIDC_CLIENT_ID}, domain=${HA_DOMAIN}"
               else

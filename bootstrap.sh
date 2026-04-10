@@ -2578,15 +2578,29 @@ patch_ha_oidc_client_id() {
         return 0
     fi
 
+    # Read the HA client secret from the Zitadel OIDC secret
+    local ha_client_secret
+    ha_client_secret=$(jq -r '.homeassistant_client_secret // empty' "$state_file" 2>/dev/null || echo "")
+    if [[ -z "$ha_client_secret" ]]; then
+        # Try reading from the K8s secret created by seed-zitadel.sh
+        ha_client_secret=$(kubectl -n home-assistant get secret zitadel-oidc-homeassistant \
+            -o jsonpath='{.data.clientSecret}' 2>/dev/null | base64 -d || echo "")
+    fi
+
     log "Creating HA OIDC config secret with client ID: ${ha_client_id}"
 
     # Create a Secret in the Karmada API (propagated to edge by the HA
     # PropagationPolicy). The HA init container reads this to patch
     # the configuration.yaml placeholders at startup.
+    local -a secret_args=(
+        --from-literal=client-id="${ha_client_id}"
+        --from-literal=domain="${DOMAIN}"
+    )
+    [[ -n "$ha_client_secret" ]] && secret_args+=(--from-literal=client-secret="${ha_client_secret}")
+
     kubectl --kubeconfig="$karmada_config" -n home-assistant \
         create secret generic ha-oidc-config \
-        --from-literal=client-id="${ha_client_id}" \
-        --from-literal=domain="${DOMAIN}" \
+        "${secret_args[@]}" \
         --dry-run=client -o yaml | kubectl --kubeconfig="$karmada_config" apply -f - 2>/dev/null
     log "HA OIDC config secret created ✓"
 }

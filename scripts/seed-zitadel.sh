@@ -447,6 +447,7 @@ write_state() {
   "gitlab_client_id": "${GITLAB_CLIENT_ID:-}",
   "grafana_client_id": "${GRAFANA_CLIENT_ID:-}",
   "homeassistant_client_id": "${HOMEASSISTANT_CLIENT_ID:-}",
+  "homeassistant_client_secret": "${HOMEASSISTANT_CLIENT_SECRET:-}",
   "issuer_url": "https://auth.${DOMAIN}",
   "seeded_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }

@@ -113,7 +113,7 @@ spec:
                 echo "hass-oidc-auth already installed"
               fi
               echo "Patching injection.js..."
-              cp /config-patches/injection.js "$COMP_DIR/static/injection.js"
+              cp /config-templates/injection.js "$COMP_DIR/static/injection.js"
 
               # 2. Pre-seed onboarding + auth to skip the first-time wizard.
               # Only runs on fresh PVC (no .storage/onboarding file yet).
@@ -186,7 +186,16 @@ spec:
               # 3. Create themes directory if missing (HA expects it)
               mkdir -p /config/themes
 
-              # 4. Patch OIDC placeholders in configuration.yaml
+              # 4. Copy GitOps-managed configs from ConfigMap to PVC
+              # (Can't use subPath mounts — they're read-only and prevent
+              # runtime patching of placeholders)
+              for f in configuration.yaml automations.yaml scripts.yaml scenes.yaml; do
+                if [ -f "/config-templates/${f}" ]; then
+                  cp "/config-templates/${f}" "/config/${f}"
+                fi
+              done
+
+              # 5. Patch OIDC placeholders in configuration.yaml
               # The ConfigMap has HA_OIDC_CLIENT_ID and DOMAIN as placeholders.
               # The ha-oidc-config Secret (created by bootstrap) provides the real values.
               if [ -n "${HA_OIDC_CLIENT_ID:-}" ] && [ -n "${HA_DOMAIN:-}" ]; then
@@ -206,8 +215,7 @@ spec:
             - name: config
               mountPath: /config
             - name: config-yaml
-              mountPath: /config-patches/injection.js
-              subPath: injection.js
+              mountPath: /config-templates
 
       containers:
         - name: home-assistant
@@ -223,19 +231,6 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /config
-            # GitOps-managed config files (subPath preserves PVC .storage/)
-            - name: config-yaml
-              mountPath: /config/configuration.yaml
-              subPath: configuration.yaml
-            - name: config-yaml
-              mountPath: /config/automations.yaml
-              subPath: automations.yaml
-            - name: config-yaml
-              mountPath: /config/scripts.yaml
-              subPath: scripts.yaml
-            - name: config-yaml
-              mountPath: /config/scenes.yaml
-              subPath: scenes.yaml
             - name: localtime
               mountPath: /etc/localtime
               readOnly: true

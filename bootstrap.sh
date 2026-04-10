@@ -2595,6 +2595,13 @@ patch_ha_oidc_client_id() {
 
     log "Creating HA OIDC config secret with client ID: ${ha_client_id}"
 
+    # Create the home-assistant namespace on the Karmada API first
+    # (apps-base Flux Kustomization creates it normally, but Flux hasn't
+    # synced yet at this point in the bootstrap pipeline).
+    kubectl --kubeconfig="$karmada_config" create namespace home-assistant \
+        --dry-run=client -o yaml 2>/dev/null | \
+        kubectl --kubeconfig="$karmada_config" apply -f - > /dev/null 2>&1 || true
+
     # Create a Secret in the Karmada API (propagated to edge by the HA
     # PropagationPolicy). The HA init container reads this to patch
     # the configuration.yaml placeholders and seed the local credential.
@@ -2603,14 +2610,23 @@ patch_ha_oidc_client_id() {
         --from-literal=domain="${DOMAIN}"
         --from-literal=local-username="${ha_local_username}"
     )
-    [[ -n "$ha_client_secret" ]] && secret_args+=(--from-literal=client-secret="${ha_client_secret}")
-    [[ -n "$ha_local_password" ]] && secret_args+=(--from-literal=local-password="${ha_local_password}")
+    if [[ -n "$ha_client_secret" ]]; then
+        secret_args+=(--from-literal=client-secret="${ha_client_secret}")
+    fi
+    if [[ -n "$ha_local_password" ]]; then
+        secret_args+=(--from-literal=local-password="${ha_local_password}")
+    fi
 
-    kubectl --kubeconfig="$karmada_config" -n home-assistant \
+    if kubectl --kubeconfig="$karmada_config" -n home-assistant \
         create secret generic ha-oidc-config \
         "${secret_args[@]}" \
-        --dry-run=client -o yaml | kubectl --kubeconfig="$karmada_config" apply -f - 2>/dev/null
-    log "HA OIDC config secret created ✓ (local user: ${ha_local_username})"
+        --dry-run=client -o yaml 2>/dev/null | \
+        kubectl --kubeconfig="$karmada_config" apply -f - > /dev/null 2>&1; then
+        log "HA OIDC config secret created ✓ (local user: ${ha_local_username})"
+    else
+        warn "HA OIDC config secret creation failed — will retry via Flux"
+    fi
+    return 0
 }
 
 configure_oidc_rancher() {
@@ -3252,7 +3268,7 @@ main() {
         # Identity provider BEFORE GitLab so GitLab can boot with OIDC
         # config from the start (OIDC client ID/secret baked into gitlab.rb)
         install_zitadel              # Helm install + seed identity config
-        patch_ha_oidc_client_id      # Inject dynamic Zitadel client ID into HA config
+        patch_ha_oidc_client_id || warn "HA OIDC patch failed — non-critical, continuing"
         configure_oidc_rancher       # Best-effort: Rancher OIDC via port-forward
         # GitLab must come BEFORE Flux — Flux's GitRepository points at the
         # self-hosted GitLab, so the repo and credentials must exist first.

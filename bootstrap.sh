@@ -2425,6 +2425,28 @@ install_zitadel() {
         return 0
     fi
 
+    # Wait for Rancher's validation webhook to be ready before creating
+    # any new namespaces. The webhook validates namespace creation and
+    # rejects requests during its startup window (~30-90s after Rancher
+    # is installed), which can silently break helm install.
+    log "  Waiting for Rancher webhook..."
+    local webhook_ready=false
+    for i in $(seq 1 60); do
+        if kubectl -n cattle-system get deploy rancher-webhook -o jsonpath='{.status.readyReplicas}' 2>/dev/null | grep -q '^[1-9]'; then
+            # Additionally verify the webhook endpoints are actually available
+            if kubectl -n cattle-system get endpoints rancher-webhook -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null | grep -q '[0-9]'; then
+                webhook_ready=true
+                break
+            fi
+        fi
+        sleep 2
+    done
+    if [[ "$webhook_ready" == "true" ]]; then
+        log "  Rancher webhook ready ✓"
+    else
+        warn "  Rancher webhook not ready after 120s — continuing anyway"
+    fi
+
     # Generate and store the masterkey secret if it doesn't exist
     if ! kubectl -n zitadel get secret zitadel-masterkey &>/dev/null; then
         kubectl create namespace zitadel --dry-run=client -o yaml | kubectl apply -f -

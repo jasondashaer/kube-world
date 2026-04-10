@@ -1,0 +1,65 @@
+# Renovate CronJob — runs weekly to check for dependency updates
+# Scans GitLab repos for Helm charts, K8s images, Terraform providers,
+# GitHub Actions, and Flux resources. Opens MRs for updates.
+#
+# Requires: renovate-token secret with a GitLab PAT (api scope)
+# Create once via: kubectl -n renovate create secret generic renovate-token \
+#   --from-literal=token=<glpat>
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: renovate
+  labels:
+    app.kubernetes.io/part-of: kube-world
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: renovate
+  namespace: renovate
+  labels:
+    app.kubernetes.io/name: renovate
+    app.kubernetes.io/part-of: kube-world
+spec:
+  # Monday 6am ET (10am UTC) — aligns with renovate.json5 schedule
+  schedule: "0 10 * * 1"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: renovate
+              image: ghcr.io/renovatebot/renovate:43
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: RENOVATE_PLATFORM
+                  value: gitlab
+                - name: RENOVATE_ENDPOINT
+                  value: http://gitlab.gitlab.svc.cluster.local/api/v4
+                - name: RENOVATE_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: renovate-token
+                      key: token
+                - name: RENOVATE_AUTODISCOVER
+                  value: "true"
+                - name: RENOVATE_AUTODISCOVER_FILTER
+                  value: "root/*"
+                - name: LOG_LEVEL
+                  value: info
+                - name: RENOVATE_GIT_AUTHOR
+                  value: "Renovate Bot <renovate@kubew.dev>"
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: 1000m
+                  memory: 1Gi

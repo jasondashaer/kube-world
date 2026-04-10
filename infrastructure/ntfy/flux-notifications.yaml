@@ -1,0 +1,42 @@
+# Flux notification-controller → ntfy
+# Sends GitOps reconciliation events (commits, syncs, failures) to
+# ntfy topics which the mobile app subscribes to.
+---
+# Generic webhook provider pointing at ntfy
+apiVersion: notification.toolkit.fluxcd.io/v1beta3
+kind: Provider
+metadata:
+  name: ntfy-kube-world
+  namespace: flux-system
+  labels:
+    app.kubernetes.io/part-of: kube-world
+spec:
+  type: generic
+  address: https://ntfy.kubew.dev/kube-world
+
+---
+# Alert: All Flux reconciliation events → ntfy
+apiVersion: notification.toolkit.fluxcd.io/v1beta3
+kind: Alert
+metadata:
+  name: kube-world-all-events
+  namespace: flux-system
+  labels:
+    app.kubernetes.io/part-of: kube-world
+spec:
+  providerRef:
+    name: ntfy-kube-world
+  eventSeverity: info
+  eventSources:
+    - kind: GitRepository
+      name: "*"
+    - kind: Kustomization
+      name: "*"
+    - kind: HelmRepository
+      name: "*"
+    - kind: HelmRelease
+      name: "*"
+  exclusionList:
+    - ".*waiting.*"
+    - ".*dependency.*is not ready.*"
+  summary: "kube-world GitOps event"

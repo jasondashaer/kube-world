@@ -1,0 +1,126 @@
+# ntfy — self-hosted push notification server
+# Flux notification-controller sends GitOps events here; iOS/Android
+# ntfy app subscribes to topics to receive real-time notifications.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ntfy
+  labels:
+    app.kubernetes.io/part-of: kube-world
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ntfy-data
+  namespace: ntfy
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ntfy-config
+  namespace: ntfy
+  labels:
+    app.kubernetes.io/name: ntfy
+    app.kubernetes.io/part-of: kube-world
+data:
+  server.yml: |
+    base-url: https://ntfy.kubew.dev
+    listen-http: ":80"
+    cache-file: /var/lib/ntfy/cache.db
+    cache-duration: 12h
+    attachment-cache-dir: /var/lib/ntfy/attachments
+    behind-proxy: true
+    auth-default-access: deny-all
+    auth-file: /var/lib/ntfy/user.db
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ntfy
+  namespace: ntfy
+  labels:
+    app.kubernetes.io/name: ntfy
+    app.kubernetes.io/part-of: kube-world
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ntfy
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ntfy
+    spec:
+      containers:
+        - name: ntfy
+          image: docker.io/binwiederhier/ntfy:v2.11.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - serve
+          ports:
+            - name: http
+              containerPort: 80
+          env:
+            - name: TZ
+              value: "America/New_York"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/ntfy
+            - name: config
+              mountPath: /etc/ntfy/server.yml
+              subPath: server.yml
+          resources:
+            requests:
+              memory: "32Mi"
+              cpu: "10m"
+            limits:
+              memory: "128Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /v1/health
+              port: 80
+            initialDelaySeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /v1/health
+              port: 80
+            initialDelaySeconds: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: ntfy-data
+        - name: config
+          configMap:
+            name: ntfy-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ntfy
+  namespace: ntfy
+  labels:
+    app.kubernetes.io/name: ntfy
+    app.kubernetes.io/part-of: kube-world
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: 80
+      name: http
+  selector:
+    app.kubernetes.io/name: ntfy

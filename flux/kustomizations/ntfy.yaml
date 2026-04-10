@@ -1,0 +1,17 @@
+# Flux Kustomization for ntfy notification server
+# Deploys to the HOST cluster (central) where Traefik runs.
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: ntfy
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./infrastructure/ntfy
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: kube-world
+  # No kubeConfig → applies to host (central) cluster
+  timeout: 10m

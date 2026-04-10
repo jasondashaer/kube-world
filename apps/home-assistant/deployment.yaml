@@ -100,11 +100,23 @@ spec:
                   name: ha-oidc-config
                   key: domain
                   optional: true
+            - name: HA_LOCAL_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: ha-oidc-config
+                  key: local-username
+                  optional: true
+            - name: HA_LOCAL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ha-oidc-config
+                  key: local-password
+                  optional: true
           command:
             - sh
             - -c
             - |
-              apk add --no-cache git python3 >/dev/null 2>&1
+              apk add --no-cache git python3 py3-bcrypt >/dev/null 2>&1
 
               # 1. Install OIDC custom component
               COMP_DIR="/config/custom_components/auth_oidc"
@@ -132,11 +144,15 @@ spec:
               {"version":4,"minor_version":1,"key":"onboarding","data":{"done":["user","core_config","analytics","integration"]}}
               ONBOARD
 
-                # Create admin user with OIDC-only auth (no local password needed
-                # since SSO handles authentication). The owner user is required for
-                # HA to consider itself set up.
-                python3 -c "
-              import json, uuid, datetime
+                # Create admin user with both OIDC (for web SSO) and local
+                # password (for the HA mobile app which can't handle OIDC).
+                HA_LOCAL_USERNAME="${HA_LOCAL_USERNAME:-admin}" \
+                HA_LOCAL_PASSWORD="${HA_LOCAL_PASSWORD:-}" \
+                python3 << 'PYEOF'
+              import json, os, uuid
+              import bcrypt
+
+              admin_id = uuid.uuid4().hex
               auth = {
                 'version': 1,
                 'minor_version': 1,
@@ -144,13 +160,13 @@ spec:
                 'data': {
                   'users': [
                     {
-                      'id': uuid.uuid4().hex,
+                      'id': admin_id,
                       'group_ids': ['system-admin'],
                       'is_owner': True,
                       'is_active': True,
                       'name': 'Admin',
                       'system_generated': False,
-                      'local_only': False
+                      'local_only': False,
                     },
                     {
                       'id': uuid.uuid4().hex,
@@ -159,7 +175,7 @@ spec:
                       'is_active': True,
                       'name': 'Home Assistant Content',
                       'system_generated': True,
-                      'local_only': False
+                      'local_only': False,
                     },
                     {
                       'id': uuid.uuid4().hex,
@@ -168,22 +184,54 @@ spec:
                       'is_active': True,
                       'name': 'Home Assistant Cast',
                       'system_generated': True,
-                      'local_only': False
-                    }
+                      'local_only': False,
+                    },
                   ],
                   'groups': [
                     {'id': 'system-admin', 'name': 'Administrators'},
                     {'id': 'system-users', 'name': 'Users'},
-                    {'id': 'system-read-only', 'name': 'Read Only'}
+                    {'id': 'system-read-only', 'name': 'Read Only'},
                   ],
                   'credentials': [],
-                  'refresh_tokens': []
+                  'refresh_tokens': [],
                 }
               }
+
+              # If a local password is provided, create the local credential.
+              # The HA mobile app needs this since it can't handle OIDC.
+              local_user = os.environ.get('HA_LOCAL_USERNAME', 'admin')
+              local_pass = os.environ.get('HA_LOCAL_PASSWORD', '')
+              if local_pass:
+                  # bcrypt hash for auth_provider.homeassistant storage
+                  hashed = bcrypt.hashpw(local_pass.encode('utf-8'),
+                                         bcrypt.gensalt(12)).decode('utf-8')
+                  ha_auth = {
+                      'version': 1,
+                      'minor_version': 1,
+                      'key': 'auth_provider.homeassistant',
+                      'data': {
+                          'users': [{'username': local_user, 'password': hashed}],
+                      },
+                  }
+                  with open('/config/.storage/auth_provider.homeassistant', 'w') as f:
+                      json.dump(ha_auth, f)
+
+                  # Link the credential to the admin user
+                  auth['data']['credentials'].append({
+                      'id': uuid.uuid4().hex,
+                      'user_id': admin_id,
+                      'auth_provider_type': 'homeassistant',
+                      'auth_provider_id': None,
+                      'data': {'username': local_user},
+                  })
+                  print(f'Local credential created: username={local_user}')
+              else:
+                  print('No HA_LOCAL_PASSWORD — skipping local credential (OIDC-only)')
+
               with open('/config/.storage/auth', 'w') as f:
-                json.dump(auth, f)
-              print('Auth file created with admin owner user')
-              "
+                  json.dump(auth, f)
+              print(f'Auth file created — admin user id={admin_id[:8]}...')
+              PYEOF
                 echo "Onboarding pre-seeded — wizard will be skipped"
               else
                 echo "Onboarding already completed"

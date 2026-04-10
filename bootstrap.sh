@@ -2587,22 +2587,30 @@ patch_ha_oidc_client_id() {
             -o jsonpath='{.data.clientSecret}' 2>/dev/null | base64 -d || echo "")
     fi
 
+    # Local HA credentials for the mobile app (which can't handle OIDC).
+    # Defaults to admin user with the Rancher bootstrap password. Can be
+    # overridden via HA_LOCAL_USERNAME / HA_LOCAL_PASSWORD env vars.
+    local ha_local_username="${HA_LOCAL_USERNAME:-admin}"
+    local ha_local_password="${HA_LOCAL_PASSWORD:-${RANCHER_BOOTSTRAP_PASSWORD:-}}"
+
     log "Creating HA OIDC config secret with client ID: ${ha_client_id}"
 
     # Create a Secret in the Karmada API (propagated to edge by the HA
     # PropagationPolicy). The HA init container reads this to patch
-    # the configuration.yaml placeholders at startup.
+    # the configuration.yaml placeholders and seed the local credential.
     local -a secret_args=(
         --from-literal=client-id="${ha_client_id}"
         --from-literal=domain="${DOMAIN}"
+        --from-literal=local-username="${ha_local_username}"
     )
     [[ -n "$ha_client_secret" ]] && secret_args+=(--from-literal=client-secret="${ha_client_secret}")
+    [[ -n "$ha_local_password" ]] && secret_args+=(--from-literal=local-password="${ha_local_password}")
 
     kubectl --kubeconfig="$karmada_config" -n home-assistant \
         create secret generic ha-oidc-config \
         "${secret_args[@]}" \
         --dry-run=client -o yaml | kubectl --kubeconfig="$karmada_config" apply -f - 2>/dev/null
-    log "HA OIDC config secret created ✓"
+    log "HA OIDC config secret created ✓ (local user: ${ha_local_username})"
 }
 
 configure_oidc_rancher() {

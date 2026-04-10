@@ -40,8 +40,10 @@ data:
     cache-duration: 12h
     attachment-cache-dir: /var/lib/ntfy/attachments
     behind-proxy: true
-    auth-default-access: deny-all
-    auth-file: /var/lib/ntfy/user.db
+    # Homelab: allow read-write to anyone. The domain itself is only
+    # reachable via Tailscale mesh (no public ingress). For public
+    # deployments, use auth-file + auth-default-access: deny-all.
+    auth-default-access: read-write
 
 ---
 apiVersion: apps/v1

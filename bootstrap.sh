@@ -2857,6 +2857,19 @@ install_gitlab_native() {
         return 1
     fi
 
+    # Create the renovate-token secret so the CronJob can authenticate.
+    # The deploy token has api+write_repository scope which is sufficient.
+    if kubectl create namespace renovate --dry-run=client -o yaml | kubectl apply -f - > /dev/null 2>&1; then
+        if kubectl create secret generic renovate-token \
+            --namespace=renovate \
+            --from-literal=token="$deploy_token" \
+            --dry-run=client -o yaml | kubectl apply -f - > /dev/null 2>&1; then
+            log "Renovate token secret created ✓"
+        else
+            warn "Failed to create renovate-token secret"
+        fi
+    fi
+
     log "GitLab native install + repo bootstrap complete ✓"
 }
 

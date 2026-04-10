@@ -2578,23 +2578,17 @@ patch_ha_oidc_client_id() {
         return 0
     fi
 
-    log "Patching HA ConfigMap with Zitadel client ID: ${ha_client_id}"
+    log "Creating HA OIDC config secret with client ID: ${ha_client_id}"
 
-    # Get the current ConfigMap from Karmada API and patch it
-    local current_yaml
-    current_yaml=$(kubectl --kubeconfig="$karmada_config" -n home-assistant \
-        get configmap home-assistant-config -o yaml 2>/dev/null || echo "")
-
-    if [[ -z "$current_yaml" ]]; then
-        debug "HA ConfigMap not yet in Karmada — will be patched on next Flux reconcile"
-        return 0
-    fi
-
-    # Patch the placeholders
-    echo "$current_yaml" | \
-        sed "s/HA_OIDC_CLIENT_ID/${ha_client_id}/g; s/auth\.DOMAIN/auth.${DOMAIN}/g" | \
-        kubectl --kubeconfig="$karmada_config" apply -f - 2>/dev/null
-    log "HA ConfigMap patched with OIDC client ID ✓"
+    # Create a Secret in the Karmada API (propagated to edge by the HA
+    # PropagationPolicy). The HA init container reads this to patch
+    # the configuration.yaml placeholders at startup.
+    kubectl --kubeconfig="$karmada_config" -n home-assistant \
+        create secret generic ha-oidc-config \
+        --from-literal=client-id="${ha_client_id}" \
+        --from-literal=domain="${DOMAIN}" \
+        --dry-run=client -o yaml | kubectl --kubeconfig="$karmada_config" apply -f - 2>/dev/null
+    log "HA OIDC config secret created ✓"
 }
 
 configure_oidc_rancher() {

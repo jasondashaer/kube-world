@@ -27,6 +27,9 @@ spec:
       kind: ConfigMap
       name: home-assistant-config
     - apiVersion: v1
+      kind: Secret
+      name: ha-oidc-config
+    - apiVersion: v1
       kind: ConfigMap
       name: udev-rules
     - apiVersion: apps/v1

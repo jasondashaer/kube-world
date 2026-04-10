@@ -2,303 +2,254 @@
 
 ## Project Overview
 
-kube-world is an ephemeral, multi-cluster Kubernetes orchestration framework. It deploys independent K3s clusters across Raspberry Pi edge devices, macOS development environments, and (future) cloud providers, using Karmada for multi-cluster scheduling, Flux for GitOps, and Rancher for management UI.
+kube-world is a multi-cluster Kubernetes orchestration framework. It deploys independent K3s clusters across Raspberry Pi edge devices, using Karmada for multi-cluster scheduling, Flux for GitOps, Rancher for management UI, and Zitadel for identity/SSO. Designed for zero-touch deployment: `git push` drives all changes.
 
 **Repository**: `https://github.com/jasondashaer/kube-world.git`
+**GitLab mirror**: `http://gitlab.kubew.dev/root/kube-world` (Flux source of truth)
 **License**: MIT | **Branch**: `main`
 
-## Architecture (Karmada + Flux + Rancher)
+## Architecture
 
 ```
-GitHub (source of truth) --> Flux (GitOps) --> Karmada API (scheduling) --> Target Clusters
-                                                                              |
-                                                    Rancher (UI/monitoring) --+
+GitLab (source of truth) --> Flux (GitOps) --> Karmada API (scheduling) --> Edge Clusters
+                                          |                                      |
+                                          +--> Edge infra (Traefik, cert-mgr,    |
+                                               ExternalDNS) via kubeConfig       |
+                                                                                 |
+                                Rancher (UI/monitoring) -------------------------+
+                                Zitadel (identity/SSO) ---> All services
 ```
 
+### Key Principles
 - **Each Pi is an independent K3s cluster** (not nodes in one cluster) for failure isolation
-- **Karmada** schedules workloads across clusters based on labels, resources, and affinity
-- **Flux** watches Git and applies manifests to the Karmada API server
-- **Rancher** provides management UI, RBAC, and monitoring dashboards
-- **Tailscale** provides mesh VPN between all clusters
+- **Per-cluster ingress**: each cluster runs its own Traefik + cert-manager + ExternalDNS
+- **Per-cluster subdomains**: `*.edge1.kubew.dev` → Tailscale MagicDNS of that cluster
+- **GitOps-managed**: edge infrastructure (Traefik, cert-manager, ExternalDNS, Gateway, HTTPRoutes) managed by Flux
+- **Zero manual steps**: bootstrap runs to completion without human intervention, including OIDC SSO
 
-### Migration Status (from Fleet to Karmada + Flux)
-- `gitops/fleet.yaml` and `apps/*/fleet.yaml` are **deprecated** reference files
-- New architecture lives in `karmada/` and `flux/` directories
-- Fleet-specific logic in `bootstrap.sh` is being replaced
+### DNS Architecture
+- Cloudflare manages `kubew.dev` zone with CNAME records → Tailscale MagicDNS
+- `*.kubew.dev` → `pi-central.<tailnet>.ts.net` (central services)
+- `*.edge1.kubew.dev` → `pi-edge-1.<tailnet>.ts.net` (edge1 apps)
+- Each new cluster gets one wildcard CNAME; apps route by hostname
+- ExternalDNS on each cluster can auto-create individual records
 
-### Future: Self-hosted GitLab
-Currently using GitHub. Plan to self-host GitLab on a dedicated Pi 5 (16GB) central management node. GitLab needs ~2.5-4GB RAM (tuned). Design all Git interactions to be portable between GitHub and GitLab.
+### Identity (Zitadel SSO)
+- Zitadel at `auth.kubew.dev` — OIDC identity provider
+- Rancher OIDC: fully automated via kubectl patch (no browser step)
+- Home Assistant OIDC: native `hass-oidc-auth` component, installed by init container
+- GitLab OIDC: configured at install via `/etc/gitlab/gitlab.rb.d/oidc.rb`
+- Grafana OIDC: pre-created client, ready for Phase 4
+
+### Self-hosted GitLab
+GitLab CE runs as a native install on pi-central (arm64, not containerized). Flux watches the GitLab repo for changes. Bootstrap pushes the repo to GitLab and creates deploy tokens for Flux.
 
 ## Repository Structure
 
 ```
 kube-world/
-├── bootstrap.sh              # Main entry point (~750 lines)
-├── config.yaml               # Central configuration (single source of truth)
-├── .sops.yaml                # SOPS encryption rules (age-based)
-├── .yamllint.yml             # YAML lint: 2-space indent, 120-char max
-├── .github/workflows/ci.yml  # CI: lint, validate, scan, test (7 jobs)
+├── bootstrap.sh              # Main orchestration (~3200 lines)
+├── config.yaml               # Central configuration (versions, cluster defs)
+├── renovate.json5             # Renovate config for auto dependency updates
 │
-├── karmada/                           # Multi-cluster scheduling
-│   ├── install-karmada.sh             # Control plane installation
-│   ├── propagation-policies/          # Where workloads go
-│   │   ├── home-assistant.yaml        # HA -> Pi IoT clusters
-│   │   ├── base.yaml                 # Namespaces/policies -> all clusters
-│   │   └── monitoring.yaml           # Monitoring -> all clusters
-│   ├── override-policies/            # Cluster-specific overrides
-│   │   └── pi-overrides.yaml         # Resource limits for Pi hardware
-│   └── cluster-registration/
-│       └── register-pi.sh            # Register Pi cluster to Karmada
-│
-├── flux/                              # GitOps (replaces gitops/fleet.yaml)
-│   ├── sources/
-│   │   └── git-repository.yaml       # Points to this repo
-│   └── kustomizations/
-│       ├── karmada-policies.yaml      # Sync Karmada policies
-│       ├── apps.yaml                  # Sync app manifests
-│       └── policies.yaml             # Sync Kyverno/scheduling
-│
-├── apps/                              # Application manifests
+├── apps/                              # Application manifests (Karmada-propagated)
 │   ├── base/namespaces.yaml          # Shared namespaces + quotas
-│   ├── home-assistant/               # HA deployment + USB rules
+│   ├── home-assistant/               # HA + OIDC init container + ConfigMap
+│   ├── companion/                    # Bitfocus Companion (streaming control)
+│   ├── nodered/                      # Node-RED (visual automations)
+│   ├── mosquitto/                    # MQTT broker
+│   ├── zigbee2mqtt/                  # Zigbee device bridge
+│   ├── esphome/                      # ESP firmware builder
+│   ├── code-server/                  # Web IDE for HA config
+│   ├── influxdb/                     # Time-series sensor data
+│   ├── gitlab/                       # GitLab service/endpoints
+│   ├── zitadel/                      # Zitadel HTTPRoutes
 │   └── velero/                       # Backup configuration
 │
-├── clusters/                          # Cluster definitions
-│   ├── mac-local.yaml                # KIND (3-node, ports on 0.0.0.0)
-│   └── pi-cluster.yaml              # K3s for Raspberry Pi
+├── infrastructure/                    # Cluster infrastructure
+│   ├── clusters/                     # Per-cluster Flux-managed infra
+│   │   └── edge1/
+│   │       ├── helm/                 # HelmReleases (Traefik, cert-manager, ExternalDNS)
+│   │       └── raw/                  # Raw K8s resources (Gateway, certs, HTTPRoutes)
+│   ├── traefik/values.yaml           # Shared Traefik Helm values
+│   ├── gateway/gateway.yaml          # Gateway resource template
+│   ├── cert-manager/                 # ClusterIssuer + Certificate templates
+│   ├── external-dns/values.yaml      # ExternalDNS Helm values template
+│   ├── zitadel/                      # Zitadel + PostgreSQL HelmReleases
+│   ├── modules/                      # Terraform modules
+│   │   ├── cloudflare-dns/           # DNS zone + CNAME management
+│   │   └── tailscale/                # Auth key management
+│   ├── terraform.tf                  # Terraform providers (Cloudflare, Tailscale)
+│   ├── variables.tf                  # Terraform variables
+│   └── main.tf                       # Module composition
 │
-├── policies/                          # Kyverno + scheduling priorities
-│   ├── kyverno-policies.yaml         # 5 cluster policies
-│   └── scheduling-priorities.yaml    # PriorityClasses
+├── karmada/                           # Multi-cluster scheduling
+│   ├── propagation-policies/         # Where workloads go
+│   │   ├── home-assistant.yaml       # HA + OIDC + udev → IoT clusters
+│   │   ├── companion.yaml            # Companion → IoT clusters
+│   │   ├── iot-apps.yaml             # Node-RED, MQTT, Z2M, ESPHome, etc.
+│   │   └── base.yaml                 # Namespaces → all clusters
+│   └── override-policies/
+│       └── pi-overrides.yaml         # Resource limits for Pi (Deployment/DaemonSet only)
+│
+├── flux/                              # GitOps configuration
+│   ├── sources/git-repository.yaml   # Points to GitLab repo
+│   └── kustomizations/
+│       ├── apps.yaml                  # App Kustomizations (16 apps)
+│       ├── karmada-policies.yaml      # Propagation + override policies
+│       ├── policies.yaml              # Kyverno + scheduling
+│       ├── identity.yaml              # Zitadel HelmReleases
+│       └── infrastructure-edge1.yaml  # Edge1 infra (helm + raw)
+│
+├── scripts/                           # Operational tooling
+│   ├── seed-zitadel.sh               # Identity seed (users, OIDC apps, roles)
+│   ├── finalize-oidc.sh              # Rancher group → role mappings
+│   ├── install-gitlab.sh             # GitLab CE native install
+│   ├── self-provision.sh             # Pi self-provisioning (cloud-init)
+│   ├── run-renovate.sh               # Renovate bot runner
+│   ├── health-check.sh               # Infrastructure diagnostics
+│   └── recover.sh                    # Failure recovery
+│
+├── pi-setup/                          # Pi provisioning
+│   ├── ansible/playbook.yml          # K3s + Tailscale install
+│   ├── cloud-init/user-data.yaml     # Zero-touch Pi config + self-provision
+│   ├── inventory.ini                  # Pi inventory (central + edge)
+│   └── scripts/                       # WiFi stability, self-provision
 │
 ├── rancher/                           # Rancher management
 │   ├── install-rancher.sh            # Install with LAN auto-detect
-│   ├── import-cluster.sh             # Import cluster helper
-│   └── test-connectivity.sh          # Network diagnostics
+│   └── import-cluster.sh             # Import cluster helper
 │
-├── pi-setup/                          # Pi provisioning (architecture-agnostic)
-│   ├── ansible/playbook.yml          # K3s install (~462 lines)
-│   ├── ansible/ansible.cfg           # SSH tuned for WiFi
-│   ├── cloud-init/user-data.yaml     # Zero-touch Pi config
-│   ├── pi-prep.sh                    # Headless Pi setup (~1149 lines)
-│   ├── join-cluster.sh               # Import Pi to Rancher
-│   └── scripts/wifi-stability.sh     # WiFi hardening
-│
-├── scripts/                           # Operational tooling
-│   ├── health-check.sh               # Full infra diagnostics
-│   └── recover.sh                    # Automated failure recovery
-│
-├── infrastructure/                    # Terraform (AWS/GCP/Azure)
-├── inventory/hardware.yaml            # Hardware registry
-├── secrets/                           # SOPS-encrypted secrets
-├── cost-evaluation/                   # Cost optimization framework
-├── docs/architecture.md               # System design diagrams
-├── docs/troubleshooting.md            # Debug guide
-│
-└── gitops/fleet.yaml                  # DEPRECATED: Fleet config (reference only)
+└── policies/                          # Kyverno + scheduling priorities
 ```
 
 ## Key Technologies
 
 | Technology | Version | Purpose |
 |-----------|---------|---------|
-| K3s | v1.29.0+k3s1 | Lightweight Kubernetes for Pi/edge and central node |
-| KIND | latest | Local dev clusters on Mac (Docker-based) |
-| Karmada | 1.12.0 | Multi-cluster scheduling and workload propagation |
-| Flux | 2.4.0 | GitOps - watches Git, applies to Karmada API |
+| K3s | v1.34.6+k3s1 | Lightweight Kubernetes for Pi/edge and central |
+| Karmada | 1.17.0 | Multi-cluster scheduling and workload propagation |
+| Flux | 2.4.0 | GitOps — watches GitLab, applies to Karmada + edge clusters |
 | Rancher | 2.13.1 | Management UI, RBAC, monitoring |
+| Zitadel | v4.13.0 (chart 9.28.0) | Identity provider, OIDC SSO for all services |
+| Traefik | v3.6.12 (chart 39.x) | Ingress controller, Gateway API, per-cluster |
+| cert-manager | v1.20.1 | TLS certificates (Let's Encrypt DNS-01 via Cloudflare) |
+| ExternalDNS | v0.20.0 | Auto-creates Cloudflare DNS from HTTPRoutes |
+| Tailscale | latest | Mesh VPN between all clusters |
+| Terraform | 1.6.0+ | External resources (Cloudflare DNS, Tailscale auth keys) |
+| Ansible | latest | Pi hardware provisioning |
 | Helm | 3.14.0 | Kubernetes package manager |
-| Ansible | latest | Pi provisioning |
-| Terraform | 1.6.0+ | Cloud infrastructure (AWS/GCP/Azure) |
-| SOPS + age | latest | Secrets encryption |
-| Kyverno | latest | Policy enforcement |
-| Tailscale | latest | Mesh VPN between clusters |
-| cert-manager | v1.14.0 | TLS certificates |
 
-## Build, Test, and Lint Commands
+## Services and URLs
 
-### Bootstrap (full cluster setup)
+### Central cluster (pi-central)
+| Service | URL | Purpose |
+|---------|-----|---------|
+| Rancher | `rancher.kubew.dev` | Cluster management UI |
+| Zitadel | `auth.kubew.dev` | Identity provider / SSO |
+| GitLab | `gitlab.kubew.dev` | Git hosting, Flux source |
+
+### Edge cluster (pi-edge-1)
+| Service | URL | Purpose |
+|---------|-----|---------|
+| Home Assistant | `ha.edge1.kubew.dev` | Smart home automation |
+| Companion | `companion.edge1.kubew.dev` | Streaming/AV control |
+| Node-RED | `nodered.edge1.kubew.dev` | Visual automation builder |
+| Zigbee2MQTT | `zigbee.edge1.kubew.dev` | Zigbee device bridge |
+| ESPHome | `esphome.edge1.kubew.dev` | ESP firmware builder |
+| VS Code Server | `code.edge1.kubew.dev` | Web IDE for HA config |
+| InfluxDB | `influxdb.edge1.kubew.dev` | Time-series sensor data |
+| Mosquitto | Internal (port 1883) | MQTT message broker |
+
+## Bootstrap
+
+The bootstrap is fully automated — zero manual steps:
+
 ```bash
-./bootstrap.sh --platform pi --mode dev --verbose     # Central Pi (primary)
-./bootstrap.sh --platform pi --stack karmada --verbose # Pi with Karmada+Flux+Rancher
-./bootstrap.sh --platform mac --mode dev --verbose    # Mac KIND dev (optional)
-./bootstrap.sh --dry-run --platform pi                # Preview only
-./bootstrap.sh --cleanup --platform pi && ./bootstrap.sh --platform pi  # Clean rebuild
+source .env.bootstrap
+./bootstrap.sh --platform pi --stack karmada --verbose
 ```
 
-### Karmada
-```bash
-./karmada/install-karmada.sh                          # Install control plane
-./karmada/install-karmada.sh --dry-run                # Preview
-./karmada/cluster-registration/register-pi.sh --pi-ip 192.168.x.x  # Register Pi
-karmadactl get clusters --kubeconfig=~/.karmada/karmada-apiserver.config
-```
+Pipeline: Ansible → K3s → Tailscale → Traefik → Gateway → Karmada → edge join → Rancher → cert-manager → LE cert → Zitadel → OIDC enable → GitLab → Flux → ExternalDNS → edge secrets → Flux reconciles edge infra → apps deploy
 
-### Flux
-```bash
-flux bootstrap github --owner=jasondashaer --repository=kube-world --branch=main --path=flux/bootstrap --personal
-flux get sources git                                  # Check Git source
-flux get kustomizations                               # Check sync status
-flux reconcile kustomization apps-home-assistant      # Force sync
-```
+### What bootstrap.sh handles (imperative, one-time):
+- Ansible provisioning of Pis
+- K3s + Tailscale installation
+- Karmada control plane + edge cluster registration
+- Rancher install + OIDC enable (automated via kubectl patch)
+- Zitadel Helm install + identity seeding
+- GitLab native install + repo push
+- Flux install + GitRepository + Kustomizations
+- Edge cluster secrets (kubeconfig, Cloudflare tokens, placeholder TLS)
+- Cloudflare wildcard CNAMEs
 
-### Validation and Linting
-```bash
-yamllint -c .yamllint.yml .                          # YAML lint
-shellcheck bootstrap.sh rancher/install-rancher.sh karmada/install-karmada.sh
-find apps/ -name '*.yaml' -type f | xargs kubeconform -summary -strict -ignore-missing-schemas
-ansible-lint pi-setup/ansible/playbook.yml
-trivy config .                                        # Security scan
-```
+### What Flux handles (GitOps, continuous):
+- All app deployments (via Karmada propagation)
+- Edge infrastructure (Traefik, cert-manager, ExternalDNS, Gateway, HTTPRoutes)
+- Karmada policies (propagation + overrides)
+- Kyverno policies + scheduling priorities
 
-### Ansible (Pi provisioning)
-```bash
-ansible-playbook -i pi-setup/ansible/inventory.ini pi-setup/ansible/playbook.yml
-```
+## Adding a New Application
 
-### Operational
-```bash
-./scripts/health-check.sh                # Full infrastructure check
-./scripts/health-check.sh --mac-only     # Mac cluster only
-./scripts/health-check.sh --pi-only      # Pi cluster only
-./scripts/health-check.sh --network      # Cross-cluster networking
-./scripts/recover.sh rancher             # Restart Rancher
-./scripts/recover.sh pi-k3s             # Restart K3s on Pi
-```
+1. Create `apps/<app-name>/deployment.yaml` with labels and resource limits
+2. Create `apps/<app-name>/kustomization.yaml` referencing deployment.yaml
+3. Add Karmada PropagationPolicy in `karmada/propagation-policies/`
+4. Add Flux Kustomization in `flux/kustomizations/apps.yaml`
+5. Add HTTPRoute in `infrastructure/clusters/edge1/raw/httproutes/`
+6. `git push` to GitLab — Flux deploys automatically
 
-## CI Pipeline (.github/workflows/ci.yml)
+## Adding a New Edge Cluster
 
-Triggered on push/PR to `main`. Jobs:
-1. **Lint**: yamllint + ShellCheck (severity: error)
-2. **Validate K8s**: kubeconform with Kyverno CRD schemas
-3. **Ansible Lint**: production profile
-4. **Security Scan**: Trivy (HIGH/CRITICAL) + SARIF upload
-5. **Secrets Scan**: TruffleHog + custom grep for keys/passwords
-6. **Test Bootstrap (macOS)**: dry-run + help text
-7. **Test Bootstrap (Linux)**: Pi platform simulation + bash syntax validation
+1. Add to `pi-setup/inventory.ini` and `config.yaml` (with subdomain)
+2. Create `infrastructure/clusters/<edge>/` (copy from edge1, update subdomain)
+3. Create `flux/kustomizations/infrastructure-<edge>.yaml`
+4. `terraform apply` — creates Cloudflare wildcard CNAME
+5. Run bootstrap (or self-provision via cloud-init)
+6. Flux deploys full infrastructure stack automatically
 
 ## Code Conventions
 
 ### Shell Scripts
-- `set -euo pipefail` and `IFS=$'\n\t'`
+- `set -euo pipefail`
 - Logging: `log()` green, `warn()` yellow, `error()` red, `debug()` blue/verbose-only
 - Function naming: `snake_case`
-- Version vars: `VAR="${VAR:-default}"` (env override with fallback)
-- Guard direct execution: `if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then main "$@"; fi`
+- Non-critical functions use `|| warn` not `|| exit`
 
 ### YAML
-- 2-space indent, max 120 chars, truthy: `true`/`false`/`yes`/`no`
-- Document start (`---`) not required
-
-### Kubernetes Manifests
-- Required label: `app.kubernetes.io/name`
-- Infrastructure label: `app.kubernetes.io/part-of: kube-world`
+- 2-space indent, max 120 chars
+- Required labels: `app.kubernetes.io/name`, `app.kubernetes.io/part-of: kube-world`
 - Resource requests and limits on all containers
-- Trusted registries only: `ghcr.io`, `docker.io/library`, `docker.io/rancher`, `registry.k8s.io`
+- Trusted registries: `ghcr.io`, `docker.io/library`, `docker.io/rancher`, `registry.k8s.io`, `quay.io`
 
-### Node Labels
-```yaml
-node.kubernetes.io/role: master | worker
-topology.kubernetes.io/zone: edge | local | cloud
-workload-type: iot | development | general
-hardware: raspberry-pi-5 | raspberry-pi | amd64
-```
+### Karmada
+- PropagationPolicy: namespace-scoped, targets `workload-type=iot` for edge apps
+- ClusterOverridePolicy: scoped to Deployment/DaemonSet/StatefulSet (not Service/PVC)
+- `dependsOn: apps-base` for propagation policies (namespaces must exist first)
 
-### Karmada Conventions
-- **PropagationPolicy**: namespace-scoped, for app-specific placement
-- **ClusterPropagationPolicy**: cluster-scoped, for infrastructure (namespaces, policies)
-- **OverridePolicy**: cluster-specific resource adjustments (e.g., Pi resource limits)
-- Target clusters by labels, not names (allows adding clusters without policy changes)
+### Flux
+- One Kustomization per app; apps depend on `apps-base` + `karmada-propagation-policies`
+- Edge infrastructure: two Kustomizations per cluster (helm + raw)
+- `retryInterval: 30s` on edge raw for cert-manager webhook timing
 
-### Flux Conventions
-- One `Kustomization` per logical group (apps-base, apps-home-assistant, policies)
-- All Kustomizations point to Karmada API via `kubeConfig.secretRef`
-- Use `dependsOn` for ordering (policies before apps)
-- `prune: true` for drift correction
-
-### Secrets
-- SOPS + age encryption. Public key in `.sops.yaml`
-- `config.yaml` fields marked `[SOPS]` must be encrypted before commit
-- Private keys (`age.key`, `key.txt`) are gitignored
-
-### Ansible
-- Remote user: `admin`, sudo without password
-- SSH tuned for WiFi: ControlMaster, ServerAliveInterval=15s, 5 retries
-- Package installs batched, long tasks use async with timeouts
-- Each play re-establishes connection for WiFi reliability
-
-## Common Patterns
-
-### Adding a new application
-1. Create `apps/<app-name>/deployment.yaml` with required labels and limits
-2. Create `karmada/propagation-policies/<app-name>.yaml` with placement rules
-3. Add Flux kustomization in `flux/kustomizations/apps.yaml`
-4. Add namespace to `apps/base/namespaces.yaml` if needed
-5. Optionally add `karmada/override-policies/` for cluster-specific overrides
-
-### Registering a new cluster
-1. Install K3s (via Ansible or manually)
-2. Install Tailscale for mesh connectivity
-3. Register with Karmada: `karmadactl join <name> --cluster-kubeconfig=<path>`
-4. Apply cluster labels for scheduling
-5. Register with Rancher: `./pi-setup/join-cluster.sh`
-
-### Deprecated patterns (from Fleet era)
-- `apps/*/fleet.yaml` bundle configs -- no longer used
-- `gitops/fleet.yaml` GitRepo definitions -- replaced by `flux/`
-- Fleet CRD wait logic in `bootstrap.sh` -- being replaced
-
-## Files to Avoid Modifying Without Understanding
-- `.sops.yaml` -- breaking this breaks all secrets
-- `bootstrap.sh` main() flow -- execution order is critical
-- `rancher/install-rancher.sh` -- sourced by bootstrap.sh, `main()` called programmatically
-- `pi-setup/ansible/ansible.cfg` SSH settings -- tuned for WiFi reliability
-- `karmada/propagation-policies/` -- incorrect policies can send workloads to wrong clusters
-
-## Debugging
-
-### Karmada scheduling
-```bash
-karmadactl get clusters                              # Cluster status
-karmadactl get rb                                    # Resource bindings (scheduling decisions)
-kubectl --kubeconfig=~/.karmada/karmada-apiserver.config get propagationpolicies -A
-kubectl --kubeconfig=~/.karmada/karmada-apiserver.config get work -A  # Work objects
-```
-
-### Flux sync
-```bash
-flux get sources git                                 # Git connectivity
-flux get kustomizations                              # Sync status
-flux logs --level=error                              # Error logs
-```
-
-### Rancher
-```bash
-kubectl -n cattle-system get pods
-kubectl -n cattle-system port-forward svc/rancher 8443:443
-```
-
-### Pi connectivity
-```bash
-./rancher/test-connectivity.sh <rancher-host>        # Full diagnostics
-./scripts/health-check.sh --network                  # Cross-cluster checks
-```
-
-Full troubleshooting guide: `docs/troubleshooting.md`
+### Per-cluster DNS
+- Central services: `*.kubew.dev`
+- Edge apps: `*.{subdomain}.kubew.dev` (e.g., `*.edge1.kubew.dev`)
+- Each cluster gets its own Traefik, cert-manager (wildcard cert), ExternalDNS
 
 ## Hardware
 
 | Device | Role | RAM | Status |
 |--------|------|-----|--------|
-| MacBook Pro M3 Max | Development workstation only (CLI tools, SSH) | 32GB | Active |
-| Raspberry Pi 5 | Central management (K3s + Karmada + Rancher + Flux) | 16GB + 1TB NVMe | Active |
-| Raspberry Pi 5 (TBD) | Edge cluster (Home Assistant + IoT) | TBD | Planned |
+| MacBook Pro M3 Max | Development workstation (CLI, SSH, bootstrap) | 32GB | Active |
+| Raspberry Pi 5 (pi-central) | Central: K3s + Karmada + Rancher + Zitadel + GitLab + Flux | 16GB + 1TB NVMe | Active |
+| Raspberry Pi 5 (pi-edge-1) | Edge: HA + Companion + Node-RED + MQTT + IoT apps | 16GB | Active |
 
 ## Project Phases
 
 - [x] Phase 0: Foundation (bootstrap, Pi provisioning, operational tooling)
-- [ ] Phase 1: Bootstrap current Pi as central management node (Karmada + Rancher + Flux)
-- [ ] Phase 2: Purchase + provision second Pi as edge cluster, register with Karmada
-- [ ] Phase 3: Home Assistant deployed via Flux -> Karmada -> edge Pi
-- [ ] Phase 4: Observability, GitLab self-hosting on central Pi
-- [ ] Phase 5: Multi-cluster expansion, advanced scheduling
+- [x] Phase 1: Central management node (Karmada + Rancher + Flux + Zitadel + GitLab)
+- [x] Phase 2: Edge cluster with full ingress stack (per-cluster DNS, Flux-managed)
+- [x] Phase 3: Home Assistant + IoT apps deployed via GitOps with SSO
+- [ ] Phase 4: Observability (Prometheus + Grafana with Zitadel SSO)
+- [ ] Phase 5: Terraform applied (Cloudflare DNS, Tailscale), cloud expansion
+- [ ] Phase 6: Additional edge clusters, advanced scheduling, Matrix/Element

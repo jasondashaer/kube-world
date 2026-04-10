@@ -1,0 +1,90 @@
+# Node-RED — visual flow-based automation builder
+# Integrates with HA via WebSocket API for powerful visual automations
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nodered-data
+  namespace: home-assistant
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 2Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nodered
+  namespace: home-assistant
+  labels:
+    app.kubernetes.io/name: nodered
+    app.kubernetes.io/part-of: kube-world
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nodered
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nodered
+    spec:
+      containers:
+        - name: nodered
+          image: docker.io/nodered/node-red:4.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 1880
+          env:
+            - name: TZ
+              value: "America/New_York"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "1000m"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 1880
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 1880
+            initialDelaySeconds: 15
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: nodered-data
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nodered
+  namespace: home-assistant
+  labels:
+    app.kubernetes.io/name: nodered
+    app.kubernetes.io/part-of: kube-world
+spec:
+  type: ClusterIP
+  ports:
+    - port: 1880
+      targetPort: 1880
+      name: http
+  selector:
+    app.kubernetes.io/name: nodered

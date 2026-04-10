@@ -1,0 +1,184 @@
+# Karmada PropagationPolicy for IoT companion apps
+# All deploy to the same edge/IoT clusters as Home Assistant
+---
+apiVersion: policy.karmada.io/v1alpha1
+kind: PropagationPolicy
+metadata:
+  name: nodered
+  namespace: home-assistant
+spec:
+  resourceSelectors:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: nodered
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      name: nodered-data
+    - apiVersion: v1
+      kind: Service
+      name: nodered
+  placement:
+    clusterAffinity:
+      labelSelector:
+        matchExpressions:
+          - key: workload-type
+            operator: In
+            values:
+              - iot
+    spreadConstraints:
+      - spreadByField: cluster
+        maxGroups: 1
+        minGroups: 1
+
+---
+apiVersion: policy.karmada.io/v1alpha1
+kind: PropagationPolicy
+metadata:
+  name: mosquitto
+  namespace: home-assistant
+spec:
+  resourceSelectors:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: mosquitto
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      name: mosquitto-data
+    - apiVersion: v1
+      kind: Service
+      name: mosquitto
+    - apiVersion: v1
+      kind: ConfigMap
+      name: mosquitto-config
+  placement:
+    clusterAffinity:
+      labelSelector:
+        matchExpressions:
+          - key: workload-type
+            operator: In
+            values:
+              - iot
+    spreadConstraints:
+      - spreadByField: cluster
+        maxGroups: 1
+        minGroups: 1
+
+---
+apiVersion: policy.karmada.io/v1alpha1
+kind: PropagationPolicy
+metadata:
+  name: zigbee2mqtt
+  namespace: home-assistant
+spec:
+  resourceSelectors:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: zigbee2mqtt
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      name: zigbee2mqtt-data
+    - apiVersion: v1
+      kind: Service
+      name: zigbee2mqtt
+    - apiVersion: v1
+      kind: ConfigMap
+      name: zigbee2mqtt-config
+  placement:
+    clusterAffinity:
+      labelSelector:
+        matchExpressions:
+          - key: workload-type
+            operator: In
+            values:
+              - iot
+    spreadConstraints:
+      - spreadByField: cluster
+        maxGroups: 1
+        minGroups: 1
+
+---
+apiVersion: policy.karmada.io/v1alpha1
+kind: PropagationPolicy
+metadata:
+  name: esphome
+  namespace: home-assistant
+spec:
+  resourceSelectors:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: esphome
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      name: esphome-config
+    - apiVersion: v1
+      kind: Service
+      name: esphome
+  placement:
+    clusterAffinity:
+      labelSelector:
+        matchExpressions:
+          - key: workload-type
+            operator: In
+            values:
+              - iot
+    spreadConstraints:
+      - spreadByField: cluster
+        maxGroups: 1
+        minGroups: 1
+
+---
+apiVersion: policy.karmada.io/v1alpha1
+kind: PropagationPolicy
+metadata:
+  name: code-server
+  namespace: home-assistant
+spec:
+  resourceSelectors:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: code-server
+    - apiVersion: v1
+      kind: Service
+      name: code-server
+  placement:
+    clusterAffinity:
+      labelSelector:
+        matchExpressions:
+          - key: workload-type
+            operator: In
+            values:
+              - iot
+    spreadConstraints:
+      - spreadByField: cluster
+        maxGroups: 1
+        minGroups: 1
+
+---
+apiVersion: policy.karmada.io/v1alpha1
+kind: PropagationPolicy
+metadata:
+  name: influxdb
+  namespace: home-assistant
+spec:
+  resourceSelectors:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: influxdb
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      name: influxdb-data
+    - apiVersion: v1
+      kind: Service
+      name: influxdb
+  placement:
+    clusterAffinity:
+      labelSelector:
+        matchExpressions:
+          - key: workload-type
+            operator: In
+            values:
+              - iot
+    spreadConstraints:
+      - spreadByField: cluster
+        maxGroups: 1
+        minGroups: 1

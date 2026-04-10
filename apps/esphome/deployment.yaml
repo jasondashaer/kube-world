@@ -1,0 +1,95 @@
+# ESPHome — configure ESP8266/ESP32 microcontrollers via YAML
+# Build and flash custom firmware for sensors, switches, displays.
+# Devices report to HA via native API or MQTT.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: esphome-config
+  namespace: home-assistant
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 2Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: esphome
+  namespace: home-assistant
+  labels:
+    app.kubernetes.io/name: esphome
+    app.kubernetes.io/part-of: kube-world
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: esphome
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: esphome
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: esphome
+          image: ghcr.io/esphome/esphome:2025.4.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 6052
+          env:
+            - name: TZ
+              value: "America/New_York"
+            - name: ESPHOME_DASHBOARD_USE_PING
+              value: "true"
+          volumeMounts:
+            - name: config
+              mountPath: /config
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "1Gi"
+              cpu: "2000m"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 6052
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 6052
+            initialDelaySeconds: 15
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: esphome-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: esphome
+  namespace: home-assistant
+  labels:
+    app.kubernetes.io/name: esphome
+    app.kubernetes.io/part-of: kube-world
+spec:
+  type: ClusterIP
+  ports:
+    - port: 6052
+      targetPort: 6052
+      name: http
+  selector:
+    app.kubernetes.io/name: esphome

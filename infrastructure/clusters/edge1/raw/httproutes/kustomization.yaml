@@ -3,3 +3,8 @@ kind: Kustomization
 resources:
   - home-assistant.yaml
   - companion.yaml
+  - nodered.yaml
+  - zigbee2mqtt.yaml
+  - esphome.yaml
+  - code-server.yaml
+  - influxdb.yaml

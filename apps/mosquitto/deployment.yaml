@@ -1,0 +1,104 @@
+# Mosquitto MQTT broker — message bus for IoT devices
+# Zigbee2MQTT, ESPHome, and other IoT integrations publish/subscribe here.
+# HA connects to this via the MQTT integration.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mosquitto-data
+  namespace: home-assistant
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mosquitto-config
+  namespace: home-assistant
+  labels:
+    app.kubernetes.io/name: mosquitto
+    app.kubernetes.io/part-of: kube-world
+data:
+  mosquitto.conf: |
+    listener 1883
+    allow_anonymous true
+    persistence true
+    persistence_location /mosquitto/data/
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mosquitto
+  namespace: home-assistant
+  labels:
+    app.kubernetes.io/name: mosquitto
+    app.kubernetes.io/part-of: kube-world
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mosquitto
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mosquitto
+    spec:
+      containers:
+        - name: mosquitto
+          image: docker.io/library/eclipse-mosquitto:2.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: mqtt
+              containerPort: 1883
+          volumeMounts:
+            - name: data
+              mountPath: /mosquitto/data
+            - name: config
+              mountPath: /mosquitto/config/mosquitto.conf
+              subPath: mosquitto.conf
+          resources:
+            requests:
+              memory: "32Mi"
+              cpu: "10m"
+            limits:
+              memory: "128Mi"
+              cpu: "200m"
+          livenessProbe:
+            tcpSocket:
+              port: 1883
+            initialDelaySeconds: 10
+            periodSeconds: 30
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: mosquitto-data
+        - name: config
+          configMap:
+            name: mosquitto-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mosquitto
+  namespace: home-assistant
+  labels:
+    app.kubernetes.io/name: mosquitto
+    app.kubernetes.io/part-of: kube-world
+spec:
+  type: ClusterIP
+  ports:
+    - port: 1883
+      targetPort: 1883
+      name: mqtt
+  selector:
+    app.kubernetes.io/name: mosquitto

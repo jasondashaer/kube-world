@@ -104,3 +104,130 @@ spec:
       key: value
   dependsOn:
     - name: apps-base
+
+---
+# IoT companion apps — all deploy to home-assistant namespace on edge clusters
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: apps-nodered
+  namespace: flux-system
+spec:
+  interval: 5m
+  path: ./apps/nodered
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: kube-world
+  kubeConfig:
+    secretRef:
+      name: karmada-kubeconfig
+      key: value
+  dependsOn:
+    - name: apps-base
+    - name: karmada-propagation-policies
+
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: apps-mosquitto
+  namespace: flux-system
+spec:
+  interval: 5m
+  path: ./apps/mosquitto
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: kube-world
+  kubeConfig:
+    secretRef:
+      name: karmada-kubeconfig
+      key: value
+  dependsOn:
+    - name: apps-base
+    - name: karmada-propagation-policies
+
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: apps-zigbee2mqtt
+  namespace: flux-system
+spec:
+  interval: 5m
+  path: ./apps/zigbee2mqtt
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: kube-world
+  kubeConfig:
+    secretRef:
+      name: karmada-kubeconfig
+      key: value
+  dependsOn:
+    - name: apps-base
+    - name: karmada-propagation-policies
+
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: apps-esphome
+  namespace: flux-system
+spec:
+  interval: 5m
+  path: ./apps/esphome
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: kube-world
+  kubeConfig:
+    secretRef:
+      name: karmada-kubeconfig
+      key: value
+  dependsOn:
+    - name: apps-base
+    - name: karmada-propagation-policies
+
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: apps-code-server
+  namespace: flux-system
+spec:
+  interval: 5m
+  path: ./apps/code-server
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: kube-world
+  kubeConfig:
+    secretRef:
+      name: karmada-kubeconfig
+      key: value
+  dependsOn:
+    - name: apps-base
+    - name: karmada-propagation-policies
+
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: apps-influxdb
+  namespace: flux-system
+spec:
+  interval: 5m
+  path: ./apps/influxdb
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: kube-world
+  kubeConfig:
+    secretRef:
+      name: karmada-kubeconfig
+      key: value
+  dependsOn:
+    - name: apps-base
+    - name: karmada-propagation-policies

@@ -2656,41 +2656,35 @@ configure_oidc_rancher() {
         return 0
     fi
 
-    # Pre-configure the Generic OIDC auth config via kubectl. Rancher's
-    # API requires a browser-based testAndApply flow to fully enable OIDC
-    # (user must login via IdP to prove it works). We can't automate
-    # that step. Instead, we set up the CRD so the user just needs to
-    # complete the setup in the Rancher UI with one click.
-    # Pre-configure the Generic OIDC auth config with enabled=false.
-    # Fields are pre-filled so the user only needs to paste the client
-    # secret (Rancher never displays stored secrets) and click Enable.
+    # Configure and enable OIDC entirely via kubectl patch.
+    # All endpoint fields must be set explicitly (Rancher's "Specify"
+    # endpoints mode). Then we set enabled=true directly — no browser
+    # testAndApply step needed.
     kubectl patch authconfig genericoidc --type=merge -p "{
-        \"enabled\": false,
+        \"enabled\": true,
         \"clientId\": \"${client_id}\",
         \"clientSecret\": \"${client_secret}\",
         \"issuer\": \"${issuer_url}\",
-        \"rancherUrl\": \"https://rancher.${DOMAIN}/verify-auth\",
+        \"rancherUrl\": \"https://rancher.${DOMAIN}\",
         \"scope\": \"openid profile email\",
         \"authEndpoint\": \"${issuer_url}/oauth/v2/authorize\",
+        \"tokenEndpoint\": \"${issuer_url}/oauth/v2/token\",
+        \"jwksUrl\": \"${issuer_url}/oauth/v2/keys\",
+        \"userInfoEndpoint\": \"${issuer_url}/oidc/v1/userinfo\",
         \"accessMode\": \"unrestricted\"
     }" > /dev/null 2>&1 || warn "  kubectl patch failed"
 
     _rancher_pf_stop
 
-    log "Rancher OIDC pre-configured ✓"
-    log ""
-    log "  ┌─────────────────────────────────────────────────────┐"
-    log "  │  ONE-TIME STEP: Complete Rancher SSO                │"
-    log "  │                                                     │"
-    log "  │  1. Login locally at https://rancher.${DOMAIN}      │"
-    log "  │  2. ☰ → Users & Authentication → Auth Provider      │"
-    log "  │  3. Select 'Generic OIDC'                           │"
-    log "  │  4. Paste Client Secret:                            │"
-    log "  │     ${client_secret}                                │"
-    log "  │  5. Switch Endpoints from 'Generate' to 'Specify'   │"
-    log "  │  6. Click 'Enable' → login via Zitadel              │"
-    log "  └─────────────────────────────────────────────────────┘"
-    log ""
+    log "Rancher OIDC enabled ✓"
+
+    # Map Zitadel groups → Rancher roles
+    log "Mapping Zitadel groups to Rancher roles..."
+    if bash "${SCRIPT_DIR}/scripts/finalize-oidc.sh" 2>&1; then
+        log "Rancher OIDC group mappings complete ✓"
+    else
+        warn "Group mapping had issues — run ./scripts/finalize-oidc.sh manually"
+    fi
 }
 
 #===============================================================================

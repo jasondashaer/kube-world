@@ -12,6 +12,20 @@ metadata:
     app.kubernetes.io/part-of: kube-world
 data:
   configuration.yaml: |
+    # Home identity and location — pre-configured to skip onboarding wizard.
+    # Change these values and push to GitLab to update.
+    homeassistant:
+      name: "Home"
+      latitude: 35.2271
+      longitude: -80.8431
+      elevation: 229
+      unit_system: us_customary
+      time_zone: "America/New_York"
+      currency: "USD"
+      country: "US"
+      language: "en"
+      external_url: "https://ha.edge1.kubew.dev"
+
     # Loads default set of integrations. Do not remove.
     default_config:
 

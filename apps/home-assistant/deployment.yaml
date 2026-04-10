@@ -85,7 +85,9 @@ spec:
             - sh
             - -c
             - |
-              apk add --no-cache git >/dev/null 2>&1
+              apk add --no-cache git python3 >/dev/null 2>&1
+
+              # 1. Install OIDC custom component
               COMP_DIR="/config/custom_components/auth_oidc"
               if [ ! -f "$COMP_DIR/manifest.json" ]; then
                 echo "Installing hass-oidc-auth..."
@@ -99,7 +101,79 @@ spec:
               fi
               echo "Patching injection.js..."
               cp /config-patches/injection.js "$COMP_DIR/static/injection.js"
-              echo "Done"
+
+              # 2. Pre-seed onboarding + auth to skip the first-time wizard.
+              # Only runs on fresh PVC (no .storage/onboarding file yet).
+              mkdir -p /config/.storage
+              if [ ! -f /config/.storage/onboarding ]; then
+                echo "Pre-seeding onboarding state..."
+
+                # Mark all onboarding steps as done
+                cat > /config/.storage/onboarding << 'ONBOARD'
+              {"version":4,"minor_version":1,"key":"onboarding","data":{"done":["user","core_config","analytics","integration"]}}
+              ONBOARD
+
+                # Create admin user with OIDC-only auth (no local password needed
+                # since SSO handles authentication). The owner user is required for
+                # HA to consider itself set up.
+                python3 -c "
+              import json, uuid, datetime
+              auth = {
+                'version': 1,
+                'minor_version': 1,
+                'key': 'auth',
+                'data': {
+                  'users': [
+                    {
+                      'id': uuid.uuid4().hex,
+                      'group_ids': ['system-admin'],
+                      'is_owner': True,
+                      'is_active': True,
+                      'name': 'Admin',
+                      'system_generated': False,
+                      'local_only': False
+                    },
+                    {
+                      'id': uuid.uuid4().hex,
+                      'group_ids': ['system-read-only'],
+                      'is_owner': False,
+                      'is_active': True,
+                      'name': 'Home Assistant Content',
+                      'system_generated': True,
+                      'local_only': False
+                    },
+                    {
+                      'id': uuid.uuid4().hex,
+                      'group_ids': ['system-admin'],
+                      'is_owner': False,
+                      'is_active': True,
+                      'name': 'Home Assistant Cast',
+                      'system_generated': True,
+                      'local_only': False
+                    }
+                  ],
+                  'groups': [
+                    {'id': 'system-admin', 'name': 'Administrators'},
+                    {'id': 'system-users', 'name': 'Users'},
+                    {'id': 'system-read-only', 'name': 'Read Only'}
+                  ],
+                  'credentials': [],
+                  'refresh_tokens': []
+                }
+              }
+              with open('/config/.storage/auth', 'w') as f:
+                json.dump(auth, f)
+              print('Auth file created with admin owner user')
+              "
+                echo "Onboarding pre-seeded — wizard will be skipped"
+              else
+                echo "Onboarding already completed"
+              fi
+
+              # 3. Create themes directory if missing (HA expects it)
+              mkdir -p /config/themes
+
+              echo "Init complete"
           volumeMounts:
             - name: config
               mountPath: /config

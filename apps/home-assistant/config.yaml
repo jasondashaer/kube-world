@@ -48,6 +48,8 @@ data:
     auth_oidc:
       client_id: "HA_OIDC_CLIENT_ID"
       discovery_url: "https://auth.DOMAIN/.well-known/openid-configuration"
+      network:
+        tls_verify: false
 
     # Include files for automations, scripts, scenes
     automation: !include automations.yaml

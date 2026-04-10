@@ -14,3 +14,4 @@ spec:
     kind: ClusterIssuer
   dnsNames:
     - "*.edge1.kubew.dev"
+    - "edge1.kubew.dev"

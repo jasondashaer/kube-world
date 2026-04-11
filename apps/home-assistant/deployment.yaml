@@ -199,18 +199,20 @@ spec:
 
               # If a local password is provided, create the local credential.
               # The HA mobile app needs this since it can't handle OIDC.
+              import base64
               local_user = os.environ.get('HA_LOCAL_USERNAME', 'admin')
               local_pass = os.environ.get('HA_LOCAL_PASSWORD', '')
               if local_pass:
-                  # bcrypt hash for auth_provider.homeassistant storage
+                  # HA stores bcrypt hash base64-encoded (not the raw bcrypt string)
                   hashed = bcrypt.hashpw(local_pass.encode('utf-8'),
-                                         bcrypt.gensalt(12)).decode('utf-8')
+                                         bcrypt.gensalt(12))
+                  encoded = base64.b64encode(hashed).decode('utf-8')
                   ha_auth = {
                       'version': 1,
                       'minor_version': 1,
                       'key': 'auth_provider.homeassistant',
                       'data': {
-                          'users': [{'username': local_user, 'password': hashed}],
+                          'users': [{'username': local_user, 'password': encoded}],
                       },
                   }
                   with open('/config/.storage/auth_provider.homeassistant', 'w') as f:

@@ -116,7 +116,7 @@ spec:
             - sh
             - -c
             - |
-              apk add --no-cache git python3 py3-bcrypt >/dev/null 2>&1
+              apk add --no-cache git python3 py3-bcrypt py3-jwt >/dev/null 2>&1
 
               # 1. Install OIDC custom component
               COMP_DIR="/config/custom_components/auth_oidc"
@@ -229,6 +229,47 @@ spec:
                   print(f'Local credential created: username={local_user}')
               else:
                   print('No HA_LOCAL_PASSWORD — skipping local credential (OIDC-only)')
+
+              # Generate a Long-Lived Access Token for the mobile app.
+              # The HA iOS/Android app can't handle OIDC SSO, so we pre-create
+              # an LLT that can be pasted into the app once.
+              import secrets as sec
+              import jwt as pyjwt
+              from datetime import datetime, timezone
+
+              rt_id = uuid.uuid4().hex
+              jwt_key = sec.token_hex(64)
+              now = datetime.now(timezone.utc)
+
+              auth['data']['refresh_tokens'].append({
+                  'id': rt_id,
+                  'user_id': admin_id,
+                  'client_id': None,
+                  'client_name': 'Mobile App (auto-generated)',
+                  'client_icon': None,
+                  'token_type': 'long_lived_access_token',
+                  'created_at': now.isoformat(),
+                  'access_token_expiration': 1800.0,
+                  'token': sec.token_hex(64),
+                  'jwt_key': jwt_key,
+                  'last_used_at': None,
+                  'last_used_ip': None,
+                  'expire_at': None,
+                  'credential_id': None,
+                  'version': '2025.4.2',
+              })
+
+              # Compute the JWT
+              llt = pyjwt.encode({
+                  'iss': rt_id,
+                  'iat': int(now.timestamp()),
+                  'exp': int(now.timestamp()) + (10 * 365 * 24 * 3600),
+              }, jwt_key, algorithm='HS256')
+
+              # Write the LLT to a file for easy retrieval
+              with open('/config/.mobile-token', 'w') as f:
+                  f.write(llt)
+              print(f'Mobile app LLT generated → /config/.mobile-token')
 
               with open('/config/.storage/auth', 'w') as f:
                   json.dump(auth, f)

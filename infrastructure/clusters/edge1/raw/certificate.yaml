@@ -12,11 +12,12 @@ spec:
   issuerRef:
     name: letsencrypt-prod
     kind: ClusterIssuer
-  # The second SAN (internal.edge1.kubew.dev) serves two purposes:
-  #   1. Creates a new LE rate limit bucket (different identifier set)
-  #   2. Uses a different TXT record than the wildcard, avoiding the
-  #      cert-manager concurrent challenge race condition
+  # The second SAN creates a new LE rate limit bucket (different identifier
+  # set) and uses a different TXT record name than the wildcard, avoiding
+  # the cert-manager concurrent challenge race condition.
+  # Must be a two-level subdomain — one-level is covered by the wildcard
+  # and LE rejects it as redundant.
   # Can be removed once the old *.edge1.kubew.dev bucket fully clears (~Apr 17)
   dnsNames:
     - "*.edge1.kubew.dev"
-    - "internal.edge1.kubew.dev"
+    - "cert.internal.edge1.kubew.dev"

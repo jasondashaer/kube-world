@@ -65,21 +65,32 @@ spec:
       # starts anyway (with the web UI showing an error instead of
       # crashlooping the whole pod).
       initContainers:
-        - name: check-dongle
+        - name: init-config
           image: docker.io/library/busybox:1.37
           command:
             - sh
             - -c
             - |
+              # Check for Zigbee dongle
               if [ -c /dev/ttyUSB0 ] || [ -c /dev/zigbee ]; then
                 echo "Zigbee dongle found: $(ls -la /dev/ttyUSB0 /dev/zigbee 2>/dev/null | head -1)"
               else
                 echo "WARNING: No Zigbee dongle detected at /dev/ttyUSB0 or /dev/zigbee"
-                echo "Zigbee2MQTT will start but won't be able to connect to devices."
-                echo "Plug in a Zigbee coordinator and restart the pod."
+                echo "Zigbee2MQTT will start but won't connect to devices."
+              fi
+              # Copy config from ConfigMap to PVC (Z2M needs to write to it
+              # for network_key generation and runtime settings)
+              if [ ! -f /app/data/configuration.yaml ] || [ -f /config-template/configuration.yaml ]; then
+                cp /config-template/configuration.yaml /app/data/configuration.yaml
+                echo "Configuration copied to PVC"
               fi
           securityContext:
             privileged: true
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+            - name: config
+              mountPath: /config-template
       containers:
         - name: zigbee2mqtt
           image: ghcr.io/koenkk/zigbee2mqtt:1.42.0
@@ -93,9 +104,6 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /app/data
-            - name: config
-              mountPath: /app/data/configuration.yaml
-              subPath: configuration.yaml
           # Privileged for access to host USB devices (/dev/ttyUSB0)
           securityContext:
             privileged: true

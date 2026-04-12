@@ -332,12 +332,10 @@ spec:
             - name: localtime
               mountPath: /etc/localtime
               readOnly: true
-            - name: usb
-              mountPath: /dev/bus/usb
-            - name: ttyusb
-              mountPath: /dev/ttyUSB0
-            - name: ttyacm
-              mountPath: /dev/ttyACM0
+            # No explicit /dev/ttyUSB0 or /dev/ttyACM0 mounts needed —
+            # privileged: true gives access to all host devices.
+            # Explicit hostPath mounts with type:"" create empty DIRECTORIES
+            # that shadow real device nodes when dongles are plugged in later.
           securityContext:
             privileged: true
           resources:
@@ -371,17 +369,9 @@ spec:
         - name: localtime
           hostPath:
             path: /etc/localtime
-        - name: usb
-          hostPath:
-            path: /dev/bus/usb
-        - name: ttyusb
-          hostPath:
-            path: /dev/ttyUSB0
-            type: ""
-        - name: ttyacm
-          hostPath:
-            path: /dev/ttyACM0
-            type: ""
+        # Privileged container accesses host /dev directly — no explicit
+        # USB device mounts needed. Removed ttyUSB0/ttyACM0 hostPath mounts
+        # which created empty directories that shadowed real device nodes.
 
       tolerations:
         - key: "iot-only"

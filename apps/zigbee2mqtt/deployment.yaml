@@ -32,7 +32,7 @@ data:
       base_topic: zigbee2mqtt
       server: mqtt://mosquitto.home-assistant.svc.cluster.local:1883
     serial:
-      port: /dev/zigbee
+      port: /dev/ttyUSB0
     frontend:
       port: 8080
     advanced:
@@ -60,6 +60,26 @@ spec:
       labels:
         app.kubernetes.io/name: zigbee2mqtt
     spec:
+      # Init container checks for the Zigbee dongle before starting.
+      # If no dongle is found, it exits cleanly so the main container
+      # starts anyway (with the web UI showing an error instead of
+      # crashlooping the whole pod).
+      initContainers:
+        - name: check-dongle
+          image: docker.io/library/busybox:1.37
+          command:
+            - sh
+            - -c
+            - |
+              if [ -c /dev/ttyUSB0 ] || [ -c /dev/zigbee ]; then
+                echo "Zigbee dongle found: $(ls -la /dev/ttyUSB0 /dev/zigbee 2>/dev/null | head -1)"
+              else
+                echo "WARNING: No Zigbee dongle detected at /dev/ttyUSB0 or /dev/zigbee"
+                echo "Zigbee2MQTT will start but won't be able to connect to devices."
+                echo "Plug in a Zigbee coordinator and restart the pod."
+              fi
+          securityContext:
+            privileged: true
       containers:
         - name: zigbee2mqtt
           image: ghcr.io/koenkk/zigbee2mqtt:1.42.0
@@ -76,8 +96,7 @@ spec:
             - name: config
               mountPath: /app/data/configuration.yaml
               subPath: configuration.yaml
-            - name: zigbee-device
-              mountPath: /dev/zigbee
+          # Privileged for access to host USB devices (/dev/ttyUSB0)
           securityContext:
             privileged: true
           resources:
@@ -93,6 +112,7 @@ spec:
               port: 8080
             initialDelaySeconds: 30
             periodSeconds: 30
+            failureThreshold: 10
           readinessProbe:
             httpGet:
               path: /
@@ -105,10 +125,8 @@ spec:
         - name: config
           configMap:
             name: zigbee2mqtt-config
-        - name: zigbee-device
-          hostPath:
-            path: /dev/zigbee
-            type: ""
+        # No explicit /dev/ttyUSB0 mount — privileged gives access
+        # to all host devices. Explicit mounts shadow real device nodes.
 
 ---
 apiVersion: v1

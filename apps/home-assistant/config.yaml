@@ -49,6 +49,11 @@ data:
       client_id: "HA_OIDC_CLIENT_ID"
       client_secret: "HA_OIDC_CLIENT_SECRET"
       discovery_url: "https://auth.DOMAIN/.well-known/openid-configuration"
+      features:
+        include_groups_scope: true
+      roles:
+        admin: "admin"
+        user: "user"
       network:
         tls_verify: false
 

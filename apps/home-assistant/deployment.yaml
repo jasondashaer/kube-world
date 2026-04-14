@@ -130,8 +130,16 @@ spec:
               else
                 echo "hass-oidc-auth already installed"
               fi
-              echo "Patching injection.js..."
+              echo "Patching injection.js + mobile app OIDC flow..."
               cp /config-templates/injection.js "$COMP_DIR/static/injection.js"
+              # Patch OIDC redirect + callback handlers to support mobile app
+              # auth flow (homeassistant:// callback scheme)
+              if [ -f /config-templates/redirect.py ]; then
+                cp /config-templates/redirect.py "$COMP_DIR/endpoints/redirect.py"
+              fi
+              if [ -f /config-templates/callback.py ]; then
+                cp /config-templates/callback.py "$COMP_DIR/endpoints/callback.py"
+              fi
 
               # 2. Pre-seed onboarding + auth to skip the first-time wizard.
               # Only runs on fresh PVC (no .storage/onboarding file yet).

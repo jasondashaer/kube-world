@@ -49,12 +49,13 @@ data:
       client_id: "HA_OIDC_CLIENT_ID"
       client_secret: "HA_OIDC_CLIENT_SECRET"
       discovery_url: "https://auth.DOMAIN/.well-known/openid-configuration"
-      # Zitadel uses project audience scope for roles (not standard "groups" scope).
-      # The claim-flattening action in Zitadel transforms the nested
-      # urn:zitadel:iam:org:project:roles claim into a flat "groups" array.
       groups_scope: "urn:zitadel:iam:org:project:id:zitadel:aud"
       features:
         include_groups_scope: true
+      # Zitadel sends roles as nested objects in urn:zitadel:iam:org:project:roles
+      # The component reads groups from this claim. We set the claim name here.
+      claims:
+        groups: "urn:zitadel:iam:org:project:roles"
       roles:
         admin: "admin"
         user: "user"

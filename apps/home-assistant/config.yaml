@@ -101,7 +101,15 @@ data:
         btn.addEventListener("click", function() {
           btn.textContent = "Redirecting...";
           btn.disabled = true;
-          window.location.href = "/auth/oidc/redirect";
+          var params = new URLSearchParams(window.location.search);
+          var appRedirect = params.get("redirect_uri") || "";
+          var clientId = params.get("client_id") || "";
+          var url = "/auth/oidc/redirect";
+          if (appRedirect) {
+            url += "?app_redirect=" + encodeURIComponent(appRedirect)
+              + "&app_client_id=" + encodeURIComponent(clientId);
+          }
+          window.location.href = url;
         });
 
         container.appendChild(btn);

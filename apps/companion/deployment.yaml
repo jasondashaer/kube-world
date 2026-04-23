@@ -64,6 +64,29 @@ spec:
                     values:
                       - edge
 
+      # Seed DB from ConfigMap on fresh PVC (first boot only)
+      initContainers:
+        - name: seed-config
+          image: docker.io/library/busybox:1.37
+          command:
+            - sh
+            - -c
+            - |
+              if [ ! -f /companion/v4.2/db.sqlite ] || [ ! -s /companion/v4.2/db.sqlite ]; then
+                echo "Fresh PVC — seeding Companion DB from ConfigMap..."
+                mkdir -p /companion/v4.2
+                cp /seed/db.sqlite /companion/v4.2/db.sqlite
+                chown 1000:1000 /companion/v4.2/db.sqlite 2>/dev/null || true
+                echo "DB seeded"
+              else
+                echo "Existing DB found — skipping seed"
+              fi
+          volumeMounts:
+            - name: data
+              mountPath: /companion
+            - name: seed-db
+              mountPath: /seed
+
       # hostNetwork for LAN device discovery (multicast/mDNS)
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
@@ -110,6 +133,10 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: companion-data
+        - name: seed-db
+          configMap:
+            name: companion-seed-db
+            optional: true
 
       tolerations:
         - key: "iot-only"

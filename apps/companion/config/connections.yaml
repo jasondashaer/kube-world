@@ -1,0 +1,21 @@
+# Companion Connection Definitions
+# Update IPs and credentials for your environment.
+# These get imported into Companion when deploying a fresh config.
+
+meta:
+  companion_version: "4.2"
+
+connections:
+  - id: homeassistant
+    module: "homeassistant-server"
+    label: "Home Assistant"
+    enabled: true
+    config:
+      host: "http://home-assistant.home-assistant.svc.cluster.local:8123"
+      access_token: ""  # Set via Companion UI or populate from ha-oidc-config secret
+
+  - id: internal
+    module: "bitfocus-companion"
+    label: "Companion"
+    enabled: true
+    config: {}

@@ -1,0 +1,15 @@
+# Custom Companion Variables
+# These persist across button presses and can be displayed on buttons.
+
+variables:
+  - name: startup_phase
+    default: "Idle"
+    persist: false
+
+  - name: service_mode
+    default: "Off"
+    persist: true
+
+  - name: all_connected
+    default: "false"
+    persist: false

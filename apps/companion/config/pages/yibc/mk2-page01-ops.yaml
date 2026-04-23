@@ -1,0 +1,236 @@
+# YIBC — Stream Deck MK2 Page 1: Operations
+# 5x3 grid — versatile control for streaming, power, audio, lighting
+
+page:
+  number: 10
+  name: "YIBC Ops"
+  device: mk2  # 5x3 = 15 buttons
+
+buttons:
+  # ═══ Row 0: Status indicators ═══
+  - row: 0
+    col: 0
+    style:
+      text: "PTZ"
+      bgcolor: "#CC0000"
+      size: 14
+    feedbacks:
+      - type: ptz:connected
+        style:
+          bgcolor: "#00CC00"
+          text: "PTZ\n● OK"
+
+  - row: 0
+    col: 1
+    style:
+      text: "Stream"
+      bgcolor: "#CC0000"
+      size: 14
+    feedbacks:
+      # TODO: Replace with actual streaming module feedback
+      - type: obs:connected
+        style:
+          bgcolor: "#00CC00"
+          text: "Stream\n● OK"
+
+  - row: 0
+    col: 2
+    style:
+      text: "Audio"
+      bgcolor: "#CC0000"
+      size: 14
+    feedbacks:
+      # TODO: Replace with actual audio module feedback
+      - type: yamaha:connected
+        style:
+          bgcolor: "#00CC00"
+          text: "Audio\n● OK"
+
+  - row: 0
+    col: 3
+    style:
+      text: "HA"
+      bgcolor: "#CC0000"
+      size: 14
+    feedbacks:
+      - type: homeassistant:connected
+        style:
+          bgcolor: "#00CC00"
+          text: "HA\n● OK"
+
+  - row: 0
+    col: 4
+    style:
+      text: "$(internal:time_hms)"
+      bgcolor: "#333333"
+      size: 14
+
+  # ═══ Row 1: Primary actions ═══
+  - row: 1
+    col: 0
+    style:
+      text: "Power\nOn"
+      bgcolor: "#006600"
+      size: 14
+    actions:
+      down:
+        # TODO: Configure WOL/startup sequence for YIBC equipment
+        - action: internal:variable_set
+          options: { variable: "startup_phase", value: "Starting" }
+
+  - row: 1
+    col: 1
+    style:
+      text: "Power\nOff"
+      bgcolor: "#CC0000"
+      size: 14
+    steps:
+      - style:
+          text: "Power\nOff"
+          bgcolor: "#660000"
+        actions:
+          down:
+            - action: internal:step_next
+      - style:
+          text: "CONFIRM\n確認？"
+          bgcolor: "#FF0000"
+        actions:
+          down:
+            # TODO: Configure shutdown sequence for YIBC equipment
+            - action: internal:step_set
+              options: { step: 1 }
+
+  - row: 1
+    col: 2
+    style:
+      text: "STREAM\n配信"
+      bgcolor: "#666666"
+      size: 14
+    actions:
+      down:
+        # TODO: Replace with actual stream toggle action
+        - action: obs:toggle_streaming
+    feedbacks:
+      - type: obs:streaming
+        style:
+          bgcolor: "#CC0000"
+          text: "● LIVE\n$(obs:stream_timecode)"
+
+  - row: 1
+    col: 3
+    style:
+      text: "REC\n録画"
+      bgcolor: "#666666"
+      size: 14
+    actions:
+      down:
+        # TODO: Replace with actual record toggle action
+        - action: obs:toggle_recording
+    feedbacks:
+      - type: obs:recording
+        style:
+          bgcolor: "#CC0000"
+          text: "● REC\n$(obs:record_timecode)"
+
+  - row: 1
+    col: 4
+    style:
+      text: "Scene 1\nシーン"
+      bgcolor: "#0066CC"
+      size: 12
+    actions:
+      down:
+        # TODO: Replace with actual scene action
+        - action: obs:set_current_scene
+          options: { scene: "Main" }
+    feedbacks:
+      - type: obs:scene_active
+        options: { scene: "Main" }
+        style:
+          bgcolor: "#00CC00"
+
+  # ═══ Row 2: Secondary actions ═══
+  - row: 2
+    col: 0
+    style:
+      text: "Mute 1\nミュート"
+      bgcolor: "#00CC00"
+      size: 12
+    actions:
+      down:
+        # TODO: Replace with actual audio mute action
+        - action: yamaha:channel_mute_toggle
+          options: { channel: 1 }
+    feedbacks:
+      - type: yamaha:channel_muted
+        options: { channel: 1 }
+        style:
+          bgcolor: "#CC0000"
+          text: "MUTED"
+
+  - row: 2
+    col: 1
+    style:
+      text: "Mute 2\nミュート"
+      bgcolor: "#00CC00"
+      size: 12
+    actions:
+      down:
+        - action: yamaha:channel_mute_toggle
+          options: { channel: 2 }
+    feedbacks:
+      - type: yamaha:channel_muted
+        options: { channel: 2 }
+        style:
+          bgcolor: "#CC0000"
+          text: "MUTED"
+
+  - row: 2
+    col: 2
+    style:
+      text: "Mute All\n全ミュート"
+      bgcolor: "#660000"
+      size: 12
+    actions:
+      down:
+        # TODO: Mute master or all channels
+        - action: yamaha:channel_mute_set
+          options: { channel: "stereo", mute: true }
+      long_press:
+        - action: yamaha:channel_mute_set
+          options: { channel: "stereo", mute: false }
+
+  - row: 2
+    col: 3
+    style:
+      text: "Lights\n照明"
+      bgcolor: "#333333"
+      size: 14
+    actions:
+      down:
+        - action: homeassistant:call_service
+          options:
+            domain: "light"
+            service: "toggle"
+            entity_id: "light.sanctuary"
+    feedbacks:
+      - type: homeassistant:entity_state
+        options:
+          entity_id: "light.sanctuary"
+          value: "on"
+        style:
+          bgcolor: "#CCCC00"
+          text: "Lights\n● ON"
+
+  - row: 2
+    col: 4
+    style:
+      text: "→ PTZ"
+      bgcolor: "#0066CC"
+      size: 14
+    actions:
+      down:
+        # Note: This navigates the MK2's page, not the Plus.
+        # The Plus stays on its PTZ page independently.
+        - action: internal:page_set
+          options: { page: 11 }

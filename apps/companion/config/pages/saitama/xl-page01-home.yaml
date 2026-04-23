@@ -1,0 +1,411 @@
+# Saitama — Stream Deck XL Page 1: Home / Dashboard
+# 8x4 = 32 buttons — comprehensive production control
+# Top row: status, Middle: primary actions, Bottom: ATEM + nav
+
+page:
+  number: 1
+  name: "Home"
+  device: xl  # 8x4
+
+buttons:
+  # ═══ Row 0: Connection status + clock ═══
+  - row: 0
+    col: 0
+    style:
+      text: "ATEM"
+      bgcolor: "#CC0000"
+      size: 14
+    feedbacks:
+      - type: atem:connected
+        style:
+          bgcolor: "#00CC00"
+          text: "ATEM\n● OK"
+
+  - row: 0
+    col: 1
+    style:
+      text: "Stream"
+      bgcolor: "#CC0000"
+      size: 14
+    feedbacks:
+      - type: obs:connected
+        style:
+          bgcolor: "#00CC00"
+          text: "Stream\n● OK"
+
+  - row: 0
+    col: 2
+    style:
+      text: "Audio"
+      bgcolor: "#CC0000"
+      size: 14
+    feedbacks:
+      # TODO: Replace with actual audio module
+      - type: yamaha:connected
+        style:
+          bgcolor: "#00CC00"
+          text: "Audio\n● OK"
+
+  - row: 0
+    col: 3
+    style:
+      text: "Slides"
+      bgcolor: "#CC0000"
+      size: 14
+    feedbacks:
+      - type: propresenter:connected
+        style:
+          bgcolor: "#00CC00"
+          text: "Slides\n● OK"
+
+  - row: 0
+    col: 4
+    style:
+      text: "HA"
+      bgcolor: "#CC0000"
+      size: 14
+    feedbacks:
+      - type: homeassistant:connected
+        style:
+          bgcolor: "#00CC00"
+          text: "HA\n● OK"
+
+  - row: 0
+    col: 7
+    style:
+      text: "$(internal:time_hms)"
+      bgcolor: "#333333"
+      size: 18
+
+  # ═══ Row 1: Primary actions ═══
+  - row: 1
+    col: 0
+    style:
+      text: "Startup\n起動"
+      bgcolor: "#006600"
+      size: 14
+    actions:
+      down:
+        # TODO: Configure startup sequence for Saitama equipment
+        - action: internal:variable_set
+          options: { variable: "startup_phase", value: "Starting" }
+
+  - row: 1
+    col: 1
+    style:
+      text: "Shutdown\n終了"
+      bgcolor: "#660000"
+      size: 14
+    steps:
+      - style:
+          text: "Shutdown\n終了"
+          bgcolor: "#660000"
+        actions:
+          down:
+            - action: internal:step_next
+      - style:
+          text: "CONFIRM\n確認？"
+          bgcolor: "#FF0000"
+        actions:
+          down:
+            # TODO: Configure shutdown sequence
+            - action: internal:step_set
+              options: { step: 1 }
+
+  - row: 1
+    col: 2
+    style:
+      text: "STREAM\n配信"
+      bgcolor: "#666666"
+      size: 14
+    actions:
+      down:
+        - action: obs:toggle_streaming
+    feedbacks:
+      - type: obs:streaming
+        style:
+          bgcolor: "#CC0000"
+          text: "● LIVE\n$(obs:stream_timecode)"
+
+  - row: 1
+    col: 3
+    style:
+      text: "REC\n録画"
+      bgcolor: "#666666"
+      size: 14
+    actions:
+      down:
+        - action: obs:toggle_recording
+    feedbacks:
+      - type: obs:recording
+        style:
+          bgcolor: "#CC0000"
+          text: "● REC\n$(obs:record_timecode)"
+
+  # Row 1 cols 4-7: Scene/source shortcuts
+  - row: 1
+    col: 4
+    style:
+      text: "Scene 1\nメイン"
+      bgcolor: "#0066CC"
+      size: 12
+    actions:
+      down:
+        - action: obs:set_current_scene
+          options: { scene: "Main" }
+    feedbacks:
+      - type: obs:scene_active
+        options: { scene: "Main" }
+        style:
+          bgcolor: "#00CC00"
+
+  - row: 1
+    col: 5
+    style:
+      text: "Scene 2\nカメラ"
+      bgcolor: "#0066CC"
+      size: 12
+    actions:
+      down:
+        - action: obs:set_current_scene
+          options: { scene: "Camera" }
+    feedbacks:
+      - type: obs:scene_active
+        options: { scene: "Camera" }
+        style:
+          bgcolor: "#00CC00"
+
+  - row: 1
+    col: 6
+    style:
+      text: "Scene 3\nスライド"
+      bgcolor: "#0066CC"
+      size: 12
+    actions:
+      down:
+        - action: obs:set_current_scene
+          options: { scene: "Slides" }
+    feedbacks:
+      - type: obs:scene_active
+        options: { scene: "Slides" }
+        style:
+          bgcolor: "#00CC00"
+
+  - row: 1
+    col: 7
+    style:
+      text: "Scene 4\nPiP"
+      bgcolor: "#0066CC"
+      size: 12
+    actions:
+      down:
+        - action: obs:set_current_scene
+          options: { scene: "PiP" }
+    feedbacks:
+      - type: obs:scene_active
+        options: { scene: "PiP" }
+        style:
+          bgcolor: "#00CC00"
+
+  # ═══ Row 2: ATEM switching ═══
+  - row: 2
+    col: 0
+    style:
+      text: "CAM 1\nカメラ1"
+      bgcolor: "#666666"
+      size: 14
+    actions:
+      down:
+        - action: atem:set_preview_input
+          options: { input: 1 }
+      long_press:
+        - action: atem:set_program_input
+          options: { input: 1 }
+    feedbacks:
+      - type: atem:preview_tally
+        options: { input: 1 }
+        style:
+          bgcolor: "#00CC00"
+      - type: atem:program_tally
+        options: { input: 1 }
+        style:
+          bgcolor: "#CC0000"
+          text: "● LIVE\nカメラ1"
+
+  - row: 2
+    col: 1
+    style:
+      text: "CAM 2\nカメラ2"
+      bgcolor: "#666666"
+      size: 14
+    actions:
+      down:
+        - action: atem:set_preview_input
+          options: { input: 2 }
+      long_press:
+        - action: atem:set_program_input
+          options: { input: 2 }
+    feedbacks:
+      - type: atem:preview_tally
+        options: { input: 2 }
+        style:
+          bgcolor: "#00CC00"
+      - type: atem:program_tally
+        options: { input: 2 }
+        style:
+          bgcolor: "#CC0000"
+          text: "● LIVE\nカメラ2"
+
+  - row: 2
+    col: 2
+    style:
+      text: "CAM 3\nカメラ3"
+      bgcolor: "#666666"
+      size: 14
+    actions:
+      down:
+        - action: atem:set_preview_input
+          options: { input: 3 }
+      long_press:
+        - action: atem:set_program_input
+          options: { input: 3 }
+    feedbacks:
+      - type: atem:preview_tally
+        options: { input: 3 }
+        style:
+          bgcolor: "#00CC00"
+      - type: atem:program_tally
+        options: { input: 3 }
+        style:
+          bgcolor: "#CC0000"
+
+  - row: 2
+    col: 3
+    style:
+      text: "PC\nスライド"
+      bgcolor: "#666666"
+      size: 14
+    actions:
+      down:
+        - action: atem:set_preview_input
+          options: { input: 4 }
+      long_press:
+        - action: atem:set_program_input
+          options: { input: 4 }
+    feedbacks:
+      - type: atem:preview_tally
+        options: { input: 4 }
+        style:
+          bgcolor: "#00CC00"
+      - type: atem:program_tally
+        options: { input: 4 }
+        style:
+          bgcolor: "#CC0000"
+
+  - row: 2
+    col: 4
+    style:
+      text: "AUTO\n切替"
+      bgcolor: "#CCCC00"
+      size: 18
+    actions:
+      down:
+        - action: atem:auto_transition
+
+  - row: 2
+    col: 5
+    style:
+      text: "CUT\nカット"
+      bgcolor: "#CCCC00"
+      size: 18
+    actions:
+      down:
+        - action: atem:cut_transition
+
+  - row: 2
+    col: 6
+    style:
+      text: "FTB\n暗転"
+      bgcolor: "#333333"
+      size: 18
+    actions:
+      down:
+        - action: atem:toggle_ftb
+    feedbacks:
+      - type: atem:ftb_active
+        style:
+          bgcolor: "#CC0000"
+          text: "● FTB\n暗転中"
+
+  - row: 2
+    col: 7
+    style:
+      text: "DSK\nテロップ"
+      bgcolor: "#333333"
+      size: 14
+    actions:
+      down:
+        - action: atem:toggle_dsk
+          options: { key: 0 }
+    feedbacks:
+      - type: atem:dsk_on_air
+        options: { key: 0 }
+        style:
+          bgcolor: "#CC0000"
+          text: "● DSK ON"
+
+  # ═══ Row 3: Navigation to sub-pages ═══
+  - row: 3
+    col: 0
+    style:
+      text: "Audio\n音響"
+      bgcolor: "#0066CC"
+      size: 14
+    actions:
+      down:
+        - action: internal:page_set
+          options: { page: 4 }
+
+  - row: 3
+    col: 1
+    style:
+      text: "Slides\nスライド"
+      bgcolor: "#0066CC"
+      size: 14
+    actions:
+      down:
+        - action: internal:page_set
+          options: { page: 3 }
+
+  - row: 3
+    col: 2
+    style:
+      text: "Stream\n配信"
+      bgcolor: "#0066CC"
+      size: 14
+    actions:
+      down:
+        - action: internal:page_set
+          options: { page: 5 }
+
+  - row: 3
+    col: 3
+    style:
+      text: "Lights\n照明"
+      bgcolor: "#0066CC"
+      size: 14
+    actions:
+      down:
+        - action: internal:page_set
+          options: { page: 6 }
+
+  - row: 3
+    col: 7
+    style:
+      text: "EMERGENCY\n緊急"
+      bgcolor: "#CC0000"
+      size: 10
+    actions:
+      down:
+        - action: internal:page_set
+          options: { page: 10 }

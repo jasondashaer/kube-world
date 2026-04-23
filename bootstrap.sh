@@ -66,6 +66,7 @@ MODE="dev"
 STACK="karmada"  # karmada (Karmada+Flux) or fleet (legacy Fleet)
 PI_IP=""          # Set during setup_pi_cluster, used in completion messages
 SKIP_PREREQS=false
+SKIP_ANSIBLE=false
 DRY_RUN=false
 CLEANUP=false
 VERBOSE=false
@@ -784,7 +785,7 @@ tailscale_prune_stale_devices() {
         return 0
     fi
 
-    log "Pruning ALL Tailscale devices with pi-* hostnames..."
+    log "Pruning stale Tailscale devices with pi-* hostnames..."
 
     local ts_api="https://api.tailscale.com/api/v2"
     local all
@@ -794,21 +795,14 @@ tailscale_prune_stale_devices() {
         return 0
     fi
 
-    # Delete ALL pi-* devices — not just duplicates. On fresh wipe, ALL
-    # existing entries are stale because Ansible is about to register
-    # brand-new devices with fresh IPs. If we kept the "most recent"
-    # old entry, the edge Pi's `tailscale ip -4 pi-central` would
-    # resolve the OLD IP instead of the new one, breaking CoreDNS
-    # entries and causing the Rancher import to stay pending forever.
-    #
-    # This is safe because:
-    #   1. Ansible runs immediately after and re-authenticates both Pis
-    #   2. The new devices get clean hostnames (no pi-central-N suffix)
-    #      since we deleted all competing entries
-    #   3. Non-Pi devices (Mac, iPhone) are untouched (no "pi-" prefix)
+    # Only prune OFFLINE pi-* devices. Online devices are actively running
+    # and should not be deleted (e.g., when re-running bootstrap on a
+    # running cluster or after moving Pis to a new network).
+    # Duplicate hostnames (e.g., pi-central and pi-central-2) where the
+    # primary is online but a stale duplicate exists are also pruned.
     local to_delete
     to_delete=$(echo "$all" | jq -r '
-        [.devices[] | select(.hostname | startswith("pi-"))]
+        [.devices[] | select(.hostname | startswith("pi-")) | select(.online == false)]
         | .[] | "\(.nodeId) \(.hostname) \(.addresses[0])"
     ')
 
@@ -856,6 +850,24 @@ setup_pi_cluster() {
     log "Target Pi: ${PI_IP}"
 
     if [[ "$HOST_OS" == "darwin" ]]; then
+        if [[ "$SKIP_ANSIBLE" == "true" ]]; then
+            log "Skipping Ansible (--skip-ansible). Fetching kubeconfig only..."
+            mkdir -p "$KUBECONFIG_DIR"
+            if scp -o StrictHostKeyChecking=accept-new "admin@${PI_IP}:/etc/rancher/k3s/k3s.yaml" "${KUBECONFIG_DIR}/pi-config" 2>/dev/null; then
+                if [[ "$HOST_OS" == "darwin" ]]; then
+                    sed -i '' "s/127.0.0.1/${PI_IP}/g" "${KUBECONFIG_DIR}/pi-config"
+                else
+                    sed -i "s/127.0.0.1/${PI_IP}/g" "${KUBECONFIG_DIR}/pi-config"
+                fi
+                export KUBECONFIG="${KUBECONFIG_DIR}/pi-config"
+                log "Kubeconfig fetched ✓"
+            else
+                error "Could not fetch kubeconfig from ${PI_IP}"
+                exit 1
+            fi
+            return 0
+        fi
+
         # Running from Mac — provision Pi remotely via Ansible
         log "Provisioning Pi remotely from Mac via Ansible..."
 
@@ -3110,6 +3122,10 @@ parse_args() {
                 ;;
             --skip-prereqs)
                 SKIP_PREREQS=true
+                shift
+                ;;
+            --skip-ansible)
+                SKIP_ANSIBLE=true
                 shift
                 ;;
             --dry-run)

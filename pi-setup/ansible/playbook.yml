@@ -289,13 +289,42 @@
       register: ts_install
       until: ts_install is success
 
-    - name: Check if Tailscale is already authenticated
-      shell: tailscale status --json 2>/dev/null | grep -q '"BackendState":"Running"'
+    - name: Check if Tailscale has ever been authenticated
+      shell: |
+        # Check for existing node key — means device was previously registered.
+        # Don't re-auth if key exists (avoids wiping registration on network change).
+        # Only re-auth if truly never authenticated (fresh install).
+        if tailscale status --json 2>/dev/null | python3 -c "
+        import sys, json
+        d = json.load(sys.stdin)
+        # Has a self node with a key = previously authenticated
+        if d.get('Self', {}).get('PublicKey', ''):
+            sys.exit(0)
+        sys.exit(1)
+        " 2>/dev/null; then
+          echo "Previously authenticated"
+          exit 0
+        else
+          echo "Never authenticated"
+          exit 1
+        fi
       register: tailscale_authed
       failed_when: false
       changed_when: false
 
-    - name: Authenticate Tailscale (headless)
+    - name: Ensure Tailscale is connected (bring up if offline)
+      shell: >
+        tailscale up
+        --accept-routes
+        --hostname={{ node_name | default(inventory_hostname) }}
+        --ssh
+        --timeout=30s
+      when:
+        - tailscale_authed.rc == 0
+      failed_when: false
+      changed_when: false
+
+    - name: Authenticate Tailscale (fresh install only)
       shell: >
         tailscale up
         --authkey={{ tailscale_auth_key }}

@@ -66,7 +66,7 @@ def load_yaml_configs():
             config["triggers"] = data
         elif basename == "variables.yaml":
             config["custom_variables"] = data
-        elif basename.startswith("page"):
+        elif "page" in basename and basename.endswith(".yaml"):
             page_data = data.get("page", data)
             page_num = page_data.get("number", basename)
             config["pages"][str(page_num)] = data

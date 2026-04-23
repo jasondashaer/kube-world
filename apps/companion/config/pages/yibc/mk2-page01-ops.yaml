@@ -2,7 +2,7 @@
 # 5x3 grid — versatile control for streaming, power, audio, lighting
 
 page:
-  number: 10
+  number: 30
   name: "YIBC Ops"
   device: mk2  # 5x3 = 15 buttons
 
@@ -233,4 +233,4 @@ buttons:
         # Note: This navigates the MK2's page, not the Plus.
         # The Plus stays on its PTZ page independently.
         - action: internal:page_set
-          options: { page: 11 }
+          options: { page: 31 }

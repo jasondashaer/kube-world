@@ -81,10 +81,10 @@ spec:
               protocol: TCP
           env:
             - name: COMPANION_CONFIG_DIRECTORY
-              value: "/companion/data"
+              value: "/companion"
           volumeMounts:
             - name: data
-              mountPath: /companion/data
+              mountPath: /companion
           resources:
             requests:
               memory: "384Mi"

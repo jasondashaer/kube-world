@@ -1,0 +1,48 @@
+# YIBC TF5 — Scene 4: Greeting / Social
+#
+# Ambient room mics up for crowd / greeting time. Speech mics still
+# available but at lower level. Music background-friendly.
+
+scene:
+  number: 4
+  bank: B
+  name: "Greeting"
+  description: "Ambient room mics up, speech standby, music low."
+
+state:
+  inputs:
+    # Music gentle background
+    - channel: 1
+      label: "Worship"
+      mute: false
+      fader: -1500  # -15dB background
+
+    - channel: 4
+      label: "Guitar"
+      mute: false
+      fader: -1500
+
+    - channel: 6
+      label: "Keys"
+      mute: false
+      fader: -1500
+
+    - channel: 11
+      label: "Pastor"
+      mute: false
+      fader: -500   # -5dB standby
+
+    - channel: 14
+      label: "Media"
+      mute: true
+      fader: -32768
+
+  buses:
+    - channel: 21
+      label: "Stream Mix"
+      mute: false
+      fader: -300
+
+  master:
+    fader: -300
+    mute: false

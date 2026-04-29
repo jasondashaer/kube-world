@@ -1,0 +1,50 @@
+# Saitama TF1 — Scene 3: Sermon
+#
+# Mirror of YIBC sermon scene with Saitama channel mapping.
+# Pastor=11, Worship=1, Keys=6, Guitar=4, Media=14.
+
+scene:
+  number: 3
+  bank: B
+  name: "Sermon"
+  description: "Pastor mic open, music muted, stream bus on."
+
+state:
+  inputs:
+    - channel: 1
+      label: "Worship"
+      mute: true
+      fader: -32768
+
+    - channel: 4
+      label: "Guitar"
+      mute: true
+      fader: -32768
+
+    - channel: 6
+      label: "Keys"
+      mute: true
+      fader: -32768
+
+    - channel: 11
+      label: "Pastor"
+      mute: false
+      fader: 0
+      hpf:
+        enable: true
+        freq: 100
+
+    - channel: 14
+      label: "Media"
+      mute: true
+      fader: -32768
+
+  buses:
+    - channel: 21
+      label: "Stream Mix"
+      mute: false
+      fader: -300
+
+  master:
+    fader: -300
+    mute: false

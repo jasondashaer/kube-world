@@ -1,0 +1,62 @@
+# YIBC TF5 — Scene 3: Sermon
+#
+# Pulpit + lapel only. Music inputs muted. Stream/record bus open at
+# speech-friendly level. Master at -3dB.
+#
+# Push via: python3 mixer-state-deploy.py --location yibc --scene 03-sermon --apply
+#
+# Default --store-bank B → stores to TF5 Bank B scene 3 as the
+# code-canonical baseline. Engineers should mirror to Bank A scene 3
+# (where the segment-transition button calls Recall) when ready, then
+# tweak Bank A freely between services.
+
+scene:
+  number: 3
+  bank: B
+  name: "Sermon"
+  description: "Pastor + lapel mics open, music muted, stream bus on."
+
+state:
+  inputs:
+    # Music layer — muted during sermon
+    - channel: 1
+      label: "Worship"
+      mute: true
+      fader: -32768
+
+    - channel: 4
+      label: "Guitar"
+      mute: true
+      fader: -32768
+
+    - channel: 6
+      label: "Keys"
+      mute: true
+      fader: -32768
+
+    # Speech layer — open
+    - channel: 11
+      label: "Pastor"
+      mute: false
+      fader: 0
+      hpf:
+        enable: true
+        freq: 100   # Hz
+
+    # Media (announcements / videos) — muted during sermon
+    - channel: 14
+      label: "Media"
+      mute: true
+      fader: -32768
+
+  buses:
+    # Stream / record bus (Mix21, half of stereo flash combo 21/22).
+    # Confirm channel number with operator before live testing.
+    - channel: 21
+      label: "Stream Mix"
+      mute: false
+      fader: -300   # -3dB
+
+  master:
+    fader: -300     # -3dB room
+    mute: false

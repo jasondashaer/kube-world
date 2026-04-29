@@ -1,0 +1,51 @@
+# YIBC TF5 — Scene 2: Worship
+#
+# Vocals + instruments open. Pastor mic open at lower level (worship
+# leader may also speak briefly between songs). Master + stream bus
+# at full unity for full-range music.
+
+scene:
+  number: 2
+  bank: B
+  name: "Worship"
+  description: "Music layer open, pastor mic standby, stream bus full."
+
+state:
+  inputs:
+    - channel: 1
+      label: "Worship"
+      mute: false
+      fader: -100   # -1dB
+
+    - channel: 4
+      label: "Guitar"
+      mute: false
+      fader: -100
+
+    - channel: 6
+      label: "Keys"
+      mute: false
+      fader: -100
+
+    - channel: 11
+      label: "Pastor"
+      mute: false
+      fader: -300   # -3dB (lower than sermon — worship leader's speech)
+      hpf:
+        enable: true
+        freq: 100
+
+    - channel: 14
+      label: "Media"
+      mute: true    # silenced during worship; unmute via segment B alt
+      fader: -32768
+
+  buses:
+    - channel: 21
+      label: "Stream Mix"
+      mute: false
+      fader: 0      # 0dB unity for music
+
+  master:
+    fader: 0
+    mute: false

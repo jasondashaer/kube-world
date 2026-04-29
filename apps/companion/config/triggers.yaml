@@ -1,0 +1,239 @@
+# Companion Triggers — Service Flow Automation
+#
+# Companion watches ProPresenter state and orchestrates audio, video,
+# and streaming systems. PP operators just run slides normally.
+#
+# Event types:
+#   condition_true — fires when all condition feedbacks are satisfied
+#   interval — fires repeatedly (options: {seconds: N})
+#   startup — fires once when Companion starts (options: {delay: ms})
+#
+# ALL SERVICE FLOW TRIGGERS ARE DISABLED BY DEFAULT.
+# Enable only after confirming variable names and testing each trigger
+# individually in a non-live environment.
+#
+# Variable names like "ProPresenter:video_countdown_timer" need to be
+# confirmed against the actual PP instance — check Companion web UI
+# under the ProPresenter connection's variable list.
+
+triggers:
+  # ═══════════════════════════════════════════
+  # SYSTEM TRIGGERS (always active)
+  # ═══════════════════════════════════════════
+
+  - name: "Startup: Set service mode"
+    enabled: true
+    sort_order: 0
+    events:
+      - type: startup
+        options: { delay: 5000 }
+    actions:
+      - action: internal:custom_variable_set_value
+        options: { name: "service_mode", value: "Ready" }
+
+  # ═══════════════════════════════════════════
+  # PRE-SERVICE FLOW
+  # ═══════════════════════════════════════════
+  # Sequence: Countdown timer runs in PP → triggers cascade
+
+  # When PP countdown reaches 1:00 — start the live stream
+  - name: "Pre-Service: Start stream at 1min"
+    enabled: false
+    sort_order: 10
+    events:
+      - type: condition_true
+        options: {}
+    conditions:
+      - type: internal:variable_value
+        options:
+          variable: "ProPresenter:video_countdown_timer"
+          value: "00:01:00"
+    actions:
+      - action: obs:toggle_streaming
+      - action: internal:custom_variable_set_value
+        options: { name: "service_mode", value: "Pre-Service" }
+
+  # When PP countdown reaches 0:10 — show intro bumper
+  - name: "Pre-Service: Intro at 10sec"
+    enabled: false
+    sort_order: 11
+    events:
+      - type: condition_true
+        options: {}
+    conditions:
+      - type: internal:variable_value
+        options:
+          variable: "ProPresenter:video_countdown_timer"
+          value: "00:00:10"
+    actions:
+      - action: obs:set_current_scene
+        options: { scene: "Intro" }
+
+  # When PP countdown reaches 0:00 — switch to camera, start recording
+  - name: "Pre-Service: Go live at countdown end"
+    enabled: false
+    sort_order: 12
+    events:
+      - type: condition_true
+        options: {}
+    conditions:
+      - type: internal:variable_value
+        options:
+          variable: "ProPresenter:video_countdown_timer"
+          value: "00:00:00"
+    actions:
+      - action: obs:set_current_scene
+        options: { scene: "Camera" }
+      - action: obs:toggle_recording
+      - action: internal:custom_variable_set_value
+        options: { name: "service_mode", value: "Live" }
+
+  # ═══════════════════════════════════════════
+  # END-OF-SERVICE FLOW
+  # ═══════════════════════════════════════════
+  # Triggered when PP loads the closing presentation.
+  # The slides operator just selects the closing slides —
+  # everything else happens automatically.
+
+  # Detect closing presentation loaded — begin end-of-service
+  - name: "End: Detect closing presentation"
+    enabled: false
+    sort_order: 20
+    events:
+      - type: condition_true
+        options: {}
+    conditions:
+      # TBD: confirm the exact presentation name used for closing
+      - type: internal:variable_value
+        options:
+          variable: "ProPresenter:presentation_name"
+          value: "Closing"
+    actions:
+      - action: internal:custom_variable_set_value
+        options: { name: "service_mode", value: "Closing" }
+
+  # When service_mode becomes "Closing" — duck audio over 1 second
+  # NOTE: This uses absolute fader values. Ensure mixer is at expected
+  # levels before enabling. See duck button notes in YIBC README.
+  - name: "End: Duck audio on close"
+    enabled: false
+    sort_order: 21
+    events:
+      - type: condition_true
+        options: {}
+    conditions:
+      - type: internal:variable_value
+        options:
+          variable: "internal:custom_service_mode"
+          value: "Closing"
+    actions:
+      # Simplified duck — 4 steps over 400ms
+      # For smoother fade, increase steps (see MK2 duck button for 20-step version)
+      - action: yamaha:MIXER_Current/St/Fader/Level
+        options: { X: 1, Val: -500 }
+      - action: yamaha:MIXER_Current/Mix/Fader/Level
+        options: { X: 17, Val: -1100 }
+      - action: internal:wait
+        options: { time: "100" }
+      - action: yamaha:MIXER_Current/St/Fader/Level
+        options: { X: 1, Val: -1000 }
+      - action: yamaha:MIXER_Current/Mix/Fader/Level
+        options: { X: 17, Val: -1600 }
+      - action: internal:wait
+        options: { time: "100" }
+      - action: yamaha:MIXER_Current/St/Fader/Level
+        options: { X: 1, Val: -1500 }
+      - action: yamaha:MIXER_Current/Mix/Fader/Level
+        options: { X: 17, Val: -2100 }
+      - action: internal:wait
+        options: { time: "100" }
+      - action: yamaha:MIXER_Current/St/Fader/Level
+        options: { X: 1, Val: -2000 }
+      - action: yamaha:MIXER_Current/Mix/Fader/Level
+        options: { X: 17, Val: -2600 }
+
+  # 10 seconds after closing detected — show outro scene
+  # Uses interval trigger that checks every second if we're in Closing mode
+  # and enough time has passed
+  - name: "End: Outro scene after 10sec"
+    enabled: false
+    sort_order: 22
+    events:
+      - type: condition_true
+        options: {}
+    conditions:
+      - type: internal:variable_value
+        options:
+          variable: "internal:custom_service_mode"
+          value: "Closing"
+    actions:
+      - action: internal:wait
+        options: { time: "10000" }
+      - action: obs:set_current_scene
+        options: { scene: "Outro" }
+
+  # 20 seconds after closing — stop stream and recording
+  - name: "End: Stop stream after 20sec"
+    enabled: false
+    sort_order: 23
+    events:
+      - type: condition_true
+        options: {}
+    conditions:
+      - type: internal:variable_value
+        options:
+          variable: "internal:custom_service_mode"
+          value: "Closing"
+    actions:
+      - action: internal:wait
+        options: { time: "20000" }
+      - action: obs:toggle_streaming
+      - action: obs:toggle_recording
+      - action: internal:custom_variable_set_value
+        options: { name: "service_mode", value: "Off" }
+
+  # ═══════════════════════════════════════════
+  # SERVICE START BUTTON SEQUENCE
+  # ═══════════════════════════════════════════
+  # These triggers support the manual "Service Start" button.
+  # The button sets service_mode to "Starting", then these
+  # triggers handle the rest of the sequence.
+
+  # Service Start step 1: Recall mixer scene
+  - name: "Start: Recall mixer scene"
+    enabled: false
+    sort_order: 30
+    events:
+      - type: condition_true
+        options: {}
+    conditions:
+      - type: internal:variable_value
+        options:
+          variable: "internal:custom_service_mode"
+          value: "Starting"
+    actions:
+      # TBD: confirm actual scene bank/slot
+      - action: yamaha:MIXER_Lib/Bank/Scene/Recall
+        options: { X: 1, Y: 1 }
+      - action: internal:wait
+        options: { time: "2000" }
+      - action: internal:custom_variable_set_value
+        options: { name: "service_mode", value: "Pre-Service" }
+
+  # ═══════════════════════════════════════════
+  # MONITORING TRIGGERS (status updates)
+  # ═══════════════════════════════════════════
+
+  # Periodic check: update service_mode if stream goes live unexpectedly
+  # - name: "Monitor: Detect stream start"
+  #   enabled: false
+  #   sort_order: 40
+  #   events:
+  #     - type: condition_true
+  #       options: {}
+  #   conditions:
+  #     - type: obs:streaming
+  #       options: {}
+  #   actions:
+  #     - action: internal:custom_variable_set_value
+  #       options: { name: "service_mode", value: "Live" }

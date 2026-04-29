@@ -1,0 +1,57 @@
+# GitOps auto-deploy: ConfigMap from YAML source + Job that imports
+#
+# Flow:
+#   - configMapGenerator: kustomize bundles all YAML files into a ConfigMap
+#     and appends a content hash to the name. Any change to the YAML
+#     triggers a hash change → new ConfigMap name → Job's volumeMount
+#     reference becomes invalid → Flux re-creates the Job → import runs.
+#   - The script ConfigMap holds companion-deploy.py for the Job to execute.
+#
+# The Companion deployment itself is NOT in this kustomization — it's
+# handled by the parent flux/kustomizations/apps.yaml. This kustomization
+# only adds the auto-import pipeline.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: companion
+
+resources:
+  - deploy-job.yaml
+
+# ConfigMap from all YAML config files
+configMapGenerator:
+  - name: companion-config
+    namespace: companion
+    files:
+      - ../config/connections.yaml
+      - ../config/variables.yaml
+      - ../config/surfaces.yaml
+      - ../config/triggers.yaml
+      - ../config/pages/yibc/mk2-page01-ops.yaml
+      - ../config/pages/yibc/plus-page01-ptz.yaml
+      - ../config/pages/yibc/plus-page02-dpad.yaml
+      - ../config/pages/saitama/xl-page01-home.yaml
+      - ../config/pages/saitama/xl-page02-audio.yaml
+      - ../config/pages/saitama/xl-page03-slides.yaml
+      - ../config/pages/saitama/xl-page04-stream.yaml
+    options:
+      labels:
+        app.kubernetes.io/name: companion-config
+        app.kubernetes.io/part-of: kube-world
+
+  - name: companion-deploy-scripts
+    namespace: companion
+    files:
+      - ../scripts/companion-deploy.py
+    options:
+      labels:
+        app.kubernetes.io/name: companion-deploy
+        app.kubernetes.io/part-of: kube-world
+
+# Generator options:
+# - generateName: false → predictable name with hash suffix
+# - disableNameSuffixHash: false (default) → APPEND hash; this is the
+#   trigger mechanism for re-runs
+generatorOptions:
+  disableNameSuffixHash: false

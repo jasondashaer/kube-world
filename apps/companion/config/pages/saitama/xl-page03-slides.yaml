@@ -1,0 +1,315 @@
+# Saitama — Stream Deck XL Page 42: Slides / ProPresenter
+# 8x4 = 32 buttons
+#
+# Row 0: Status + slide info + timer
+# Row 1: Navigation (Prev/Next/GO) + slide triggers
+# Row 2: Looks + clears
+# Row 3: Timer controls + nav
+
+page:
+  number: 42
+  name: "ProP"
+  device: xl
+
+buttons:
+  # ═══ Row 0: Status + info ═══
+  - row: 0
+    col: 0
+    style:
+      text: "ProP"
+      bgcolor: "#991111"
+      size: 14
+    feedbacks:
+      - type: propresenter_saitama:connected
+        style:
+          bgcolor: "#116611"
+          text: "ProP\n● OK"
+
+  - row: 0
+    col: 1
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 0
+    col: 2
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 0
+    col: 3
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 0
+    col: 4
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 0
+    col: 5
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 0
+    col: 6
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 0
+    col: 7
+    style:
+      text: "$(internal:time_hms)"
+      bgcolor: "#222222"
+      size: 18
+
+  # ═══ Row 1: Slide navigation ═══
+  - row: 1
+    col: 0
+    style:
+      text: "PREV"
+      bgcolor: "#555555"
+      size: 18
+    actions:
+      down:
+        - action: propresenter_saitama:prev_slide
+
+  - row: 1
+    col: 1
+    style:
+      text: "NEXT"
+      bgcolor: "#555555"
+      size: 18
+    actions:
+      down:
+        - action: propresenter_saitama:next_slide
+
+  - row: 1
+    col: 2
+    style:
+      text: "GO"
+      bgcolor: "#00AA00"
+      size: 24
+    actions:
+      down:
+        - action: propresenter_saitama:trigger_next
+
+  - row: 1
+    col: 3
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 1
+    col: 4
+    style:
+      text: "Slide 1"
+      bgcolor: "#004499"
+      size: 14
+    actions:
+      down:
+        - action: propresenter_saitama:trigger_slide
+          options: { index: 0 }
+
+  - row: 1
+    col: 5
+    style:
+      text: "Slide 2"
+      bgcolor: "#004499"
+      size: 14
+    actions:
+      down:
+        - action: propresenter_saitama:trigger_slide
+          options: { index: 1 }
+
+  - row: 1
+    col: 6
+    style:
+      text: "Slide 3"
+      bgcolor: "#004499"
+      size: 14
+    actions:
+      down:
+        - action: propresenter_saitama:trigger_slide
+          options: { index: 2 }
+
+  - row: 1
+    col: 7
+    style:
+      text: "Slide 4"
+      bgcolor: "#004499"
+      size: 14
+    actions:
+      down:
+        - action: propresenter_saitama:trigger_slide
+          options: { index: 3 }
+
+  # ═══ Row 2: Looks + clears ═══
+  - row: 2
+    col: 0
+    style:
+      text: "Normal"
+      bgcolor: "#553300"
+      size: 14
+    actions:
+      down:
+        - action: propresenter_saitama:trigger_look
+          options: { name: "Normal" }
+
+  - row: 2
+    col: 1
+    style:
+      text: "Lyrics"
+      bgcolor: "#553300"
+      size: 14
+    actions:
+      down:
+        - action: propresenter_saitama:trigger_look
+          options: { name: "Lyrics" }
+
+  - row: 2
+    col: 2
+    style:
+      text: "Scripture"
+      bgcolor: "#553300"
+      size: 12
+    actions:
+      down:
+        - action: propresenter_saitama:trigger_look
+          options: { name: "Scripture" }
+
+  - row: 2
+    col: 3
+    style:
+      text: "Blank"
+      bgcolor: "#553300"
+      size: 14
+    actions:
+      down:
+        - action: propresenter_saitama:trigger_look
+          options: { name: "Blank" }
+
+  - row: 2
+    col: 4
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 2
+    col: 5
+    style:
+      text: "CLEAR\nSlide"
+      bgcolor: "#666600"
+      size: 14
+    actions:
+      down:
+        - action: propresenter_saitama:clear_slide
+
+  - row: 2
+    col: 6
+    style:
+      text: "CLEAR\nMedia"
+      bgcolor: "#666600"
+      size: 14
+    actions:
+      down:
+        - action: propresenter_saitama:clear_media
+
+  - row: 2
+    col: 7
+    style:
+      text: "CLEAR\nAll"
+      bgcolor: "#993300"
+      size: 14
+    actions:
+      down:
+        - action: propresenter_saitama:clear_all
+
+  # ═══ Row 3: Timers + nav ═══
+  - row: 3
+    col: 0
+    style:
+      text: "Timer\nStart"
+      bgcolor: "#006600"
+      size: 14
+    actions:
+      down:
+        - action: propresenter_saitama:timer_start
+          options: { index: 0 }
+
+  - row: 3
+    col: 1
+    style:
+      text: "Timer\nStop"
+      bgcolor: "#660000"
+      size: 14
+    actions:
+      down:
+        - action: propresenter_saitama:timer_stop
+          options: { index: 0 }
+
+  - row: 3
+    col: 2
+    style:
+      text: "Timer\nReset"
+      bgcolor: "#444444"
+      size: 14
+    actions:
+      down:
+        - action: propresenter_saitama:timer_reset
+          options: { index: 0 }
+
+  - row: 3
+    col: 3
+    style:
+      text: "+1 Min"
+      bgcolor: "#444444"
+      size: 14
+    actions:
+      down:
+        - action: propresenter_saitama:timer_adjust
+          options: { index: 0, seconds: 60 }
+
+  - row: 3
+    col: 4
+    style:
+      text: "-1 Min"
+      bgcolor: "#444444"
+      size: 14
+    actions:
+      down:
+        - action: propresenter_saitama:timer_adjust
+          options: { index: 0, seconds: -60 }
+
+  - row: 3
+    col: 5
+    style:
+      text: "Message"
+      bgcolor: "#444444"
+      size: 14
+    actions:
+      down:
+        - action: propresenter_saitama:toggle_message
+          options: { index: 0 }
+
+  - row: 3
+    col: 6
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 3
+    col: 7
+    style:
+      text: "← Home"
+      bgcolor: "#003366"
+      size: 14
+    actions:
+      down:
+        - action: internal:set_page
+          options: { controller: "self", page: 40 }

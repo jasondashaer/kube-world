@@ -1,5 +1,42 @@
 # PTZ Camera Integration
 
+## Important: Action ID Reference
+
+The `ptzoptics-visca` module (v3.5.0) uses these **actual action IDs** (definitionIds). Documentation examples below use descriptive names for clarity but YAML configs must use these exact IDs:
+
+| Action | definitionId | Options |
+|--------|-------------|---------|
+| Pan Left | `left` | none |
+| Pan Right | `right` | none |
+| Tilt Up | `up` | none |
+| Tilt Down | `down` | none |
+| Stop Movement | `stop` | none |
+| Home Position | `home` | none |
+| Zoom In | `zoomI` | none |
+| Zoom Out | `zoomO` | none |
+| Zoom Stop | `zoomS` | none |
+| Focus Near | `focusN` | none |
+| Focus Far | `focusF` | none |
+| Focus Stop | `focusS` | none |
+| Focus Mode Toggle | `focusM` | none |
+| Recall Preset | `recallPreset` | `{isText: false, presetAsNumber: N}` |
+| Save Preset | `setPreset` | `{isText: false, presetAsNumber: N}` |
+| Set P/T Speed | `ptSpeedSet` | `{speed: 1-24}` |
+| Speed Up | `ptSpeedU` | none |
+| Speed Down | `ptSpeedD` | none |
+| Power | `power` | state |
+| Custom Command | `custom` | `{custom: "81 01 ..."}` |
+
+Internal Companion action IDs used alongside PTZ:
+
+| Action | definitionId | Options |
+|--------|-------------|---------|
+| Set Variable | `custom_variable_set_value` | `{name: "var", value: "val"}` |
+| Set via Expression | `custom_variable_set_expression` | `{name: "var", expression: "..."}` |
+| Set Page | `set_page` | `{controller: "self", page: N}` |
+| Wait/Delay | `wait` | `{time: "ms_expression"}` |
+| Step Advance | `step_delta` | `{amount: 1}` |
+
 ## Overview
 
 PTZ (Pan-Tilt-Zoom) cameras are controlled via network protocols — most commonly VISCA over TCP/IP. Companion has modules for most major PTZ brands, all sharing similar action patterns.

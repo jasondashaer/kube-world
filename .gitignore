@@ -63,3 +63,8 @@ node_modules/
 /tmp/kube-world/
 pi-setup/cloud-init/output/
 terraform.tfvars
+
+# Companion generated artifacts (built by companion-deploy.py generate)
+apps/companion/config/companion.companionconfig
+apps/companion/config/companion.json
+apps/companion/config/companion-export.json

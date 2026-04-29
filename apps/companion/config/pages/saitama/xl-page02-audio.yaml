@@ -1,0 +1,369 @@
+# Saitama — Stream Deck XL Page 41: Audio Mixer (Yamaha TF1)
+# 8x4 = 32 buttons
+#
+# Channel mapping (Saitama TF1):
+#   Ch 11 = Pastor
+#   Ch 1  = Worship
+#   Ch 6  = Keys
+#   Ch 4  = Guitar
+#   Ch 14 = Media
+#
+# Row 0: Channel labels
+# Row 1: Mute toggles
+# Row 2: Fader up/down pairs
+# Row 3: Scene recalls + master + nav
+
+page:
+  number: 41
+  name: "Audio"
+  device: xl
+
+buttons:
+  # ═══ Row 0: Channel labels ═══
+  - row: 0
+    col: 0
+    style:
+      text: "Pastor\n牧師"
+      bgcolor: "#333366"
+      size: 12
+
+  - row: 0
+    col: 1
+    style:
+      text: "Worship\n賛美"
+      bgcolor: "#333366"
+      size: 10
+
+  - row: 0
+    col: 2
+    style:
+      text: "Keys\n鍵盤"
+      bgcolor: "#333366"
+      size: 12
+
+  - row: 0
+    col: 3
+    style:
+      text: "Guitar\nギター"
+      bgcolor: "#333366"
+      size: 10
+
+  - row: 0
+    col: 4
+    style:
+      text: "Media\nメディア"
+      bgcolor: "#336633"
+      size: 10
+
+  - row: 0
+    col: 5
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 0
+    col: 6
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 0
+    col: 7
+    style:
+      text: "MASTER\nマスター"
+      bgcolor: "#663333"
+      size: 10
+
+  # ═══ Row 1: Mute toggles ═══
+  - row: 1
+    col: 0
+    style:
+      text: "Pastor\n牧師"
+      bgcolor: "#00AA00"
+      size: 10
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Current/InCh/Fader/On
+          options: { X: 11, Val: "Toggle" }
+    feedbacks:
+      - type: yamaha_saitama:MIXER_Current/InCh/Fader/On
+        options: { X: 11, Val: 0 }
+        style:
+          bgcolor: "#CC0000"
+          text: "MUTE"
+          size: 14
+
+  - row: 1
+    col: 1
+    style:
+      text: "Worship\n賛美"
+      bgcolor: "#00AA00"
+      size: 10
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Current/InCh/Fader/On
+          options: { X: 1, Val: "Toggle" }
+    feedbacks:
+      - type: yamaha_saitama:MIXER_Current/InCh/Fader/On
+        options: { X: 1, Val: 0 }
+        style:
+          bgcolor: "#CC0000"
+          text: "MUTE"
+          size: 14
+
+  - row: 1
+    col: 2
+    style:
+      text: "Keys\n鍵盤"
+      bgcolor: "#00AA00"
+      size: 12
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Current/InCh/Fader/On
+          options: { X: 6, Val: "Toggle" }
+    feedbacks:
+      - type: yamaha_saitama:MIXER_Current/InCh/Fader/On
+        options: { X: 6, Val: 0 }
+        style:
+          bgcolor: "#CC0000"
+          text: "MUTE"
+          size: 14
+
+  - row: 1
+    col: 3
+    style:
+      text: "Guitar\nギター"
+      bgcolor: "#00AA00"
+      size: 10
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Current/InCh/Fader/On
+          options: { X: 4, Val: "Toggle" }
+    feedbacks:
+      - type: yamaha_saitama:MIXER_Current/InCh/Fader/On
+        options: { X: 4, Val: 0 }
+        style:
+          bgcolor: "#CC0000"
+          text: "MUTE"
+          size: 14
+
+  - row: 1
+    col: 4
+    style:
+      text: "Media\nメディア"
+      bgcolor: "#00AA00"
+      size: 10
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Current/InCh/Fader/On
+          options: { X: 14, Val: "Toggle" }
+    feedbacks:
+      - type: yamaha_saitama:MIXER_Current/InCh/Fader/On
+        options: { X: 14, Val: 0 }
+        style:
+          bgcolor: "#CC0000"
+          text: "MUTE"
+          size: 14
+
+  - row: 1
+    col: 5
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 1
+    col: 6
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 1
+    col: 7
+    style:
+      text: "MASTER\nマスター"
+      bgcolor: "#00AA00"
+      size: 10
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Current/St/Fader/On
+          options: { X: 1, Val: "Toggle" }
+    feedbacks:
+      - type: yamaha_saitama:MIXER_Current/St/Fader/On
+        options: { X: 1, Val: 0 }
+        style:
+          bgcolor: "#CC0000"
+          text: "MUTE"
+          size: 14
+
+  # ═══ Row 2: Fader up/down ═══
+  - row: 2
+    col: 0
+    style:
+      text: "Pastor\n▲"
+      bgcolor: "#444444"
+      size: 12
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Current/InCh/Fader/Level
+          options: { X: 11, Val: 100, Rel: true }
+
+  - row: 2
+    col: 1
+    style:
+      text: "Pastor\n▼"
+      bgcolor: "#333333"
+      size: 12
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Current/InCh/Fader/Level
+          options: { X: 11, Val: -100, Rel: true }
+
+  - row: 2
+    col: 2
+    style:
+      text: "Worship\n▲"
+      bgcolor: "#444444"
+      size: 10
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Current/InCh/Fader/Level
+          options: { X: 1, Val: 100, Rel: true }
+
+  - row: 2
+    col: 3
+    style:
+      text: "Worship\n▼"
+      bgcolor: "#333333"
+      size: 10
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Current/InCh/Fader/Level
+          options: { X: 1, Val: -100, Rel: true }
+
+  - row: 2
+    col: 4
+    style:
+      text: "Media\n▲"
+      bgcolor: "#444444"
+      size: 12
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Current/InCh/Fader/Level
+          options: { X: 14, Val: 100, Rel: true }
+
+  - row: 2
+    col: 5
+    style:
+      text: "Media\n▼"
+      bgcolor: "#333333"
+      size: 12
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Current/InCh/Fader/Level
+          options: { X: 14, Val: -100, Rel: true }
+
+  - row: 2
+    col: 6
+    style:
+      text: "Master\n▲"
+      bgcolor: "#554444"
+      size: 12
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Current/St/Fader/Level
+          options: { X: 1, Val: 100, Rel: true }
+
+  - row: 2
+    col: 7
+    style:
+      text: "Master\n▼"
+      bgcolor: "#443333"
+      size: 12
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Current/St/Fader/Level
+          options: { X: 1, Val: -100, Rel: true }
+
+  # ═══ Row 3: Scenes + master + nav ═══
+  - row: 3
+    col: 0
+    style:
+      text: "Scene 1\nシーン1"
+      bgcolor: "#664400"
+      size: 10
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
+          options: { X: 1, Y: 1 }
+
+  - row: 3
+    col: 1
+    style:
+      text: "Scene 2\nシーン2"
+      bgcolor: "#664400"
+      size: 10
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
+          options: { X: 1, Y: 2 }
+
+  - row: 3
+    col: 2
+    style:
+      text: "Scene 3\nシーン3"
+      bgcolor: "#664400"
+      size: 10
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
+          options: { X: 2, Y: 1 }
+
+  - row: 3
+    col: 3
+    style:
+      text: "Scene 4\nシーン4"
+      bgcolor: "#664400"
+      size: 10
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
+          options: { X: 2, Y: 2 }
+
+  - row: 3
+    col: 4
+    style:
+      text: "Master\n0dB"
+      bgcolor: "#444444"
+      size: 12
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Current/St/Fader/Level
+          options: { X: 1, Val: 0 }
+
+  - row: 3
+    col: 5
+    style:
+      text: "Master\n-∞"
+      bgcolor: "#444444"
+      size: 12
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Current/St/Fader/Level
+          options: { X: 1, Val: -32768 }
+
+  - row: 3
+    col: 6
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 3
+    col: 7
+    style:
+      text: "← Home\nホーム"
+      bgcolor: "#003366"
+      size: 12
+    actions:
+      down:
+        - action: internal:set_page
+          options: { controller: "self", page: 40 }

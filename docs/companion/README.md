@@ -1,38 +1,51 @@
-# Bitfocus Companion Configuration Guide
+# Companion Documentation
 
-Guide for configuring Bitfocus Companion with Stream Deck for production control. Companion runs at `companion.edge1.kubew.dev` on the kube-world edge cluster.
+Single source of truth for the Bitfocus Companion subsystem of kube-world.
 
-## Documentation Structure
+## What This Is
 
-### `integrations/`
-One `.md` file per Companion module/integration. Each covers: what the module does, connection setup, available actions/feedbacks, common button patterns, and troubleshooting.
+Companion runs on pi-edge-1, controlling Stream Decks at two church locations (YIBC, Saitama). Configs live in YAML, get generated into a `.companionconfig` blob, and import into Companion via its tRPC WebSocket API. The whole thing is GitOps — push to git, Stream Decks update.
 
-### `ui-guide/`
-How Companion itself works — its UI sections, how buttons are built, action/feedback/trigger systems, page management, variable system, and the YAML-to-config workflow.
+## Where to Start
 
-### `layouts/`
-Button layout design and logic — page organization, navigation patterns, color coding, functional groupings, and role-based design philosophy.
+| If you want to... | Read |
+|---|---|
+| Understand the whole system | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| Understand the deploy flow | [PIPELINE.md](PIPELINE.md) |
+| Learn agent conventions | [`apps/companion/CLAUDE.md`](../../apps/companion/CLAUDE.md) |
+| See what's at each church | [locations/](locations/) |
+| Look up a Stream Deck device | [devices/](devices/) |
+| Look up a system integration | [systems/](systems/) |
+| Find what a button does | [pages/](pages/) |
+| Look up an action ID | [reference/action-ids.md](reference/action-ids.md) |
+| Add a new Stream Deck | [guides/add-new-stream-deck.md](guides/add-new-stream-deck.md) |
+| Add a new system | [guides/add-new-system.md](guides/add-new-system.md) |
+| Add a new location | [guides/add-new-location.md](guides/add-new-location.md) |
+| Onboard a new operator | [guides/setup-from-scratch.md](guides/setup-from-scratch.md) |
+| Deploy a config change | [guides/deploy-config-changes.md](guides/deploy-config-changes.md) |
+| Diagnose an issue | [reference/troubleshooting.md](reference/troubleshooting.md) |
 
-## Source Material
-Based on the `churchSupport` repo (`/Users/jacksonharris/repos/churchSupport/`) which has:
-- YAML-based page configurations (`config/pages/`)
-- Connection definitions (`config/connections.yaml`)
-- Trigger/variable definitions (`config/triggers.yaml`, `config/variables.yaml`)
-- Converter script (`scripts/yaml-to-companion.py`)
-- Operator guides and troubleshooting docs
+## Inventory
 
-## Quick Start
-1. Open `https://companion.edge1.kubew.dev` (allow 15-20s for JS bundle on slow connections)
-2. Connect Stream Deck XL via USB to the edge Pi
-3. Configure connections under the Connections tab
-4. Import or build button pages
-5. Test with real equipment
+| Location | Devices | Systems |
+|---|---|---|
+| YIBC | Stream Deck+ (PTZ control), Stream Deck MK2 (Ops) | Yamaha TF5, ProPresenter v18.4, PTZ Camera, Home Assistant |
+| Saitama | Stream Deck XL (Full Production) | Yamaha TF1, ProPresenter v21.3, ATEM, OBS, ProPresenter |
 
-## Stream Deck XL Grid Reference
-8 columns x 4 rows = 32 buttons per page. Zero-indexed:
+See [INVENTORY.md](INVENTORY.md) for flat list of every device/IP/channel/preset.
+
+## Status
+
+Current deployed state, surfaces connected, last commit: see [STATUS.md](STATUS.md).
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
+
+## Critical Rule
+
+**Never modify Companion via web UI.** Karmada will revert deployment changes; manual config imports get overwritten by the next git-driven deploy. All changes go through git.
+
 ```
-Row 0: [0,0] [0,1] [0,2] [0,3] [0,4] [0,5] [0,6] [0,7]
-Row 1: [1,0] [1,1] [1,2] [1,3] [1,4] [1,5] [1,6] [1,7]
-Row 2: [2,0] [2,1] [2,2] [2,3] [2,4] [2,5] [2,6] [2,7]
-Row 3: [3,0] [3,1] [3,2] [3,3] [3,4] [3,5] [3,6] [3,7]
+git push  →  Flux  →  Karmada  →  ConfigMap  →  Job  →  Companion  →  Stream Decks
 ```

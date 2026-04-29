@@ -1,23 +1,93 @@
 # Yamaha TF Series Integration
 
 ## Module
-`yamaha-rcp`
+`yamaha-rcp` (v3.5.10)
 
-## Connection
+## Connection Config (confirmed working)
+```yaml
+- id: yamaha
+  module: "yamaha-rcp"
+  label: "Yamaha TF5"
+  enabled: true
+  config:
+    host: "192.168.1.54"
+    model: "TF"
+```
+
+**Critical**: Set `isFirstInit: true` in the generator to skip upgrade scripts that crash on fresh connections. The `model` field must be the string `"TF"` (not a number).
+
 | Setting | Value |
 |---------|-------|
-| Host | TF1 IP address |
-| Port | 49280 (RCP protocol, auto) |
-| Model | TF (select TF1/TF3/TF5/TF-RACK) |
-| Bonjour | Enable for auto-discovery on LAN |
-| Metering | Enable/disable real-time metering data |
-| Metering Interval | Polling rate for meter data (ms) |
-| KeepAlive | Interval for connection keepalive packets |
-| Protocol | TCP/RCP |
+| Host | Mixer IP address |
+| Model | `"TF"` (string, from dropdown: CL/QL, PM, TF, DM3, DM7, RIO, TIO, RSIO) |
 
-**Setup:** Requires physical network connection to the mixer. Does NOT work with TF Editor software alone. TF1 has 16 input channels + stereo out + 20 AUX/bus/matrix.
+**Setup:** Requires physical network connection to the mixer. Does NOT work with TF Editor software alone. TF1 = 16ch, TF3 = 24ch, TF5 = 32ch (40 input channels with stereo inputs).
 
-**Model selection:** The module auto-generates actions/feedbacks based on the selected model's channel count and capabilities. TF1 = 16ch, TF3 = 24ch, TF5 = 32ch.
+## Confirmed Working Action IDs (RCP)
+
+Action IDs use the RCP address format with `/` separators:
+
+| Action | definitionId | Options |
+|--------|-------------|---------|
+| Channel Mute | `MIXER_Current/InCh/Fader/On` | X=ch#, Val=0(mute)/1(on)/Toggle |
+| Channel Level | `MIXER_Current/InCh/Fader/Level` | X=ch#, Val=-32768 to 1000 |
+| Stereo Master Mute | `MIXER_Current/St/Fader/On` | X=1, Val=0/1/Toggle |
+| Stereo Master Level | `MIXER_Current/St/Fader/Level` | X=1, Val=-32768 to 1000 |
+| Aux/Mix Bus Mute | `MIXER_Current/Mix/Fader/On` | X=bus#, Val=0/1/Toggle |
+| Aux/Mix Bus Level | `MIXER_Current/Mix/Fader/Level` | X=bus#, Val=-32768 to 1000 |
+| DCA Mute | `MIXER_Current/DCA/Fader/On` | X=DCA#, Val=0/1/Toggle |
+| DCA Level | `MIXER_Current/DCA/Fader/Level` | X=DCA#, Val=-32768 to 1000 |
+| Scene Recall (TF) | `MIXER_Lib/Bank/Scene/Recall` | X=bank#, Y=1(A)/2(B) |
+
+### Fader Value Scale
+- `-32768` = -∞ dB (silence)
+- `-2000` = -20 dB
+- `-600` = -6 dB
+- `0` = 0 dB (unity)
+- `1000` = +10 dB (max)
+- **100 units = 1 dB**
+
+### Mute Logic (inverted!)
+- `Fader/On = 1` means channel is **ON** (unmuted)
+- `Fader/On = 0` means channel is **MUTED**
+- `Val = "Toggle"` toggles between states
+
+## Smooth Fading (Software-Implemented)
+
+The Yamaha TF RCP protocol has no native fade duration parameter. Smooth fades are implemented by sending multiple level commands with Companion `internal:wait` delays between them.
+
+### Duck Button Pattern (-20dB fade over 1 second)
+```
+20 steps × 50ms = 1 second total
+Each step: set stereo level + set aux level + wait 50ms
+1dB per step (Val changes by -100 per step)
+```
+
+### Multi-Bus Fading with Offset
+When fading multiple buses simultaneously (e.g. stereo master + front fill aux), maintain the dB offset throughout:
+```
+Stereo master: 0dB → -20dB (Val: 0 → -2000)
+Aux 17 (front fills at -6dB offset): -6dB → -26dB (Val: -600 → -2600)
+```
+Both move -20dB together, preserving the 6dB gap.
+
+### Limitations
+- Assumes a fixed starting level (0dB for master, -6dB for aux)
+- If mixer state drifts from expected (e.g. Companion restarts), first press may jump
+- Workaround: recall a scene before using duck to ensure known fader positions
+- Future: use auto-create variable feedback to read actual fader level before fading
+
+## Variables (from connected mixer)
+
+| Variable | Description |
+|----------|-------------|
+| `$(Yamaha_TF5:modelName)` | Device model (e.g. "TF5") |
+| `$(Yamaha_TF5:curScene)` | Current scene ID (e.g. "B08") |
+| `$(Yamaha_TF5:curSceneName)` | Current scene name |
+| `$(Yamaha_TF5:runMode)` | Device run mode (e.g. "normal") |
+
+*Note: Variable prefix uses the connection label (e.g. `Yamaha_TF5:`) not the module ID.*
+*Additional variables are created when feedbacks with "Auto-Create Variable" are enabled.*
 
 ## Available Actions (200+ dynamically generated)
 

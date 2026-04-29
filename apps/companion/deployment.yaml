@@ -91,6 +91,15 @@ spec:
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
 
+      # Run as companion user (uid 1000) and ensure PVC is group-writable.
+      # Without fsGroup, the PVC mounts as root-owned and Companion fails
+      # with "unable to open database file" — runs entirely in RAM and
+      # config never persists.
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+
       containers:
         - name: companion
           image: ghcr.io/bitfocus/companion/companion:latest
@@ -105,6 +114,8 @@ spec:
           env:
             - name: COMPANION_CONFIG_DIRECTORY
               value: "/companion"
+            - name: TZ
+              value: "Asia/Tokyo"
           volumeMounts:
             - name: data
               mountPath: /companion

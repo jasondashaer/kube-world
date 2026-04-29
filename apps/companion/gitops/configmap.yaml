@@ -1,0 +1,14 @@
+# Companion config ConfigMap — generated from apps/companion/config/*.yaml
+#
+# This file is the placeholder. The actual ConfigMap is built by kustomize's
+# configMapGenerator from the YAML source files (see kustomization.yaml).
+#
+# Why ConfigMap instead of cloning git inside the cluster:
+# - Flux already mirrors git → cluster, no point in re-cloning
+# - kustomize hashes the ConfigMap, which automatically triggers Job re-run
+#   on any YAML change
+# - Cluster doesn't need any git credentials
+#
+# The ConfigMap will be named `companion-config-<hash>` and referenced by
+# the auto-deploy Job. The hash suffix is what makes deploys deterministic:
+# any YAML change → new hash → Job re-runs → Companion imports.

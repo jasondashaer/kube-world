@@ -1,0 +1,18 @@
+# Surface-to-page assignments
+# After each import, surfaces are reassigned to their startup pages.
+
+surfaces:
+  - group_id: "streamdeck:A00NA53835A5F1"
+    name: "Stream Deck XL"
+    address: "192.168.1.41"
+    startup_page: 40
+
+  - group_id: "streamdeck:A00WA5241MWHZB"
+    name: "Stream Deck+"
+    address: "192.168.1.42"
+    startup_page: 20
+
+  - group_id: "streamdeck:A00SA5432NCLFZ"
+    name: "Stream Deck MK2"
+    address: "192.168.1.43"
+    startup_page: 30

@@ -1,7 +1,7 @@
 # Custom Companion Variables
-# These persist across button presses and can be displayed on buttons.
 
 variables:
+  # System state
   - name: startup_phase
     default: "Idle"
     persist: false
@@ -12,4 +12,36 @@ variables:
 
   - name: all_connected
     default: "false"
+    persist: false
+
+  # Stereo master level before duck (stored on duck press)
+  - name: pre_duck_level
+    default: "0"
+    persist: false
+
+  # Duck state tracker (0=normal, 1=ducked)
+  - name: duck_active
+    default: "0"
+    persist: false
+
+  # PTZ speed (1-24 VISCA scale)
+  - name: ptz_speed
+    default: "12"
+    persist: false
+
+  # Preset selectors for D-Pad page encoders
+  - name: preset_sel_0
+    default: "0"
+    persist: false
+
+  - name: preset_sel_1
+    default: "1"
+    persist: false
+
+  - name: preset_name_0
+    default: "Cross"
+    persist: false
+
+  - name: preset_name_1
+    default: "Wide"
     persist: false

@@ -1,9 +1,53 @@
-# Companion kustomization.
+# Companion application — root kustomization.
+#
+# Combines:
+#   - deployment.yaml: Companion server (Deployment, PVC, Service, Namespace)
+#   - gitops/deploy-job.yaml: Auto-import Job triggered by ConfigMap hash change
+#   - configMapGenerator: bundles all config YAML + the deploy script
 #
 # The HTTPRoute (gateway.yaml) is a HOST-cluster concern (Traefik lives
 # on the central Pi) and is applied separately — NOT by this kustomization.
+#
+# GitOps flow: edit YAML in config/, commit, push.
+# Flux reconciles → kustomize re-hashes ConfigMaps → Job re-runs →
+# Companion imports new config → Stream Decks update. Never edit
+# Companion via web UI; Karmada will revert deployment changes.
 ---
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+
 resources:
   - deployment.yaml
+  - gitops/deploy-job.yaml
+
+# ConfigMaps generated from YAML source files. Hash suffix on ConfigMap
+# name = any YAML change → new ConfigMap name → Job's volume reference
+# becomes invalid → Flux re-creates the Job → import runs.
+configMapGenerator:
+  - name: companion-config
+    namespace: companion
+    files:
+      - config/connections.yaml
+      - config/variables.yaml
+      - config/surfaces.yaml
+      - config/triggers.yaml
+      - config/pages/yibc/mk2-page01-ops.yaml
+      - config/pages/yibc/plus-page01-ptz.yaml
+      - config/pages/yibc/plus-page02-dpad.yaml
+      - config/pages/saitama/xl-page01-home.yaml
+      - config/pages/saitama/xl-page02-audio.yaml
+      - config/pages/saitama/xl-page03-slides.yaml
+      - config/pages/saitama/xl-page04-stream.yaml
+    options:
+      labels:
+        app.kubernetes.io/name: companion-config
+        app.kubernetes.io/part-of: kube-world
+
+  - name: companion-deploy-scripts
+    namespace: companion
+    files:
+      - scripts/companion-deploy.py
+    options:
+      labels:
+        app.kubernetes.io/name: companion-deploy
+        app.kubernetes.io/part-of: kube-world

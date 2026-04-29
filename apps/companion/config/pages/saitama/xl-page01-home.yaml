@@ -1,123 +1,134 @@
-# Saitama — Stream Deck XL Page 1: Home / Dashboard
-# 8x4 = 32 buttons — comprehensive production control
-# Top row: status, Middle: primary actions, Bottom: ATEM + nav
+# Saitama — Stream Deck XL Page 40: Home Dashboard
+# 8x4 = 32 buttons
 
 page:
   number: 40
   name: "Home"
-  device: xl  # 8x4
+  device: xl
 
 buttons:
-  # ═══ Row 0: Connection status + clock ═══
+  # ═══ Row 0: Status bar ═══
   - row: 0
     col: 0
     style:
       text: "ATEM"
-      bgcolor: "#CC0000"
+      bgcolor: "#991111"
       size: 14
     feedbacks:
       - type: atem:connected
         style:
-          bgcolor: "#00CC00"
+          bgcolor: "#116611"
           text: "ATEM\n● OK"
 
   - row: 0
     col: 1
     style:
-      text: "Stream"
-      bgcolor: "#CC0000"
+      text: "OBS"
+      bgcolor: "#991111"
       size: 14
     feedbacks:
       - type: obs:connected
         style:
-          bgcolor: "#00CC00"
-          text: "Stream\n● OK"
+          bgcolor: "#116611"
+          text: "OBS\n● OK"
 
   - row: 0
     col: 2
     style:
-      text: "Audio"
-      bgcolor: "#CC0000"
-      size: 14
+      text: "Audio\n音響"
+      bgcolor: "#991111"
+      size: 12
     feedbacks:
-      # TODO: Replace with actual audio module
-      - type: yamaha:connected
+      - type: yamaha_saitama:connected
         style:
-          bgcolor: "#00CC00"
+          bgcolor: "#116611"
           text: "Audio\n● OK"
 
   - row: 0
     col: 3
     style:
-      text: "Slides"
-      bgcolor: "#CC0000"
+      text: "ProP"
+      bgcolor: "#991111"
       size: 14
     feedbacks:
-      - type: propresenter:connected
+      - type: propresenter_saitama:connected
         style:
-          bgcolor: "#00CC00"
-          text: "Slides\n● OK"
+          bgcolor: "#116611"
+          text: "ProP\n● OK"
 
   - row: 0
     col: 4
     style:
-      text: "HA"
-      bgcolor: "#CC0000"
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 0
+    col: 5
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 0
+    col: 6
+    style:
+      text: "$(internal:custom_service_mode)"
+      bgcolor: "#444444"
       size: 14
-    feedbacks:
-      - type: homeassistant:connected
-        style:
-          bgcolor: "#00CC00"
-          text: "HA\n● OK"
 
   - row: 0
     col: 7
     style:
       text: "$(internal:time_hms)"
-      bgcolor: "#333333"
+      bgcolor: "#222222"
       size: 18
 
-  # ═══ Row 1: Primary actions ═══
+  # ═══ Row 1: Slides + Stream/Rec + Intro/Outro ═══
   - row: 1
     col: 0
     style:
-      text: "Startup\n起動"
-      bgcolor: "#006600"
+      text: "PREV\n前へ"
+      bgcolor: "#553300"
       size: 14
     actions:
       down:
-        # TODO: Configure startup sequence for Saitama equipment
-        - action: internal:variable_set
-          options: { variable: "startup_phase", value: "Starting" }
+        - action: propresenter_saitama:last
 
   - row: 1
     col: 1
     style:
-      text: "Shutdown\n終了"
-      bgcolor: "#660000"
+      text: "NEXT\n次へ"
+      bgcolor: "#553300"
       size: 14
-    steps:
-      - style:
-          text: "Shutdown\n終了"
-          bgcolor: "#660000"
-        actions:
-          down:
-            - action: internal:step_next
-      - style:
-          text: "CONFIRM\n確認？"
-          bgcolor: "#FF0000"
-        actions:
-          down:
-            # TODO: Configure shutdown sequence
-            - action: internal:step_set
-              options: { step: 1 }
+    actions:
+      down:
+        - action: propresenter_saitama:next
 
   - row: 1
     col: 2
     style:
+      text: "GO\n進む"
+      bgcolor: "#00AA00"
+      size: 18
+    actions:
+      down:
+        - action: propresenter_saitama:next
+
+  - row: 1
+    col: 3
+    style:
+      text: "CLEAR\nクリア"
+      bgcolor: "#664400"
+      size: 12
+    actions:
+      down:
+        - action: propresenter_saitama:clearslide
+
+  - row: 1
+    col: 4
+    style:
       text: "STREAM\n配信"
-      bgcolor: "#666666"
-      size: 14
+      bgcolor: "#555555"
+      size: 12
     actions:
       down:
         - action: obs:toggle_streaming
@@ -125,13 +136,13 @@ buttons:
       - type: obs:streaming
         style:
           bgcolor: "#CC0000"
-          text: "● LIVE\n$(obs:stream_timecode)"
+          text: "● LIVE\n配信中"
 
   - row: 1
-    col: 3
+    col: 5
     style:
       text: "REC\n録画"
-      bgcolor: "#666666"
+      bgcolor: "#555555"
       size: 14
     actions:
       down:
@@ -140,272 +151,283 @@ buttons:
       - type: obs:recording
         style:
           bgcolor: "#CC0000"
-          text: "● REC\n$(obs:record_timecode)"
-
-  # Row 1 cols 4-7: Scene/source shortcuts
-  - row: 1
-    col: 4
-    style:
-      text: "Scene 1\nメイン"
-      bgcolor: "#0066CC"
-      size: 12
-    actions:
-      down:
-        - action: obs:set_current_scene
-          options: { scene: "Main" }
-    feedbacks:
-      - type: obs:scene_active
-        options: { scene: "Main" }
-        style:
-          bgcolor: "#00CC00"
-
-  - row: 1
-    col: 5
-    style:
-      text: "Scene 2\nカメラ"
-      bgcolor: "#0066CC"
-      size: 12
-    actions:
-      down:
-        - action: obs:set_current_scene
-          options: { scene: "Camera" }
-    feedbacks:
-      - type: obs:scene_active
-        options: { scene: "Camera" }
-        style:
-          bgcolor: "#00CC00"
+          text: "● REC\n録画中"
 
   - row: 1
     col: 6
     style:
-      text: "Scene 3\nスライド"
-      bgcolor: "#0066CC"
+      text: "Intro\nイントロ"
+      bgcolor: "#004499"
       size: 12
     actions:
       down:
         - action: obs:set_current_scene
-          options: { scene: "Slides" }
+          options: { scene: "Intro" }
     feedbacks:
       - type: obs:scene_active
-        options: { scene: "Slides" }
+        options: { scene: "Intro" }
         style:
-          bgcolor: "#00CC00"
+          bgcolor: "#00AA00"
+          text: "● Intro"
 
   - row: 1
     col: 7
     style:
-      text: "Scene 4\nPiP"
-      bgcolor: "#0066CC"
+      text: "Outro\nアウトロ"
+      bgcolor: "#004499"
       size: 12
     actions:
       down:
         - action: obs:set_current_scene
-          options: { scene: "PiP" }
+          options: { scene: "Outro" }
     feedbacks:
       - type: obs:scene_active
-        options: { scene: "PiP" }
+        options: { scene: "Outro" }
         style:
-          bgcolor: "#00CC00"
+          bgcolor: "#00AA00"
+          text: "● Outro"
 
-  # ═══ Row 2: ATEM switching ═══
+  # ═══ Row 2: Timers + Scenes + Mute/Duck ═══
   - row: 2
     col: 0
     style:
-      text: "CAM 1\nカメラ1"
-      bgcolor: "#666666"
-      size: 14
+      text: "Timer\n開始"
+      bgcolor: "#006600"
+      size: 12
     actions:
       down:
-        - action: atem:set_preview_input
-          options: { input: 1 }
-      long_press:
-        - action: atem:set_program_input
-          options: { input: 1 }
-    feedbacks:
-      - type: atem:preview_tally
-        options: { input: 1 }
-        style:
-          bgcolor: "#00CC00"
-      - type: atem:program_tally
-        options: { input: 1 }
-        style:
-          bgcolor: "#CC0000"
-          text: "● LIVE\nカメラ1"
+        - action: propresenter_saitama:clockStart
+          options: { clockIndex: "0" }
 
   - row: 2
     col: 1
     style:
-      text: "CAM 2\nカメラ2"
-      bgcolor: "#666666"
-      size: 14
+      text: "Timer\n停止"
+      bgcolor: "#660000"
+      size: 12
     actions:
       down:
-        - action: atem:set_preview_input
-          options: { input: 2 }
-      long_press:
-        - action: atem:set_program_input
-          options: { input: 2 }
-    feedbacks:
-      - type: atem:preview_tally
-        options: { input: 2 }
-        style:
-          bgcolor: "#00CC00"
-      - type: atem:program_tally
-        options: { input: 2 }
-        style:
-          bgcolor: "#CC0000"
-          text: "● LIVE\nカメラ2"
+        - action: propresenter_saitama:clockStop
+          options: { clockIndex: "0" }
 
   - row: 2
     col: 2
     style:
-      text: "CAM 3\nカメラ3"
-      bgcolor: "#666666"
-      size: 14
-    actions:
-      down:
-        - action: atem:set_preview_input
-          options: { input: 3 }
-      long_press:
-        - action: atem:set_program_input
-          options: { input: 3 }
-    feedbacks:
-      - type: atem:preview_tally
-        options: { input: 3 }
-        style:
-          bgcolor: "#00CC00"
-      - type: atem:program_tally
-        options: { input: 3 }
-        style:
-          bgcolor: "#CC0000"
-
-  - row: 2
-    col: 3
-    style:
-      text: "PC\nスライド"
-      bgcolor: "#666666"
-      size: 14
-    actions:
-      down:
-        - action: atem:set_preview_input
-          options: { input: 4 }
-      long_press:
-        - action: atem:set_program_input
-          options: { input: 4 }
-    feedbacks:
-      - type: atem:preview_tally
-        options: { input: 4 }
-        style:
-          bgcolor: "#00CC00"
-      - type: atem:program_tally
-        options: { input: 4 }
-        style:
-          bgcolor: "#CC0000"
-
-  - row: 2
-    col: 4
-    style:
-      text: "AUTO\n切替"
-      bgcolor: "#CCCC00"
-      size: 18
-    actions:
-      down:
-        - action: atem:auto_transition
-
-  - row: 2
-    col: 5
-    style:
-      text: "CUT\nカット"
-      bgcolor: "#CCCC00"
-      size: 18
-    actions:
-      down:
-        - action: atem:cut_transition
-
-  - row: 2
-    col: 6
-    style:
-      text: "FTB\n暗転"
-      bgcolor: "#333333"
-      size: 18
-    actions:
-      down:
-        - action: atem:toggle_ftb
-    feedbacks:
-      - type: atem:ftb_active
-        style:
-          bgcolor: "#CC0000"
-          text: "● FTB\n暗転中"
-
-  - row: 2
-    col: 7
-    style:
-      text: "DSK\nテロップ"
-      bgcolor: "#333333"
-      size: 14
-    actions:
-      down:
-        - action: atem:toggle_dsk
-          options: { key: 0 }
-    feedbacks:
-      - type: atem:dsk_on_air
-        options: { key: 0 }
-        style:
-          bgcolor: "#CC0000"
-          text: "● DSK ON"
-
-  # ═══ Row 3: Navigation to sub-pages ═══
-  - row: 3
-    col: 0
-    style:
-      text: "Audio\n音響"
-      bgcolor: "#0066CC"
-      size: 14
-    actions:
-      down:
-        - action: internal:page_set
-          options: { page: 4 }
-
-  - row: 3
-    col: 1
-    style:
-      text: "Slides\nスライド"
-      bgcolor: "#0066CC"
-      size: 14
-    actions:
-      down:
-        - action: internal:page_set
-          options: { page: 3 }
-
-  - row: 3
-    col: 2
-    style:
-      text: "Stream\n配信"
-      bgcolor: "#0066CC"
-      size: 14
-    actions:
-      down:
-        - action: internal:page_set
-          options: { page: 5 }
-
-  - row: 3
-    col: 3
-    style:
-      text: "Lights\n照明"
-      bgcolor: "#0066CC"
-      size: 14
-    actions:
-      down:
-        - action: internal:page_set
-          options: { page: 6 }
-
-  - row: 3
-    col: 7
-    style:
-      text: "EMERGENCY\n緊急"
-      bgcolor: "#CC0000"
+      text: "Timer\nリセット"
+      bgcolor: "#444444"
       size: 10
     actions:
       down:
-        - action: internal:page_set
-          options: { page: 10 }
+        - action: propresenter_saitama:clockReset
+          options: { clockIndex: "0" }
+
+  - row: 2
+    col: 3
+    style:
+      text: "Worship\n賛美(TBD)"
+      bgcolor: "#664400"
+      size: 10
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
+          options: { X: 1, Y: 1 }
+
+  - row: 2
+    col: 4
+    style:
+      text: "Speaking\n説教(TBD)"
+      bgcolor: "#664400"
+      size: 10
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
+          options: { X: 1, Y: 2 }
+
+  - row: 2
+    col: 5
+    style:
+      text: "Pastor\nミュート"
+      bgcolor: "#444444"
+      size: 10
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Current/InCh/Fader/On
+          options: { X: 11, Val: "Toggle" }
+    feedbacks:
+      - type: yamaha_saitama:MIXER_Current/InCh/Fader/On
+        options: { X: 11, Val: 0 }
+        style:
+          bgcolor: "#CC0000"
+          text: "MUTE\nミュート"
+          size: 10
+
+  - row: 2
+    col: 6
+    style:
+      text: "Master\nミュート"
+      bgcolor: "#444444"
+      size: 10
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Current/St/Fader/On
+          options: { X: 1, Val: "Toggle" }
+    feedbacks:
+      - type: yamaha_saitama:MIXER_Current/St/Fader/On
+        options: { X: 1, Val: 0 }
+        style:
+          bgcolor: "#CC0000"
+          text: "MUTE\nミュート"
+          size: 10
+
+  - row: 2
+    col: 7
+    style:
+      text: "DUCK\nダック"
+      bgcolor: "#664400"
+      size: 12
+    steps:
+      - style:
+          text: "DUCK\nダック"
+          bgcolor: "#664400"
+        actions:
+          down:
+            - action: yamaha_saitama:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -500 }
+            - action: internal:wait
+              options: { time: "100" }
+            - action: yamaha_saitama:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -1000 }
+            - action: internal:wait
+              options: { time: "100" }
+            - action: yamaha_saitama:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -1500 }
+            - action: internal:wait
+              options: { time: "100" }
+            - action: yamaha_saitama:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -2000 }
+            - action: internal:step_delta
+              options: { amount: 1 }
+      - style:
+          text: "UNDUCK\n戻す"
+          bgcolor: "#CC6600"
+        actions:
+          down:
+            - action: yamaha_saitama:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -1500 }
+            - action: internal:wait
+              options: { time: "100" }
+            - action: yamaha_saitama:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -1000 }
+            - action: internal:wait
+              options: { time: "100" }
+            - action: yamaha_saitama:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -500 }
+            - action: internal:wait
+              options: { time: "100" }
+            - action: yamaha_saitama:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: 0 }
+            - action: internal:step_delta
+              options: { amount: -1 }
+
+  # ═══ Row 3: Utilities + navigation + safety ═══
+  - row: 3
+    col: 0
+    style:
+      text: "Startup\n起動"
+      bgcolor: "#006600"
+      size: 12
+    actions:
+      down:
+        - action: internal:custom_variable_set_value
+          options: { name: "startup_phase", value: "Starting" }
+
+  - row: 3
+    col: 1
+    style:
+      text: "Shutdown\n終了"
+      bgcolor: "#660000"
+      size: 12
+    steps:
+      - style:
+          text: "Shutdown\n終了"
+          bgcolor: "#660000"
+        actions:
+          down:
+            - action: internal:step_delta
+              options: { amount: 1 }
+      - style:
+          text: "CONFIRM?\n確認？"
+          bgcolor: "#FF0000"
+        actions:
+          down:
+            - action: internal:step_delta
+              options: { amount: -1 }
+
+  - row: 3
+    col: 2
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 3
+    col: 3
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 3
+    col: 4
+    style:
+      text: "→ Audio\n音響"
+      bgcolor: "#003366"
+      size: 12
+    actions:
+      down:
+        - action: internal:set_page
+          options: { controller: "self", page: 41 }
+
+  - row: 3
+    col: 5
+    style:
+      text: "→ ProP\nスライド"
+      bgcolor: "#003366"
+      size: 10
+    actions:
+      down:
+        - action: internal:set_page
+          options: { controller: "self", page: 42 }
+
+  - row: 3
+    col: 6
+    style:
+      text: "→ Stream\n配信"
+      bgcolor: "#003366"
+      size: 10
+    actions:
+      down:
+        - action: internal:set_page
+          options: { controller: "self", page: 43 }
+
+  - row: 3
+    col: 7
+    style:
+      text: "PANIC\n緊急"
+      bgcolor: "#990000"
+      size: 14
+    steps:
+      - style:
+          text: "PANIC\n緊急"
+          bgcolor: "#990000"
+        actions:
+          down:
+            - action: internal:step_delta
+              options: { amount: 1 }
+      - style:
+          text: "CONFIRM?\n確認？"
+          bgcolor: "#FF0000"
+        actions:
+          down:
+            - action: yamaha_saitama:MIXER_Current/St/Fader/On
+              options: { X: 1, Val: 0 }
+            - action: internal:step_delta
+              options: { amount: -1 }

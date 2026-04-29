@@ -1,236 +1,420 @@
-# YIBC — Stream Deck MK2 Page 1: Operations
-# 5x3 grid — versatile control for streaming, power, audio, lighting
+# YIBC — Stream Deck MK2 Page 30: Operations
+# 5x3 grid — testing ProPresenter + Yamaha TF5 control
 
 page:
   number: 30
-  name: "YIBC Ops"
+  name: "Ops"
   device: mk2  # 5x3 = 15 buttons
 
 buttons:
-  # ═══ Row 0: Status indicators ═══
+  # ═══ Row 0: Stream control (unchanged) ═══
   - row: 0
     col: 0
     style:
-      text: "PTZ"
-      bgcolor: "#CC0000"
-      size: 14
-    feedbacks:
-      - type: ptz:connected
-        style:
-          bgcolor: "#00CC00"
-          text: "PTZ\n● OK"
-
-  - row: 0
-    col: 1
-    style:
-      text: "Stream"
-      bgcolor: "#CC0000"
-      size: 14
-    feedbacks:
-      # TODO: Replace with actual streaming module feedback
-      - type: obs:connected
-        style:
-          bgcolor: "#00CC00"
-          text: "Stream\n● OK"
-
-  - row: 0
-    col: 2
-    style:
-      text: "Audio"
-      bgcolor: "#CC0000"
-      size: 14
-    feedbacks:
-      # TODO: Replace with actual audio module feedback
-      - type: yamaha:connected
-        style:
-          bgcolor: "#00CC00"
-          text: "Audio\n● OK"
-
-  - row: 0
-    col: 3
-    style:
-      text: "HA"
-      bgcolor: "#CC0000"
-      size: 14
-    feedbacks:
-      - type: homeassistant:connected
-        style:
-          bgcolor: "#00CC00"
-          text: "HA\n● OK"
-
-  - row: 0
-    col: 4
-    style:
-      text: "$(internal:time_hms)"
-      bgcolor: "#333333"
-      size: 14
-
-  # ═══ Row 1: Primary actions ═══
-  - row: 1
-    col: 0
-    style:
-      text: "Power\nOn"
-      bgcolor: "#006600"
+      text: "STREAM"
+      bgcolor: "#555555"
       size: 14
     actions:
       down:
-        # TODO: Configure WOL/startup sequence for YIBC equipment
-        - action: internal:variable_set
-          options: { variable: "startup_phase", value: "Starting" }
-
-  - row: 1
-    col: 1
-    style:
-      text: "Power\nOff"
-      bgcolor: "#CC0000"
-      size: 14
-    steps:
-      - style:
-          text: "Power\nOff"
-          bgcolor: "#660000"
-        actions:
-          down:
-            - action: internal:step_next
-      - style:
-          text: "CONFIRM\n確認？"
-          bgcolor: "#FF0000"
-        actions:
-          down:
-            # TODO: Configure shutdown sequence for YIBC equipment
-            - action: internal:step_set
-              options: { step: 1 }
-
-  - row: 1
-    col: 2
-    style:
-      text: "STREAM\n配信"
-      bgcolor: "#666666"
-      size: 14
-    actions:
-      down:
-        # TODO: Replace with actual stream toggle action
         - action: obs:toggle_streaming
     feedbacks:
       - type: obs:streaming
         style:
           bgcolor: "#CC0000"
-          text: "● LIVE\n$(obs:stream_timecode)"
+          text: "● LIVE"
 
-  - row: 1
-    col: 3
+  - row: 0
+    col: 1
     style:
-      text: "REC\n録画"
-      bgcolor: "#666666"
+      text: "REC"
+      bgcolor: "#555555"
       size: 14
     actions:
       down:
-        # TODO: Replace with actual record toggle action
         - action: obs:toggle_recording
     feedbacks:
       - type: obs:recording
         style:
           bgcolor: "#CC0000"
-          text: "● REC\n$(obs:record_timecode)"
+          text: "● REC"
 
-  - row: 1
-    col: 4
+  - row: 0
+    col: 2
     style:
-      text: "Scene 1\nシーン"
-      bgcolor: "#0066CC"
-      size: 12
+      text: "Main"
+      bgcolor: "#004499"
+      size: 14
     actions:
       down:
-        # TODO: Replace with actual scene action
         - action: obs:set_current_scene
           options: { scene: "Main" }
     feedbacks:
       - type: obs:scene_active
         options: { scene: "Main" }
         style:
-          bgcolor: "#00CC00"
+          bgcolor: "#00AA00"
+          text: "● Main"
 
-  # ═══ Row 2: Secondary actions ═══
+  - row: 0
+    col: 3
+    style:
+      text: "Camera"
+      bgcolor: "#004499"
+      size: 14
+    actions:
+      down:
+        - action: obs:set_current_scene
+          options: { scene: "Camera" }
+    feedbacks:
+      - type: obs:scene_active
+        options: { scene: "Camera" }
+        style:
+          bgcolor: "#00AA00"
+          text: "● Cam"
+
+  - row: 0
+    col: 4
+    style:
+      text: "$(internal:time_hms)"
+      bgcolor: "#222222"
+      size: 14
+
+  # ═══ Row 1: ProPresenter test ═══
+  - row: 1
+    col: 0
+    style:
+      text: "PREV\nSlide"
+      bgcolor: "#553300"
+      size: 14
+    actions:
+      down:
+        - action: propresenter_yibc:last
+
+  - row: 1
+    col: 1
+    style:
+      text: "NEXT\nSlide"
+      bgcolor: "#553300"
+      size: 14
+    actions:
+      down:
+        - action: propresenter_yibc:next
+
+  - row: 1
+    col: 2
+    style:
+      text: "CLEAR\nAll"
+      bgcolor: "#993300"
+      size: 14
+    actions:
+      down:
+        - action: propresenter_yibc:clearall
+
+  - row: 1
+    col: 3
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 1
+    col: 4
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  # ═══ Row 2: Audio + nav ═══
   - row: 2
     col: 0
     style:
-      text: "Mute 1\nミュート"
-      bgcolor: "#00CC00"
+      text: "Master\nMute"
+      bgcolor: "#444444"
       size: 12
     actions:
       down:
-        # TODO: Replace with actual audio mute action
-        - action: yamaha:channel_mute_toggle
-          options: { channel: 1 }
+        - action: yamaha_yibc:MIXER_Current/St/Fader/On
+          options: { X: 1, Val: "Toggle" }
+        - action: yamaha_yibc:MIXER_Current/Mix/Fader/On
+          options: { X: 17, Val: "Toggle" }
     feedbacks:
-      - type: yamaha:channel_muted
-        options: { channel: 1 }
+      - type: yamaha_yibc:MIXER_Current/St/Fader/On
+        options: { X: 1, Val: 0 }
         style:
           bgcolor: "#CC0000"
-          text: "MUTED"
+          text: "MUTE"
+          size: 14
 
   - row: 2
     col: 1
     style:
-      text: "Mute 2\nミュート"
-      bgcolor: "#00CC00"
+      text: "DUCK\n-20dB"
+      bgcolor: "#664400"
       size: 12
-    actions:
-      down:
-        - action: yamaha:channel_mute_toggle
-          options: { channel: 2 }
-    feedbacks:
-      - type: yamaha:channel_muted
-        options: { channel: 2 }
-        style:
-          bgcolor: "#CC0000"
-          text: "MUTED"
+    steps:
+      - style:
+          text: "DUCK\n-20dB"
+          bgcolor: "#664400"
+        actions:
+          down:
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -100 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -700 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -200 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -800 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -300 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -900 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -400 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -1000 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -500 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -1100 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -600 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -1200 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -700 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -1300 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -800 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -1400 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -900 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -1500 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -1000 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -1600 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -1100 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -1700 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -1200 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -1800 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -1300 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -1900 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -1400 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -2000 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -1500 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -2100 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -1600 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -2200 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -1700 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -2300 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -1800 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -2400 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -1900 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -2500 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -2000 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -2600 }
+            - action: internal:step_delta
+              options: { amount: 1 }
+      - style:
+          text: "UNDUCK\nRestore"
+          bgcolor: "#CC6600"
+        actions:
+          down:
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -1900 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -2500 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -1800 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -2400 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -1700 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -2300 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -1600 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -2200 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -1500 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -2100 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -1400 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -2000 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -1300 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -1900 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -1200 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -1800 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -1100 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -1700 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -1000 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -1600 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -900 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -1500 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -800 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -1400 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -700 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -1300 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -600 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -1200 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -500 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -1100 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -400 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -1000 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -300 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -900 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -200 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -800 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -100 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -700 }
+            - action: internal:wait
+              options: { time: "50" }
+            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: 0 }
+            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
+              options: { X: 17, Val: -600 }
+            - action: internal:step_delta
+              options: { amount: -1 }
 
   - row: 2
     col: 2
     style:
-      text: "Mute All\n全ミュート"
-      bgcolor: "#660000"
-      size: 12
-    actions:
-      down:
-        # TODO: Mute master or all channels
-        - action: yamaha:channel_mute_set
-          options: { channel: "stereo", mute: true }
-      long_press:
-        - action: yamaha:channel_mute_set
-          options: { channel: "stereo", mute: false }
+      text: ""
+      bgcolor: "#1A1A1A"
 
   - row: 2
     col: 3
     style:
-      text: "Lights\n照明"
-      bgcolor: "#333333"
-      size: 14
-    actions:
-      down:
-        - action: homeassistant:call_service
-          options:
-            domain: "light"
-            service: "toggle"
-            entity_id: "light.sanctuary"
-    feedbacks:
-      - type: homeassistant:entity_state
-        options:
-          entity_id: "light.sanctuary"
-          value: "on"
-        style:
-          bgcolor: "#CCCC00"
-          text: "Lights\n● ON"
+      text: ""
+      bgcolor: "#1A1A1A"
 
   - row: 2
     col: 4
     style:
-      text: "→ PTZ"
-      bgcolor: "#0066CC"
-      size: 14
-    actions:
-      down:
-        # Note: This navigates the MK2's page, not the Plus.
-        # The Plus stays on its PTZ page independently.
-        - action: internal:page_set
-          options: { page: 31 }
+      text: ""
+      bgcolor: "#1A1A1A"

@@ -1,21 +1,84 @@
 # Companion Connection Definitions
-# Update IPs and credentials for your environment.
-# These get imported into Companion when deploying a fresh config.
+#
+# Both YIBC and Saitama instances defined simultaneously.
+# At each location, only the local connections will succeed —
+# the others will show as disconnected. This is expected.
 
 meta:
   companion_version: "4.2"
 
 connections:
+  # ═══════════════════════════════════════════
+  # YIBC connections (used by Plus + MK2)
+  # ═══════════════════════════════════════════
+
+  # Home Assistant — YIBC
   - id: homeassistant
     module: "homeassistant-server"
     label: "Home Assistant"
     enabled: true
     config:
       host: "http://home-assistant.home-assistant.svc.cluster.local:8123"
-      access_token: ""  # Set via Companion UI or populate from ha-oidc-config secret
+      access_token: ""
 
-  - id: internal
-    module: "bitfocus-companion"
-    label: "Companion"
+  # PTZ Camera — YIBC only
+  - id: ptz
+    module: "ptzoptics-visca"
+    label: "PTZ Camera"
     enabled: true
-    config: {}
+    config:
+      host: "192.168.1.113"
+      port: 5678
+      protocol: "tcp"
+
+  # Yamaha TF5 — YIBC
+  - id: yamaha_yibc
+    module: "yamaha-rcp"
+    label: "Yamaha TF5 (YIBC)"
+    enabled: true
+    config:
+      host: "192.168.1.54"
+      model: "TF"
+
+  # ProPresenter 7 v18.4 — YIBC
+  - id: propresenter_yibc
+    module: "renewedvision-propresenter"
+    label: "ProPresenter (YIBC)"
+    enabled: true
+    config:
+      host: "192.168.1.2"
+      port: "1025"
+      pass: "YIBC"
+      use_sd: "yes"
+      sdpass: ""
+      sendPresentationCurrentMsgs: "disabled"
+      timerPolling: "enabled"
+
+  # ═══════════════════════════════════════════
+  # Saitama connections (used by XL)
+  # ═══════════════════════════════════════════
+
+  # Yamaha TF1 — Saitama
+  - id: yamaha_saitama
+    module: "yamaha-rcp"
+    label: "Yamaha TF1 (Saitama)"
+    enabled: true
+    config:
+      host: "192.168.10.30"
+      model: "TF"
+
+  # ProPresenter 7 v21.3 — Saitama
+  - id: propresenter_saitama
+    module: "renewedvision-propresenter"
+    label: "ProPresenter (Saitama)"
+    enabled: true
+    config:
+      host: "192.168.68.55"
+      port: "53678"
+      pass: "test1234"
+      use_sd: "yes"
+      sdpass: ""
+      sendPresentationCurrentMsgs: "disabled"
+      timerPolling: "enabled"
+
+  # Future: ATEM Saitama, OBS at each location, Blackmagic recorder

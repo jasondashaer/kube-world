@@ -1,245 +1,240 @@
-# YIBC — Stream Deck+ Page 1: PTZ Camera Control
-# Buttons: camera presets + speed selection
-# Encoders: pan/tilt/zoom/focus with press actions
+# YIBC — Stream Deck+ Page 20: PTZ Encoder Control
+# 4x2 buttons + 4 encoders + LCD strip
+#
+# Row 0: Presets + Zoom In
+# Row 1: Presets + nav + Zoom Out
+# Row 2: LCD strip labels
+# Encoders: PAN / TILT / SPEED / PAGE
 
 page:
   number: 20
-  name: "PTZ Control"
-  device: plus  # 4x2 buttons + 4 encoders
+  name: "PTZ"
+  device: plus
 
 buttons:
-  # Row 0: Camera presets (tap = recall, hold = save)
+  # ═══ Row 0: Presets + Zoom In ═══
   - row: 0
     col: 0
+    style:
+      text: "Cross\n十字架"
+      bgcolor: "#004499"
+      size: 14
+    actions:
+      down:
+        - action: ptz:recallPreset
+          options: { isText: false, presetAsNumber: 0 }
+      long_press:
+        - action: ptz:setPreset
+          options: { isText: false, presetAsNumber: 0 }
+
+  - row: 0
+    col: 1
     style:
       text: "Wide\nワイド"
-      bgcolor: "#0066CC"
+      bgcolor: "#004499"
       size: 14
     actions:
       down:
-        - action: ptz:preset_recall
-          options: { preset: 0 }
+        - action: ptz:recallPreset
+          options: { isText: false, presetAsNumber: 1 }
       long_press:
-        - action: ptz:preset_save
-          options: { preset: 0 }
-    feedbacks:
-      - type: ptz:preset_active
-        options: { preset: 0 }
-        style:
-          bgcolor: "#00CC00"
-          text: "● Wide"
-
-  - row: 0
-    col: 1
-    style:
-      text: "Pulpit\n説教台"
-      bgcolor: "#0066CC"
-      size: 14
-    actions:
-      down:
-        - action: ptz:preset_recall
-          options: { preset: 1 }
-      long_press:
-        - action: ptz:preset_save
-          options: { preset: 1 }
-    feedbacks:
-      - type: ptz:preset_active
-        options: { preset: 1 }
-        style:
-          bgcolor: "#00CC00"
+        - action: ptz:setPreset
+          options: { isText: false, presetAsNumber: 1 }
 
   - row: 0
     col: 2
     style:
-      text: "Worship\n賛美"
-      bgcolor: "#0066CC"
+      text: "Sermon\n説教"
+      bgcolor: "#004499"
       size: 14
     actions:
       down:
-        - action: ptz:preset_recall
-          options: { preset: 2 }
+        - action: ptz:recallPreset
+          options: { isText: false, presetAsNumber: 2 }
       long_press:
-        - action: ptz:preset_save
-          options: { preset: 2 }
-    feedbacks:
-      - type: ptz:preset_active
-        options: { preset: 2 }
-        style:
-          bgcolor: "#00CC00"
+        - action: ptz:setPreset
+          options: { isText: false, presetAsNumber: 2 }
 
   - row: 0
     col: 3
     style:
-      text: "Custom\nカスタム"
-      bgcolor: "#0066CC"
+      text: "ZOOM +\nズーム"
+      bgcolor: "#555555"
       size: 14
     actions:
       down:
-        - action: ptz:preset_recall
-          options: { preset: 3 }
-      long_press:
-        - action: ptz:preset_save
-          options: { preset: 3 }
-    feedbacks:
-      - type: ptz:preset_active
-        options: { preset: 3 }
-        style:
-          bgcolor: "#00CC00"
+        - action: ptz:zoomI
+      up:
+        - action: ptz:zoomS
 
-  # Row 1: Speed selection + navigation
+  # ═══ Row 1: More presets + Zoom Out ═══
   - row: 1
     col: 0
     style:
-      text: "Slow\nゆっくり"
-      bgcolor: "#333333"
-      size: 12
+      text: "Pulpit\n説教台"
+      bgcolor: "#004499"
+      size: 14
     actions:
       down:
-        - action: internal:variable_set
-          options: { variable: "ptz_pan_speed", value: "3" }
-        - action: internal:variable_set
-          options: { variable: "ptz_tilt_speed", value: "3" }
-        - action: internal:variable_set
-          options: { variable: "ptz_zoom_speed", value: "1" }
-    feedbacks:
-      - type: internal:variable_value
-        options: { variable: "ptz_pan_speed", value: "3" }
-        style:
-          bgcolor: "#00CC00"
+        - action: ptz:recallPreset
+          options: { isText: false, presetAsNumber: 3 }
+      long_press:
+        - action: ptz:setPreset
+          options: { isText: false, presetAsNumber: 3 }
 
   - row: 1
     col: 1
     style:
-      text: "Med\n中速"
-      bgcolor: "#333333"
-      size: 12
+      text: "Worship\n賛美"
+      bgcolor: "#004499"
+      size: 14
     actions:
       down:
-        - action: internal:variable_set
-          options: { variable: "ptz_pan_speed", value: "8" }
-        - action: internal:variable_set
-          options: { variable: "ptz_tilt_speed", value: "6" }
-        - action: internal:variable_set
-          options: { variable: "ptz_zoom_speed", value: "3" }
-    feedbacks:
-      - type: internal:variable_value
-        options: { variable: "ptz_pan_speed", value: "8" }
-        style:
-          bgcolor: "#00CC00"
+        - action: ptz:recallPreset
+          options: { isText: false, presetAsNumber: 4 }
+      long_press:
+        - action: ptz:setPreset
+          options: { isText: false, presetAsNumber: 4 }
 
   - row: 1
     col: 2
     style:
-      text: "Fast\n高速"
-      bgcolor: "#333333"
-      size: 12
+      text: "Guitar\nギター"
+      bgcolor: "#004499"
+      size: 14
     actions:
       down:
-        - action: internal:variable_set
-          options: { variable: "ptz_pan_speed", value: "16" }
-        - action: internal:variable_set
-          options: { variable: "ptz_tilt_speed", value: "14" }
-        - action: internal:variable_set
-          options: { variable: "ptz_zoom_speed", value: "5" }
-    feedbacks:
-      - type: internal:variable_value
-        options: { variable: "ptz_pan_speed", value: "16" }
-        style:
-          bgcolor: "#00CC00"
+        - action: ptz:recallPreset
+          options: { isText: false, presetAsNumber: 5 }
+      long_press:
+        - action: ptz:setPreset
+          options: { isText: false, presetAsNumber: 5 }
 
   - row: 1
     col: 3
     style:
-      text: "AF/MF"
-      bgcolor: "#333333"
+      text: "ZOOM -\nズーム"
+      bgcolor: "#444444"
       size: 14
     actions:
       down:
-        - action: ptz:focus_auto_toggle
-    feedbacks:
-      - type: ptz:focus_mode
-        options: { mode: "auto" }
-        style:
-          bgcolor: "#00CC00"
-          text: "AUTO\nオート"
-      - type: ptz:focus_mode
-        options: { mode: "manual" }
-        style:
-          bgcolor: "#CCCC00"
-          text: "MANUAL\n手動"
+        - action: ptz:zoomO
+      up:
+        - action: ptz:zoomS
+
+  # ═══ Row 2: LCD strip labels ═══
+  - row: 2
+    col: 0
+    style:
+      text: "PAN ◄►"
+      bgcolor: "#222222"
+      size: 14
+
+  - row: 2
+    col: 1
+    style:
+      text: "TILT ▲▼"
+      bgcolor: "#222222"
+      size: 14
+
+  - row: 2
+    col: 2
+    style:
+      text: "SPD $(internal:custom_ptz_speed)"
+      bgcolor: "#222222"
+      size: 14
+
+  - row: 2
+    col: 3
+    style:
+      text: "PAGE ►"
+      bgcolor: "#222222"
+      size: 14
+    actions:
+      down:
+        - action: internal:set_page
+          options: { controller: "self", page: 21 }
 
 encoders:
-  # E0: Pan
+  # E0: PAN
   - encoder: 0
     style:
       text: "PAN"
       size: 14
     actions:
       rotate_cw:
-        - action: ptz:pan_right
-          options: { speed: "$(internal:ptz_pan_speed)" }
+        - action: ptz:right
+        - action: internal:wait
+          options: { time: "10 + ($(internal:custom_ptz_speed) - 1) * 15" }
+        - action: ptz:stop
       rotate_ccw:
-        - action: ptz:pan_left
-          options: { speed: "$(internal:ptz_pan_speed)" }
+        - action: ptz:left
+        - action: internal:wait
+          options: { time: "10 + ($(internal:custom_ptz_speed) - 1) * 15" }
+        - action: ptz:stop
       down:
-        - action: ptz:pan_tilt_home
+        - action: ptz:home
       long_press:
-        - action: ptz:pan_tilt_stop
+        - action: ptz:stop
 
-  # E1: Tilt
+  # E1: TILT
   - encoder: 1
     style:
       text: "TILT"
       size: 14
     actions:
       rotate_cw:
-        - action: ptz:tilt_up
-          options: { speed: "$(internal:ptz_tilt_speed)" }
+        - action: ptz:up
+        - action: internal:wait
+          options: { time: "10 + ($(internal:custom_ptz_speed) - 1) * 15" }
+        - action: ptz:stop
       rotate_ccw:
-        - action: ptz:tilt_down
-          options: { speed: "$(internal:ptz_tilt_speed)" }
+        - action: ptz:down
+        - action: internal:wait
+          options: { time: "10 + ($(internal:custom_ptz_speed) - 1) * 15" }
+        - action: ptz:stop
       down:
-        - action: ptz:pan_tilt_home
+        - action: ptz:home
       long_press:
-        - action: ptz:pan_tilt_stop
+        - action: ptz:stop
 
-  # E2: Zoom
+  # E2: SPEED — controls camera pan/tilt speed (1-24)
   - encoder: 2
     style:
-      text: "ZOOM\n$(ptz:zoom_pct)%"
-      size: 12
-    actions:
-      rotate_cw:
-        - action: ptz:zoom_in
-          options: { speed: "$(internal:ptz_zoom_speed)" }
-      rotate_ccw:
-        - action: ptz:zoom_out
-          options: { speed: "$(internal:ptz_zoom_speed)" }
-      down:
-        - action: ptz:preset_recall
-          options: { preset: 0 }  # Quick wide shot
-      long_press:
-        - action: ptz:zoom_stop
-
-  # E3: Focus
-  - encoder: 3
-    style:
-      text: "FOCUS"
+      text: "SPD"
       size: 14
     actions:
       rotate_cw:
-        - action: ptz:focus_far
-          options: { speed: 2 }
+        - action: ptz:ptSpeedU
+        - action: internal:custom_variable_set_expression
+          options: { name: "ptz_speed", expression: "min($(internal:custom_ptz_speed) + 1, 24)" }
       rotate_ccw:
-        - action: ptz:focus_near
-          options: { speed: 2 }
+        - action: ptz:ptSpeedD
+        - action: internal:custom_variable_set_expression
+          options: { name: "ptz_speed", expression: "max($(internal:custom_ptz_speed) - 1, 1)" }
       down:
-        - action: ptz:focus_one_push
+        - action: ptz:ptSpeedSet
+          options: { speed: 12 }
+        - action: internal:custom_variable_set_value
+          options: { name: "ptz_speed", value: "12" }
       long_press:
-        - action: ptz:focus_auto_toggle
-    feedbacks:
-      - type: ptz:focus_mode
-        options: { mode: "auto" }
-        style:
-          bgcolor: "#00CC00"
-          text: "AF"
+        - action: ptz:stop
+        - action: ptz:zoomS
+
+  # E3: PAGE — rotate cycles between Plus-relevant pages
+  # CW = next page, CCW = previous page
+  # Press = go to PTZ page (home)
+  - encoder: 3
+    style:
+      text: "PAGE"
+      size: 14
+    actions:
+      rotate_cw:
+        - action: internal:set_page
+          options: { controller: "self", page: 21 }
+      rotate_ccw:
+        - action: internal:set_page
+          options: { controller: "self", page: 21 }
+      down:
+        - action: internal:set_page
+          options: { controller: "self", page: 20 }

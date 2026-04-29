@@ -1,0 +1,141 @@
+# Companion Auto-Deploy — runs companion-deploy.py on every config change.
+#
+# Why a Deployment (not a Job):
+#   - Jobs are immutable after creation (PodTemplateSpec frozen)
+#   - When kustomize re-hashes ConfigMap, the Job's volume reference would
+#     change → Apply fails with immutable-field error
+#   - Deployments allow rolling updates: ConfigMap hash change rolls a
+#     new ReplicaSet → new Pod runs init container → import re-runs
+#
+# How it triggers:
+#   - kustomize configMapGenerator hashes ConfigMap content into the name
+#   - Volume references the hashed name (kustomize substitutes)
+#   - Any YAML change → new hash → new ConfigMap name → Deployment template
+#     pod-spec hash changes → rolling update → new Pod → init container
+#     waits for Companion + runs companion-deploy.py
+#
+# Steady state:
+#   - Init container exits 0 after successful import
+#   - Main container `pause` keeps the Pod Running (so K8s doesn't keep
+#     restarting). Pod stays alive but does nothing until the next
+#     ConfigMap-driven rollout.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: companion-deploy
+  namespace: companion
+  labels:
+    app.kubernetes.io/name: companion-deploy
+    app.kubernetes.io/part-of: kube-world
+    app.kubernetes.io/component: gitops
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: companion-deploy
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: companion-deploy
+    spec:
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: workload-type
+                    operator: In
+                    values:
+                      - iot
+      tolerations:
+        - key: "iot-only"
+          operator: "Equal"
+          value: "true"
+          effect: "NoSchedule"
+
+      initContainers:
+        # Step 1: Wait for Companion service to be ready (API responding).
+        - name: wait-for-companion
+          image: docker.io/library/busybox:1.37
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for Companion API at companion.companion.svc:8000..."
+              for i in $(seq 1 60); do
+                if wget -q -T 5 -O- http://companion.companion.svc:8000/api/custom-variable/__nonexistent__/value 2>&1 | grep -q "Custom variable"; then
+                  echo "Companion API ready"
+                  exit 0
+                fi
+                # 404 with "Custom variable" message = API up; missing/empty body = API not initialized
+                STATUS=$(wget -q -T 5 -S -O /dev/null http://companion.companion.svc:8000/ 2>&1 | grep "HTTP/" | tail -1 | awk '{print $2}')
+                echo "Attempt $i: HTTP=$STATUS"
+                sleep 5
+              done
+              echo "TIMEOUT waiting for Companion"
+              exit 1
+
+        # Step 2: Generate + import the config via tRPC.
+        - name: deploy
+          image: docker.io/library/python:3.11-slim
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              echo "Installing Python dependencies..."
+              pip install --quiet --no-cache-dir pyyaml websocket-client
+              echo "=== Generating .companionconfig from YAML ==="
+              cd /work
+              python3 /scripts/companion-deploy.py generate
+              echo "=== Importing to Companion ==="
+              python3 /scripts/companion-deploy.py import \
+                --url http://companion.companion.svc:8000
+              echo "=== Import successful ==="
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: COMPANION_CONFIG_DIR
+              value: /work/config
+            - name: COMPANION_OUTPUT_FILE
+              value: /tmp/companion.companionconfig
+          volumeMounts:
+            - name: config
+              mountPath: /work/config
+            - name: scripts
+              mountPath: /scripts
+          workingDir: /work
+
+      # Main container is a no-op pause — Pod stays Running after init succeeds.
+      # Without this the Pod would CrashLoopBackOff between init runs.
+      containers:
+        - name: pause
+          image: docker.io/library/busybox:1.37
+          command:
+            - sh
+            - -c
+            - |
+              echo "Deploy complete. Pod alive for observability."
+              echo "Trigger next deploy by editing apps/companion/config/*.yaml"
+              echo "and committing. Flux + kustomize will roll a new Pod."
+              sleep infinity
+          resources:
+            requests:
+              memory: "8Mi"
+              cpu: "1m"
+            limits:
+              memory: "32Mi"
+              cpu: "100m"
+
+      volumes:
+        - name: config
+          configMap:
+            name: companion-config  # kustomize will append hash suffix
+        - name: scripts
+          configMap:
+            name: companion-deploy-scripts  # kustomize will append hash suffix
+            defaultMode: 0755

@@ -21,10 +21,12 @@ Companion uses a flat global page-number namespace (1-99). Pages are partitioned
 | 20 | PTZ Encoder Control | YIBC | Plus | 4×4 | `apps/companion/config/pages/yibc/plus-page01-ptz.yaml` | [yibc-plus-20-ptz.md](yibc-plus-20-ptz.md) |
 | 21 | PTZ D-Pad | YIBC | Plus | 4×4 | `apps/companion/config/pages/yibc/plus-page02-dpad.yaml` | [yibc-plus-21-dpad.md](yibc-plus-21-dpad.md) |
 | 30 | Ops | YIBC | MK2 | 5×3 | `apps/companion/config/pages/yibc/mk2-page01-ops.yaml` | [yibc-mk2-30-ops.md](yibc-mk2-30-ops.md) |
+| 31 | Segments | YIBC | MK2 | 5×3 | `apps/companion/config/pages/yibc/mk2-page02-segments.yaml` | [yibc-mk2-31-segments.md](yibc-mk2-31-segments.md) |
 | 40 | Home Dashboard | Saitama | XL | 8×4 | `apps/companion/config/pages/saitama/xl-page01-home.yaml` | [saitama-xl-40-home.md](saitama-xl-40-home.md) |
 | 41 | Audio Mixer | Saitama | XL | 8×4 | `apps/companion/config/pages/saitama/xl-page02-audio.yaml` | [saitama-xl-41-audio.md](saitama-xl-41-audio.md) |
 | 42 | ProP | Saitama | XL | 8×4 | `apps/companion/config/pages/saitama/xl-page03-slides.yaml` | [saitama-xl-42-prop.md](saitama-xl-42-prop.md) |
 | 43 | Stream | Saitama | XL | 8×4 | `apps/companion/config/pages/saitama/xl-page04-stream.yaml` | [saitama-xl-43-stream.md](saitama-xl-43-stream.md) |
+| 44 | Segments | Saitama | XL | 8×4 | `apps/companion/config/pages/saitama/xl-page05-segments.yaml` | [saitama-xl-44-segments.md](saitama-xl-44-segments.md) |
 
 ## Plus page rotation (20 ↔ 21)
 

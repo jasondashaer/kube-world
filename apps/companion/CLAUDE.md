@@ -108,31 +108,51 @@ apps/companion/
   CLAUDE.md                          ← this file
   README.md                          ← human-facing entry
   deployment.yaml                    ← K8s deployment, Flux/Karmada-managed
+  kustomization.yaml                 ← root kustomization (deployment + auto-import)
   gitops/                            ← K8s resources for auto-import pipeline
-    configmap-job.yaml               ← ConfigMap with YAML + Job that imports
-    rbac.yaml                        ← ServiceAccount + Role
-    kustomization.yaml               ← Kustomize entry
+    deploy-job.yaml                  ← Deployment with init container that runs
+                                       companion-deploy.py on every ConfigMap hash change
+    kustomization.yaml               ← (legacy, still referenced in places)
   config/
     connections.yaml                 ← all module connections (both locations)
     variables.yaml                   ← all custom variables
     surfaces.yaml                    ← surface-to-page assignments
     triggers.yaml                    ← all triggers (automation)
-    pages/yibc/*.yaml                ← YIBC pages (Plus 20-21, MK2 30)
-    pages/saitama/*.yaml             ← Saitama pages (XL 40-43)
+    pages/yibc/*.yaml                ← YIBC pages (Plus 20-21, MK2 30-31)
+    pages/saitama/*.yaml             ← Saitama pages (XL 40-44)
+    scenes/<location>/*.yaml         ← Declarative mixer scene state (RCP push targets)
   scripts/
     companion-deploy.py              ← YAML → tRPC importer (also runs in-cluster Job)
+    mixer-state-deploy.py            ← Operator-run RCP push to TF mixers; --dry-run + --apply
 
 docs/companion/
   README.md                          ← navigation
   ARCHITECTURE.md                    ← system design
   PIPELINE.md                        ← GitOps flow detail
+  STATUS.md                          ← current build state
+  INVENTORY.md                       ← hardware + connection inventory
   locations/                         ← per-location specs
   systems/                           ← per-integration specs
   devices/                           ← per-Stream-Deck specs
   pages/                             ← per-page detailed button matrices
-  reference/                         ← action IDs, variables, troubleshooting
-  guides/                            ← how-to for common tasks
+  reference/                         ← action-ids, variables, triggers,
+                                       smooth-fades, troubleshooting,
+                                       yamaha-rcp-namespace
+  guides/                            ← deploy-config-changes, scene-strategy,
+                                       live-test-runbook, add-new-{system,
+                                       location,stream-deck}, setup-from-scratch
 ```
+
+## Two Deploy Pipelines (don't confuse them)
+
+| Pipeline | Trigger | What it touches | Auto? |
+|---|---|---|---|
+| `companion-deploy.py` (in-cluster Deployment init container) | git push → Flux → ConfigMap hash → rolling update | Companion config (buttons, pages, connections, triggers, surfaces) via tRPC import | YES — fires on every YAML change in `apps/companion/config/`. Pi-edge-1 only |
+| `mixer-state-deploy.py` (operator-run on Mac) | manual `python3 ... --apply` | TF1/TF5 mixer state via RCP, then stores to scene slot | NO — operator runs deliberately with backup ready. Live mixer reachable from operator's laptop |
+
+The auto-pipeline never touches the mixer directly. The operator pipeline is for code-pushed mixer scene baselines (Bank B). Bank A is engineer-owned working scenes — Companion segment-transition pads call Recall against Bank A; engineers edit Bank A on the mixer between services without touching code.
+
+See `docs/companion/guides/scene-strategy.md` for the full hybrid model.
 
 ## When in Doubt
 

@@ -1,0 +1,175 @@
+# YIBC — Stream Deck MK2 Page 31: Service Segments
+# 5x3 grid — segment-transition pad. Recalls mixer scenes by number.
+#
+# Hybrid design: Companion calls Lib/Bank/Scene/Recall with a scene number.
+# The mixer (TF5) owns the scene contents. Engineers can edit scenes
+# directly on the mixer between services to tune EQ / dynamics / mic
+# routing without touching Companion config. As long as the scene number
+# stays the same, Companion keeps working.
+#
+# Scene number convention (TF5 Bank A):
+#   01 — Announcements (room mics + announcer mic)
+#   02 — Worship (vocal + instrument layer)
+#   03 — Sermon (pulpit + lapel only)
+#   04 — Greeting / Social (ambient room mics)
+#
+# Adjust scene numbers below to match the operator's mixer scene library.
+# Recall Safe (set globally on the mixer) protects the main fader so a
+# scene recall doesn't snap the room volume to a stored level.
+
+page:
+  number: 31
+  name: "Segments"
+  device: mk2
+
+buttons:
+  # ═══ Row 0: Segment selection ═══
+  - row: 0
+    col: 0
+    style:
+      text: "ANNOUNCE"
+      bgcolor: "#003366"
+      color: "#FFFFFF"
+      size: 12
+    actions:
+      down:
+        - action: yamaha_yibc:MIXER_Lib/Bank/Scene/Recall
+          options: { X: 1, Y: 1 }   # X=scene 1, Y=bank A
+        - action: internal:custom_variable_set_value
+          options: { name: "service_mode", value: "Announcements" }
+
+  - row: 0
+    col: 1
+    style:
+      text: "WORSHIP"
+      bgcolor: "#660066"
+      color: "#FFFFFF"
+      size: 12
+    actions:
+      down:
+        - action: yamaha_yibc:MIXER_Lib/Bank/Scene/Recall
+          options: { X: 2, Y: 1 }
+        - action: internal:custom_variable_set_value
+          options: { name: "service_mode", value: "Worship" }
+
+  - row: 0
+    col: 2
+    style:
+      text: "SERMON"
+      bgcolor: "#664400"
+      color: "#FFFFFF"
+      size: 12
+    actions:
+      down:
+        - action: yamaha_yibc:MIXER_Lib/Bank/Scene/Recall
+          options: { X: 3, Y: 1 }
+        - action: internal:custom_variable_set_value
+          options: { name: "service_mode", value: "Sermon" }
+
+  - row: 0
+    col: 3
+    style:
+      text: "GREETING"
+      bgcolor: "#006633"
+      color: "#FFFFFF"
+      size: 12
+    actions:
+      down:
+        - action: yamaha_yibc:MIXER_Lib/Bank/Scene/Recall
+          options: { X: 4, Y: 1 }
+        - action: internal:custom_variable_set_value
+          options: { name: "service_mode", value: "Greeting" }
+
+  # Mode + scene display
+  - row: 0
+    col: 4
+    style:
+      text: "$(internal:custom_service_mode)\nScene $(Yamaha_TF5__YIBC_:curScene)"
+      bgcolor: "#222222"
+      color: "#888888"
+      size: 11
+
+  # ═══ Row 1: Auxiliary segments (open for now) ═══
+  - row: 1
+    col: 0
+    style:
+      text: "PRELUDE"
+      bgcolor: "#222244"
+      color: "#666666"
+      size: 12
+    actions:
+      down:
+        - action: yamaha_yibc:MIXER_Lib/Bank/Scene/Recall
+          options: { X: 5, Y: 1 }
+        - action: internal:custom_variable_set_value
+          options: { name: "service_mode", value: "Prelude" }
+
+  - row: 1
+    col: 1
+    style:
+      text: "OFFERING"
+      bgcolor: "#222244"
+      color: "#666666"
+      size: 12
+    actions:
+      down:
+        - action: yamaha_yibc:MIXER_Lib/Bank/Scene/Recall
+          options: { X: 6, Y: 1 }
+        - action: internal:custom_variable_set_value
+          options: { name: "service_mode", value: "Offering" }
+
+  - row: 1
+    col: 2
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 1
+    col: 3
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 1
+    col: 4
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  # ═══ Row 2: Navigation back to ops ═══
+  - row: 2
+    col: 0
+    style:
+      text: "← OPS"
+      bgcolor: "#444444"
+      color: "#FFFFFF"
+      size: 14
+    actions:
+      down:
+        - action: internal:set_page
+          options: { controller: "self", page: 30 }
+
+  - row: 2
+    col: 1
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 2
+    col: 2
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 2
+    col: 3
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 2
+    col: 4
+    style:
+      text: "$(internal:time_hms)"
+      bgcolor: "#222222"
+      size: 14

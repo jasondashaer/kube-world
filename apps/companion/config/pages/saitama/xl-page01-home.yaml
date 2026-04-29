@@ -372,8 +372,13 @@ buttons:
   - row: 3
     col: 3
     style:
-      text: ""
-      bgcolor: "#1A1A1A"
+      text: "→ Segments\n場面"
+      bgcolor: "#003366"
+      size: 10
+    actions:
+      down:
+        - action: internal:set_page
+          options: { controller: "self", page: 44 }
 
   - row: 3
     col: 4

@@ -1,0 +1,340 @@
+# Saitama — Stream Deck XL Page 44: Service Segments
+# 8x4 = 32 buttons. Segment-transition pad. Recalls TF1 mixer scenes.
+#
+# Hybrid design: Companion calls Lib/Bank/Scene/Recall with a scene
+# number; the TF1 mixer at Saitama owns the scene contents. Engineers
+# tweak EQ/dynamics/routing on the mixer between services without
+# touching Companion config.
+#
+# Set Recall Safe globally on the TF1 to protect master fader + main bus
+# from scene recall — otherwise scene change snaps room volume.
+#
+# Saitama channel mapping (TF1 inputs):
+#   Worship=1, Guitar=4, Keys=6, Pastor=11, Media=14
+# Scene contents reflect those mappings.
+
+page:
+  number: 44
+  name: "Segments"
+  device: xl
+
+buttons:
+  # ═══ Row 0: Primary segments ═══
+  - row: 0
+    col: 0
+    style:
+      text: "ANNOUNCE"
+      bgcolor: "#003366"
+      color: "#FFFFFF"
+      size: 12
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
+          options: { X: 1, Y: 1 }
+        - action: internal:custom_variable_set_value
+          options: { name: "service_mode", value: "Announcements" }
+
+  - row: 0
+    col: 1
+    style:
+      text: "WORSHIP"
+      bgcolor: "#660066"
+      color: "#FFFFFF"
+      size: 12
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
+          options: { X: 2, Y: 1 }
+        - action: internal:custom_variable_set_value
+          options: { name: "service_mode", value: "Worship" }
+
+  - row: 0
+    col: 2
+    style:
+      text: "SERMON"
+      bgcolor: "#664400"
+      color: "#FFFFFF"
+      size: 12
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
+          options: { X: 3, Y: 1 }
+        - action: internal:custom_variable_set_value
+          options: { name: "service_mode", value: "Sermon" }
+
+  - row: 0
+    col: 3
+    style:
+      text: "GREETING"
+      bgcolor: "#006633"
+      color: "#FFFFFF"
+      size: 12
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
+          options: { X: 4, Y: 1 }
+        - action: internal:custom_variable_set_value
+          options: { name: "service_mode", value: "Greeting" }
+
+  # Status / current scene display
+  - row: 0
+    col: 4
+    style:
+      text: "$(internal:custom_service_mode)\nScene $(Yamaha_TF1__Saitama_:curScene)"
+      bgcolor: "#222222"
+      color: "#888888"
+      size: 11
+
+  - row: 0
+    col: 5
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 0
+    col: 6
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 0
+    col: 7
+    style:
+      text: "$(internal:time_hms)"
+      bgcolor: "#222222"
+      size: 14
+
+  # ═══ Row 1: Auxiliary segments ═══
+  - row: 1
+    col: 0
+    style:
+      text: "PRELUDE"
+      bgcolor: "#222244"
+      color: "#FFFFFF"
+      size: 12
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
+          options: { X: 5, Y: 1 }
+        - action: internal:custom_variable_set_value
+          options: { name: "service_mode", value: "Prelude" }
+
+  - row: 1
+    col: 1
+    style:
+      text: "OFFERING"
+      bgcolor: "#222244"
+      color: "#FFFFFF"
+      size: 12
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
+          options: { X: 6, Y: 1 }
+        - action: internal:custom_variable_set_value
+          options: { name: "service_mode", value: "Offering" }
+
+  - row: 1
+    col: 2
+    style:
+      text: "COMMUNION"
+      bgcolor: "#222244"
+      color: "#FFFFFF"
+      size: 12
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
+          options: { X: 7, Y: 1 }
+        - action: internal:custom_variable_set_value
+          options: { name: "service_mode", value: "Communion" }
+
+  - row: 1
+    col: 3
+    style:
+      text: "INVITATION"
+      bgcolor: "#222244"
+      color: "#FFFFFF"
+      size: 12
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
+          options: { X: 8, Y: 1 }
+        - action: internal:custom_variable_set_value
+          options: { name: "service_mode", value: "Invitation" }
+
+  - row: 1
+    col: 4
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 1
+    col: 5
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 1
+    col: 6
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 1
+    col: 7
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  # ═══ Row 2: Bank B alternates (advanced) ═══
+  - row: 2
+    col: 0
+    style:
+      text: "ANNCE B"
+      bgcolor: "#1A1A33"
+      color: "#888888"
+      size: 11
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
+          options: { X: 1, Y: 2 }   # bank B
+        - action: internal:custom_variable_set_value
+          options: { name: "service_mode", value: "Announcements (B)" }
+
+  - row: 2
+    col: 1
+    style:
+      text: "WORSHIP B"
+      bgcolor: "#1A1A33"
+      color: "#888888"
+      size: 11
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
+          options: { X: 2, Y: 2 }
+        - action: internal:custom_variable_set_value
+          options: { name: "service_mode", value: "Worship (B)" }
+
+  - row: 2
+    col: 2
+    style:
+      text: "SERMON B"
+      bgcolor: "#1A1A33"
+      color: "#888888"
+      size: 11
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
+          options: { X: 3, Y: 2 }
+        - action: internal:custom_variable_set_value
+          options: { name: "service_mode", value: "Sermon (B)" }
+
+  - row: 2
+    col: 3
+    style:
+      text: "GREET B"
+      bgcolor: "#1A1A33"
+      color: "#888888"
+      size: 11
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
+          options: { X: 4, Y: 2 }
+        - action: internal:custom_variable_set_value
+          options: { name: "service_mode", value: "Greeting (B)" }
+
+  - row: 2
+    col: 4
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 2
+    col: 5
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 2
+    col: 6
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 2
+    col: 7
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  # ═══ Row 3: Navigation ═══
+  - row: 3
+    col: 0
+    style:
+      text: "← HOME"
+      bgcolor: "#444444"
+      color: "#FFFFFF"
+      size: 14
+    actions:
+      down:
+        - action: internal:set_page
+          options: { controller: "self", page: 40 }
+
+  - row: 3
+    col: 1
+    style:
+      text: "AUDIO"
+      bgcolor: "#444444"
+      color: "#FFFFFF"
+      size: 14
+    actions:
+      down:
+        - action: internal:set_page
+          options: { controller: "self", page: 41 }
+
+  - row: 3
+    col: 2
+    style:
+      text: "PROP"
+      bgcolor: "#444444"
+      color: "#FFFFFF"
+      size: 14
+    actions:
+      down:
+        - action: internal:set_page
+          options: { controller: "self", page: 42 }
+
+  - row: 3
+    col: 3
+    style:
+      text: "STREAM"
+      bgcolor: "#444444"
+      color: "#FFFFFF"
+      size: 14
+    actions:
+      down:
+        - action: internal:set_page
+          options: { controller: "self", page: 43 }
+
+  - row: 3
+    col: 4
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 3
+    col: 5
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 3
+    col: 6
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 3
+    col: 7
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"

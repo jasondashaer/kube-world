@@ -54,6 +54,28 @@ connections:
       sendPresentationCurrentMsgs: "disabled"
       timerPolling: "enabled"
 
+  # OBS Studio — YIBC. Placeholder host/port; update after install.
+  # Module requires obs-websocket plugin v5+ on the OBS host.
+  - id: obs_yibc
+    module: "bitfocus-obs-websocket"
+    label: "OBS (YIBC)"
+    enabled: true
+    config:
+      host: "192.168.1.50"
+      port: "4455"
+      password: ""
+
+  # Spotify — YIBC. OAuth happens via Companion UI on first connect.
+  # Premium account required for playback control. Account-scoped, not
+  # device-scoped — re-auth needed when swapping accounts but no code change.
+  - id: spotify_yibc
+    module: "bitfocus-spotify-premium"
+    label: "Spotify (YIBC)"
+    enabled: true
+    config:
+      clientId: ""
+      clientSecret: ""
+
   # ═══════════════════════════════════════════
   # Saitama connections (used by XL)
   # ═══════════════════════════════════════════
@@ -81,4 +103,31 @@ connections:
       sendPresentationCurrentMsgs: "disabled"
       timerPolling: "enabled"
 
-  # Future: ATEM Saitama, OBS at each location, Blackmagic recorder
+  # OBS Studio — Saitama. Placeholder host/port.
+  - id: obs_saitama
+    module: "bitfocus-obs-websocket"
+    label: "OBS (Saitama)"
+    enabled: true
+    config:
+      host: "192.168.10.50"
+      port: "4455"
+      password: ""
+
+  # ATEM switcher — Saitama. Placeholder host.
+  - id: atem_saitama
+    module: "bmd-atem"
+    label: "ATEM (Saitama)"
+    enabled: true
+    config:
+      host: "192.168.10.40"
+
+  # Spotify — Saitama (separate account). OAuth via Companion UI.
+  - id: spotify_saitama
+    module: "bitfocus-spotify-premium"
+    label: "Spotify (Saitama)"
+    enabled: true
+    config:
+      clientId: ""
+      clientSecret: ""
+
+  # Future: ATEM YIBC, Blackmagic HyperDeck recorder

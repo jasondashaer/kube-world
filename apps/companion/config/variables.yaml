@@ -45,3 +45,43 @@ variables:
   - name: preset_name_1
     default: "Wide"
     persist: false
+
+  # ═══════════════════════════════════════════
+  # Service-flow ARM state
+  # ═══════════════════════════════════════════
+  # Triggers gate on service_armed == "1". ARM button sets this; DISARM
+  # or end-of-flow clears it. Without ARM, no automation fires regardless
+  # of timer state — operator must explicitly start the chain.
+
+  - name: service_armed
+    default: "0"
+    persist: false
+
+  # Mix bus index used for the live stream + recording feed.
+  # PLACEHOLDER — confirm with operator before live testing.
+  # Likely a stereo-flash-combo bus (e.g. Mix21/22 paired) on TF5/TF1.
+  # Abstracted so triggers don't hardcode it — change one variable to
+  # retarget the entire close flow.
+  - name: record_bus_idx
+    default: "21"
+    persist: true
+
+  # Stereo master target level for the close flow's final fixed position
+  # (the "speaking-volume" fade target after closing remarks). -300 = -3dB.
+  - name: closing_target_db_units
+    default: "-300"
+    persist: true
+
+  # Pre-close snapshot of master + record bus levels (stored at close-start
+  # so unducking can restore exactly).
+  - name: pre_close_master_level
+    default: "0"
+    persist: false
+  - name: pre_close_mix_level
+    default: "0"
+    persist: false
+
+  # Close-flow stage marker. "Idle" → "Closing-Remarks" → "Closing-Outro" → "Stopped".
+  - name: close_stage
+    default: "Idle"
+    persist: false

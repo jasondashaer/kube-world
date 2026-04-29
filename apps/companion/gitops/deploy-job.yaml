@@ -65,15 +65,17 @@ spec:
             - sh
             - -c
             - |
-              echo "Waiting for Companion API at companion.companion.svc:8000..."
+              echo "Waiting for Companion at companion.companion.svc:8000..."
+              # Readiness signal: GET / returns 200 with HTML body (web UI served).
+              # Companion's tRPC endpoint isn't HTTP-pollable, but if HTML loads
+              # the WebSocket /trpc upgrade also works.
               for i in $(seq 1 60); do
-                if wget -q -T 5 -O- http://companion.companion.svc:8000/api/custom-variable/__nonexistent__/value 2>&1 | grep -q "Custom variable"; then
-                  echo "Companion API ready"
+                if wget -q -T 5 -O- http://companion.companion.svc:8000/ 2>&1 | grep -q "<!doctype html"; then
+                  echo "Companion ready (web UI serving)"
                   exit 0
                 fi
-                # 404 with "Custom variable" message = API up; missing/empty body = API not initialized
                 STATUS=$(wget -q -T 5 -S -O /dev/null http://companion.companion.svc:8000/ 2>&1 | grep "HTTP/" | tail -1 | awk '{print $2}')
-                echo "Attempt $i: HTTP=$STATUS"
+                echo "Attempt $i: HTTP=$STATUS (waiting for HTML body)"
                 sleep 5
               done
               echo "TIMEOUT waiting for Companion"

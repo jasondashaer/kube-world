@@ -75,7 +75,7 @@ buttons:
   - row: 0
     col: 4
     style:
-      text: "$(internal:time_hms)"
+      text: "JST\n$(internal:time_hms)"
       bgcolor: "#222222"
       size: 14
 

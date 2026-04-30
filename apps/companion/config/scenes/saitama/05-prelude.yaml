@@ -1,0 +1,51 @@
+# Saitama TF1 — Scene 5: Prelude
+#
+# Instrumental music before service. Mics standby low so a stray tap
+# doesn't blast the room. Master ducked for comfortable arrival volume.
+
+scene:
+  number: 5
+  bank: B
+  name: "Prelude"
+  description: "Instrumental music up, mics standby low, master ducked."
+
+state:
+  inputs:
+    - channel: 1
+      label: "Worship"
+      mute: false
+      fader: -300   # -3dB instrumental
+
+    - channel: 4
+      label: "Guitar"
+      mute: false
+      fader: -300
+
+    - channel: 6
+      label: "Keys"
+      mute: false
+      fader: -300
+
+    # Pastor standby — operator opens during welcome
+    - channel: 11
+      label: "Pastor"
+      mute: false
+      fader: -2000  # -20dB standby
+      hpf:
+        enable: true
+        freq: 100
+
+    - channel: 14
+      label: "Media"
+      mute: true
+      fader: -32768
+
+  buses:
+    - channel: 21
+      label: "Stream Mix"
+      mute: false
+      fader: -300
+
+  master:
+    fader: -500     # -5dB pre-service room
+    mute: false

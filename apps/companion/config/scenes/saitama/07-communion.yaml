@@ -1,0 +1,57 @@
+# Saitama TF1 — Scene 7: Communion
+#
+# Very subdued. Pastor mic open for words of institution / prayer.
+# Background music at -20dB — present but contemplative; volume must
+# never compete with the spoken word during the elements.
+#
+# Be intentional: this is the most reverent moment of the service. If
+# the room ever feels loud during communion, pull master, not channels —
+# the relative balance here is tuned and Recall Safe protects master.
+
+scene:
+  number: 7
+  bank: B
+  name: "Communion"
+  description: "Pastor open, very subdued music, intentional volume."
+
+state:
+  inputs:
+    # Music — barely-there bed for reverence
+    - channel: 1
+      label: "Worship"
+      mute: false
+      fader: -2000  # -20dB — pad / soft underscore only
+
+    - channel: 4
+      label: "Guitar"
+      mute: false
+      fader: -2000
+
+    - channel: 6
+      label: "Keys"
+      mute: false
+      fader: -2000
+
+    # Pastor mic primary — words of institution
+    - channel: 11
+      label: "Pastor"
+      mute: false
+      fader: -100   # -1dB, clear and intimate
+      hpf:
+        enable: true
+        freq: 100
+
+    - channel: 14
+      label: "Media"
+      mute: true
+      fader: -32768
+
+  buses:
+    - channel: 21
+      label: "Stream Mix"
+      mute: false
+      fader: -300   # -3dB stream — intentional dynamic for online viewers
+
+  master:
+    fader: -500     # -5dB — quieter sanctuary, contemplative
+    mute: false

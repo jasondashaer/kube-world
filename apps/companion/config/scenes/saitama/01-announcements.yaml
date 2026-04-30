@@ -1,0 +1,50 @@
+# Saitama TF1 — Scene 1: Announcements
+#
+# Mirror of YIBC announcements with Saitama channel mapping (TF1).
+# Announcer mic open, music muted, speech-friendly room.
+
+scene:
+  number: 1
+  bank: B
+  name: "Announcements"
+  description: "Announcer mic open, music muted, speech EQ."
+
+state:
+  inputs:
+    - channel: 1
+      label: "Worship"
+      mute: true
+      fader: -32768
+
+    - channel: 4
+      label: "Guitar"
+      mute: true
+      fader: -32768
+
+    - channel: 6
+      label: "Keys"
+      mute: true
+      fader: -32768
+
+    - channel: 11
+      label: "Pastor"
+      mute: false
+      fader: -100   # -1dB
+      hpf:
+        enable: true
+        freq: 120
+
+    - channel: 14
+      label: "Media"
+      mute: false
+      fader: -300   # ducked; unmute selectively for video plays
+
+  buses:
+    - channel: 21
+      label: "Stream Mix"
+      mute: false
+      fader: -200
+
+  master:
+    fader: -200
+    mute: false

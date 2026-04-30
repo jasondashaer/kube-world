@@ -1,0 +1,50 @@
+# Saitama TF1 — Scene 6: Offering
+#
+# Worship music open as offertory cue. Pastor mic available for prayer
+# over offering. Music foreground; pastor steps in briefly.
+
+scene:
+  number: 6
+  bank: B
+  name: "Offering"
+  description: "Worship music open, pastor mic available for prayer."
+
+state:
+  inputs:
+    - channel: 1
+      label: "Worship"
+      mute: false
+      fader: -100   # -1dB, full mix
+
+    - channel: 4
+      label: "Guitar"
+      mute: false
+      fader: -100
+
+    - channel: 6
+      label: "Keys"
+      mute: false
+      fader: -100
+
+    - channel: 11
+      label: "Pastor"
+      mute: false
+      fader: -300   # -3dB — sits on top of music for prayer
+      hpf:
+        enable: true
+        freq: 100
+
+    - channel: 14
+      label: "Media"
+      mute: true
+      fader: -32768
+
+  buses:
+    - channel: 21
+      label: "Stream Mix"
+      mute: false
+      fader: -100
+
+  master:
+    fader: -100     # -1dB
+    mute: false

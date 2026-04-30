@@ -21,3 +21,8 @@ rules:
 ignore:
   - '.git/'
   - 'secrets/*.enc.yaml'
+  - 'apps/companion/secrets/*.sealed.yaml'
+  - 'apps/companion/secrets/*.unsealed.yaml'
+  - 'apps/companion/config/companion.companionconfig'
+  - 'apps/companion/config/companion.json'
+  - 'deploy/vanilla/site/*/.env'

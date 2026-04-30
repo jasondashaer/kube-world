@@ -1,0 +1,54 @@
+# Saitama TF1 — Scene 8: Invitation / Altar Call
+#
+# Sermon-like speech config (pastor primary, dry, intelligible) with a
+# soft pad/keys bed underneath very low for emotional underscoring.
+# Worship and guitar muted — only keys carries the pad. Stream bus on.
+
+scene:
+  number: 8
+  bank: B
+  name: "Invitation"
+  description: "Pastor open like sermon, soft keys pad underneath, others muted."
+
+state:
+  inputs:
+    # Worship + guitar muted — too active for invitation underscore
+    - channel: 1
+      label: "Worship"
+      mute: true
+      fader: -32768
+
+    - channel: 4
+      label: "Guitar"
+      mute: true
+      fader: -32768
+
+    # Keys provide the soft pad bed — very low
+    - channel: 6
+      label: "Keys"
+      mute: false
+      fader: -2500  # -25dB — barely-perceptible pad underscore
+
+    # Pastor mic — sermon-style: primary, intelligible
+    - channel: 11
+      label: "Pastor"
+      mute: false
+      fader: 0      # 0dB unity, same as sermon
+      hpf:
+        enable: true
+        freq: 100
+
+    - channel: 14
+      label: "Media"
+      mute: true
+      fader: -32768
+
+  buses:
+    - channel: 21
+      label: "Stream Mix"
+      mute: false
+      fader: -300
+
+  master:
+    fader: -300     # -3dB room
+    mute: false

@@ -1,0 +1,57 @@
+# YIBC TF5 — Scene 5: Prelude
+#
+# Instrumental music before service. Mics are in standby (low level so a
+# stray tap doesn't blast the room) — operator opens to full when speaker
+# steps in. Master pulled down -3 to -5dB so room hum during arrivals
+# stays comfortable.
+
+scene:
+  number: 5
+  bank: B
+  name: "Prelude"
+  description: "Instrumental music up, mics standby low, master ducked."
+
+state:
+  inputs:
+    # Music layer — open for prelude instrumental
+    - channel: 1
+      label: "Worship"
+      mute: false
+      fader: -300   # -3dB — softer than worship; instrumental, not full band
+
+    - channel: 4
+      label: "Guitar"
+      mute: false
+      fader: -300
+
+    - channel: 6
+      label: "Keys"
+      mute: false
+      fader: -300
+
+    # Pastor mic standby — operator opens during welcome / call-to-worship
+    - channel: 11
+      label: "Pastor"
+      mute: false
+      fader: -2000  # -20dB standby; live but won't feedback if bumped
+      hpf:
+        enable: true
+        freq: 100
+
+    # Media muted — no video roll-ins during prelude
+    - channel: 14
+      label: "Media"
+      mute: true
+      fader: -32768
+
+  buses:
+    # Stream/record bus open at moderate level — service hasn't started but
+    # stream may be live for early arrivers
+    - channel: 21
+      label: "Stream Mix"
+      mute: false
+      fader: -300
+
+  master:
+    fader: -500     # -5dB — quieter room for arrival / pre-service
+    mute: false

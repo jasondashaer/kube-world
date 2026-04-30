@@ -1,0 +1,50 @@
+# Saitama TF1 — Scene 2: Worship
+#
+# Music layer open, pastor mic standby for worship-leader speech between
+# songs. Stream bus + master at unity for full-range music.
+
+scene:
+  number: 2
+  bank: B
+  name: "Worship"
+  description: "Music layer open, pastor mic standby, stream bus full."
+
+state:
+  inputs:
+    - channel: 1
+      label: "Worship"
+      mute: false
+      fader: -100   # -1dB
+
+    - channel: 4
+      label: "Guitar"
+      mute: false
+      fader: -100
+
+    - channel: 6
+      label: "Keys"
+      mute: false
+      fader: -100
+
+    - channel: 11
+      label: "Pastor"
+      mute: false
+      fader: -300   # -3dB — worship leader's spoken words between songs
+      hpf:
+        enable: true
+        freq: 100
+
+    - channel: 14
+      label: "Media"
+      mute: true    # silenced during worship; engineer can unmute on demand
+      fader: -32768
+
+  buses:
+    - channel: 21
+      label: "Stream Mix"
+      mute: false
+      fader: 0      # 0dB unity for music
+
+  master:
+    fader: 0
+    mute: false

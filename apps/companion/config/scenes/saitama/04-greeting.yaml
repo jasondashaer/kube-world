@@ -1,0 +1,48 @@
+# Saitama TF1 — Scene 4: Greeting / Social
+#
+# Crowd / greeting time. Music in background, speech mics in standby.
+# Mirror of YIBC greeting scene with TF1 mapping.
+
+scene:
+  number: 4
+  bank: B
+  name: "Greeting"
+  description: "Speech standby, music background-low."
+
+state:
+  inputs:
+    # Music gentle background
+    - channel: 1
+      label: "Worship"
+      mute: false
+      fader: -1500  # -15dB background
+
+    - channel: 4
+      label: "Guitar"
+      mute: false
+      fader: -1500
+
+    - channel: 6
+      label: "Keys"
+      mute: false
+      fader: -1500
+
+    - channel: 11
+      label: "Pastor"
+      mute: false
+      fader: -500   # -5dB standby — pastor often re-engages to call attention back
+
+    - channel: 14
+      label: "Media"
+      mute: true
+      fader: -32768
+
+  buses:
+    - channel: 21
+      label: "Stream Mix"
+      mute: false
+      fader: -300
+
+  master:
+    fader: -300
+    mute: false

@@ -1,0 +1,51 @@
+# Dev environment overlay for Companion.
+#
+# Dev cluster (today: pi-edge-1; long-term: home dev Pi) watches the
+# `main` branch and auto-applies any push. This overlay layers dev-
+# specific values atop the shared base in apps/companion/.
+#
+# What's dev-specific:
+#   - Sealed Secret encrypted against dev cluster's keypair (different
+#     from prod's). When committed, dev's SealedSecret can be decrypted
+#     ONLY by the dev cluster's controller.
+#   - Higher rate limits / verbose logging if/when added.
+#   - Dev-only test connections if/when added.
+#
+# What's NOT in this overlay (lives in base):
+#   - All page YAML, connection definitions, triggers, surfaces.
+#   - The deploy-job Deployment + companion server Deployment.
+#   - The configMapGenerator pulling YAML into ConfigMaps.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: companion
+
+resources:
+  - ../../          # the base — apps/companion/kustomization.yaml
+
+  # Dev-cluster sealed credentials (per-cluster keypair).
+  # Generated locally with kubeseal against the dev cluster:
+  #   kubeseal --controller-namespace sealed-secrets \
+  #     --controller-name sealed-secrets-controller \
+  #     --kubeconfig ~/.kube/dev \
+  #     -f ../../secrets/companion-credentials.unsealed.yaml \
+  #     -w ./companion-credentials.sealed.yaml
+  # Commit the .sealed.yaml file. Cleartext is .gitignore'd.
+  # Uncomment after first seal:
+  # - companion-credentials.sealed.yaml
+
+# Patches: empty for now. Use this section for dev-only Deployment
+# tweaks (resource caps, env additions for verbose logging, etc.).
+# Example:
+#
+# patches:
+#   - target:
+#       kind: Deployment
+#       name: companion
+#     patch: |
+#       - op: add
+#         path: /spec/template/spec/containers/0/env/-
+#         value:
+#           name: COMPANION_LOG_LEVEL
+#           value: debug

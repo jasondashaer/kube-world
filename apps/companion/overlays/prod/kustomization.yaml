@@ -1,0 +1,54 @@
+# Prod environment overlay for Companion.
+#
+# Prod cluster (when it exists — built once user is in Japan and
+# self-servicing is feasible) watches signed `prod-v*` tags only,
+# NOT the main branch. A signed tag is the explicit promotion gate;
+# pushing to main alone cannot reach prod.
+#
+# What's prod-specific:
+#   - Sealed Secret encrypted against PROD cluster's keypair. Distinct
+#     ciphertext from dev. A leak of dev's sealed secrets does not
+#     compromise prod.
+#   - Tighter resource limits (Pi production hardware specs).
+#   - Production-only labels for monitoring / alert routing.
+#
+# What's NOT in this overlay (lives in base):
+#   - Page YAML, connections, triggers, surfaces — same source of
+#     truth used in dev.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: companion
+
+resources:
+  - ../../          # the base — apps/companion/kustomization.yaml
+
+  # Prod-cluster sealed credentials. Generate against the prod cluster:
+  #   kubeseal --controller-namespace sealed-secrets \
+  #     --controller-name sealed-secrets-controller \
+  #     --kubeconfig ~/.kube/prod \
+  #     -f ../../secrets/companion-credentials.unsealed.yaml \
+  #     -w ./companion-credentials.sealed.yaml
+  # Uncomment when prod cluster is online:
+  # - companion-credentials.sealed.yaml
+
+commonLabels:
+  app.kubernetes.io/managed-by: flux-prod
+  environment: production
+
+# Production resource adjustments
+patches:
+  - target:
+      kind: Deployment
+      name: companion
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "2Gi"
+            cpu: "2000m"

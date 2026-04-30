@@ -10,6 +10,8 @@ stages:
   - validate
   - security
   - test
+  - dev
+  - prod
   - notify
 
 variables:
@@ -125,6 +127,140 @@ test-bootstrap-dryrun:
     - chmod +x bootstrap.sh
     - ./bootstrap.sh --help
     - ./bootstrap.sh --dry-run --platform pi --verbose
+
+# ─────────────────────────────────────────────────────────────
+# Companion-specific validation
+# ─────────────────────────────────────────────────────────────
+companion-config-parse:
+  stage: validate
+  tags: [shell]
+  script:
+    - cd apps/companion && python3 scripts/companion-deploy.py generate
+    # Failure exits non-zero — catches YAML schema errors before deploy.
+
+companion-config-substitute:
+  stage: validate
+  tags: [shell]
+  script:
+    # Run with placeholder env vars to confirm every ${VAR} reference
+    # in connections.yaml is recognized. Adding a new ${VAR} without
+    # updating this list will cause MISSING warnings here, prompting
+    # the developer to add the env var to the SealedSecret + this list.
+    - export PROPRESENTER_PASSWORD_YIBC=ci-dummy
+    - export PROPRESENTER_PASSWORD_SAITAMA=ci-dummy
+    - export OBS_PASSWORD_YIBC=ci-dummy
+    - export OBS_PASSWORD_SAITAMA=ci-dummy
+    - export SPOTIFY_CLIENT_ID=ci-dummy
+    - export SPOTIFY_CLIENT_SECRET=ci-dummy
+    - export SPOTIFY_CLIENT_ID_SAITAMA=ci-dummy
+    - export SPOTIFY_CLIENT_SECRET_SAITAMA=ci-dummy
+    - cd apps/companion && python3 scripts/companion-deploy.py generate 2>&1 | tee /tmp/sub-output.txt
+    - |
+      if grep -q "MISSING" /tmp/sub-output.txt; then
+        echo "FAIL: Add the missing env vars to .gitlab-ci.yml"
+        exit 1
+      fi
+
+companion-mixer-scenes-dryrun:
+  stage: validate
+  tags: [shell]
+  script:
+    # Validate every scene YAML by running mixer-state-deploy.py in
+    # dry-run mode. No mixer connection — pure schema/parse validation.
+    - |
+      for scene in apps/companion/config/scenes/yibc/*.yaml apps/companion/config/scenes/saitama/*.yaml; do
+        [ -f "$scene" ] || continue
+        name=$(basename "$scene" .yaml)
+        loc=$(basename "$(dirname "$scene")")
+        echo "=== $loc/$name ==="
+        python3 apps/companion/scripts/mixer-state-deploy.py --location "$loc" --scene "$name" --dry-run
+      done
+
+companion-seed-export:
+  stage: validate
+  tags: [shell]
+  script:
+    # Build per-site seed configs. Confirms filtering + host-rewrite
+    # work without errors before handoff. Artifacts kept for download.
+    - mkdir -p /tmp/seeds
+    - python3 apps/companion/scripts/seed-export.py --site yibc --output /tmp/seeds/seed-yibc.companionconfig --rewrite-hosts
+    - python3 apps/companion/scripts/seed-export.py --site saitama --output /tmp/seeds/seed-saitama.companionconfig --rewrite-hosts
+    - ls -la /tmp/seeds/
+  artifacts:
+    paths:
+      - /tmp/seeds/
+    expire_in: 30 days
+
+companion-kustomize-build:
+  stage: validate
+  tags: [shell]
+  script:
+    - kustomize build apps/companion >/dev/null
+    - kustomize build apps/companion/overlays/dev >/dev/null
+    - kustomize build apps/companion/overlays/prod >/dev/null
+
+# ─────────────────────────────────────────────────────────────
+# Dev environment deploy (manual, MR-pre-merge OK)
+# ─────────────────────────────────────────────────────────────
+# Mirrors the work-pattern: dev jobs runnable on MRs before approval,
+# prod jobs gated post-merge. KUBECONFIG_DEV must be a CI/CD variable
+# of type "File" pointing at a kubeconfig with apply permissions on
+# the dev cluster.
+dev-dryrun-apply:
+  stage: dev
+  tags: [shell]
+  when: manual
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+  script:
+    - kubectl --kubeconfig "$KUBECONFIG_DEV" apply --dry-run=server -k apps/companion/overlays/dev
+  environment:
+    name: dev
+    url: https://companion.edge1.kubew.dev
+
+dev-apply:
+  stage: dev
+  tags: [shell]
+  when: manual
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  script:
+    - kubectl --kubeconfig "$KUBECONFIG_DEV" apply -k apps/companion/overlays/dev
+  environment:
+    name: dev
+    url: https://companion.edge1.kubew.dev
+
+# ─────────────────────────────────────────────────────────────
+# Prod environment deploy (tag-gated, manual, post-merge only)
+# ─────────────────────────────────────────────────────────────
+# Only fires on commits tagged `prod-v*`. The tag itself must be
+# GPG-signed (`git tag -s prod-vN`); the apply job re-verifies the
+# signature server-side as last-line-of-defense.
+prod-dryrun-apply:
+  stage: prod
+  tags: [shell]
+  when: manual
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^prod-v/
+  script:
+    - kubectl --kubeconfig "$KUBECONFIG_PROD" apply --dry-run=server -k apps/companion/overlays/prod
+  environment:
+    name: prod
+    url: https://companion.kubew.dev
+
+prod-apply:
+  stage: prod
+  tags: [shell]
+  when: manual
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^prod-v/
+  script:
+    - git verify-tag "$CI_COMMIT_TAG"
+    - kubectl --kubeconfig "$KUBECONFIG_PROD" apply -k apps/companion/overlays/prod
+  environment:
+    name: prod
+    url: https://companion.kubew.dev
 
 # ─────────────────────────────────────────────────────────────
 # Notify Stage — sends results to ntfy

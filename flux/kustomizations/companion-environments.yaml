@@ -1,0 +1,76 @@
+# Per-environment Flux Kustomizations for Companion.
+#
+# Today: only `companion-dev` is wired live (replaces the legacy
+# `apps-companion` in apps.yaml when ready to cut over). The
+# `companion-prod` definition is here as a template — uncomment +
+# customize when the prod cluster comes online.
+#
+# Environment selection model:
+#   - Dev cluster's Flux watches `main` branch.
+#   - Prod cluster's Flux (when it exists) watches `prod-v*` tag pattern.
+#
+# A push to `main` cannot reach prod — prod's GitRepository ref is the
+# tag pattern, not a branch. Promotion = `git tag -s prod-vN && git push --tags`.
+#
+# See docs/companion/ENVIRONMENT-STRATEGY.md for the full design.
+
+---
+# Dev environment — watches `main`, applies overlays/dev
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: companion-dev
+  namespace: flux-system
+spec:
+  interval: 5m
+  path: ./apps/companion/overlays/dev
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: kube-world
+  dependsOn:
+    - name: apps-base
+    - name: karmada-propagation-policies
+  kubeConfig:
+    secretRef:
+      name: karmada-kubeconfig
+      key: value
+
+# ---
+# # Prod environment — uncomment when prod cluster is online.
+# # Requires a separate GitRepository pointing at the tag-pattern ref.
+# apiVersion: source.toolkit.fluxcd.io/v1
+# kind: GitRepository
+# metadata:
+#   name: kube-world-prod
+#   namespace: flux-system
+# spec:
+#   interval: 1m
+#   url: http://gitlab.kubew.dev/root/kube-world.git
+#   ref:
+#     # Track newest tag matching the prod release pattern. Cutting
+#     # `git tag -s prod-vN ...` triggers prod reconciliation.
+#     semver: ">=0.0.0"            # OR
+#     # tag: prod-v1                # for pinned-version-only updates
+#   secretRef:
+#     name: gitlab-deploy-token
+# ---
+# apiVersion: kustomize.toolkit.fluxcd.io/v1
+# kind: Kustomization
+# metadata:
+#   name: companion-prod
+#   namespace: flux-system
+# spec:
+#   interval: 5m
+#   path: ./apps/companion/overlays/prod
+#   prune: true
+#   sourceRef:
+#     kind: GitRepository
+#     name: kube-world-prod
+#   dependsOn:
+#     - name: apps-base
+#     - name: karmada-propagation-policies
+#   kubeConfig:
+#     secretRef:
+#       name: karmada-prod-kubeconfig
+#       key: value

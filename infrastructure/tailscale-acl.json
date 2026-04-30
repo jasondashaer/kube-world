@@ -128,6 +128,12 @@
       "src": ["tag:edge"],
       "dst": ["tag:central", "tag:edge"],
       "ip":  ["*"]
+    },
+    {
+      "//-rule": "LEGACY admin reach to existing infra. Members + tag:admin reach tag:central + tag:edge devices (existing pi-central + pi-edge-1 from bootstrap.sh). Keeps GitLab + Karmada apiserver + Flux UI reachable while new tag taxonomy is rolled out. Will retire when those Pis are re-tagged with the new env-prod / site-* / k8s-control taxonomy.",
+      "src": ["autogroup:member", "tag:admin", "tag:operator"],
+      "dst": ["tag:central", "tag:edge"],
+      "ip":  ["*"]
     }
   ],
 

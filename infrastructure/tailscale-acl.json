@@ -1,41 +1,153 @@
 {
+  "//-doc": [
+    "Tailscale ACL — DEFAULT-DENY production access model.",
+    "",
+    "Production Companion Pis are reachable on Tailscale (registered, ",
+    "addressable, can phone home for ACL/cert refresh) but NO ports are ",
+    "open from any other tailnet device unless tag:maintenance has been ",
+    "explicitly added to the destination Pi.",
+    "",
+    "Maintenance flip procedure:",
+    "  1. Open https://login.tailscale.com/admin/machines",
+    "  2. Find the production Pi (e.g. pi-yibc).",
+    "  3. Edit tags → add `tag:maintenance` → save. Takes effect <30s.",
+    "  4. SSH / web UI / satellite mirror are now reachable from tag:admin.",
+    "  5. Do the work.",
+    "  6. Edit tags → remove `tag:maintenance` → save. Pi locks down.",
+    "",
+    "Audit: every tag mutation is logged in Tailscale's activity feed",
+    "(https://login.tailscale.com/admin/logs/configuration).",
+    "",
+    "Why tag:maintenance is gated by web UI rather than ACL push:",
+    "  - Per-Pi granularity (turn on YIBC, leave Saitama locked).",
+    "  - No git commit per maintenance event (lower friction).",
+    "  - tagOwners restricts who can apply the tag (only admins).",
+    "  - Reverting in an emergency is one click, not a git revert.",
+    "",
+    "What egress is allowed from production Pis:",
+    "  - Local LAN (Stream Decks, AV systems) — handled at LAN layer, not ACL.",
+    "  - GitLab / GitHub for ConfigMap-driven imports (if k3s mode).",
+    "  - Tailscale control plane (always — required for the Pi to stay registered).",
+    "  - No outbound to other tailnet members unless explicitly granted.",
+    "",
+    "Tag taxonomy (multiple tags per device, NOT composite):",
+    "  tag:companion        — runs Companion brain (full install)",
+    "  tag:satellite        — runs Companion Satellite (Stream Deck mirror)",
+    "  tag:k8s-control      — K3s server (apiserver host) — post-cutover only",
+    "  tag:k8s-worker       — K3s agent / cluster member — post-cutover only",
+    "  tag:env-prod         — production tier; default-deny inbound",
+    "  tag:env-dev          — development tier; admin can reach freely",
+    "  tag:site-yibc        — physically at YIBC",
+    "  tag:site-saitama     — physically at Saitama",
+    "  tag:site-home        — Jackson's home (US today, Japan future)",
+    "  tag:admin            — Jackson's laptops + Mac (operator)",
+    "  tag:onsite-helper    — local-engineer machines at the church (optional)",
+    "  tag:maintenance      — temporary on-switch; default-deny rules bypass",
+    "",
+    "A YIBC production Pi gets: tag:companion + tag:env-prod + tag:site-yibc.",
+    "A Saitama Pi gets: tag:companion + tag:env-prod + tag:site-saitama.",
+    "Jackson's Mac gets: tag:satellite + tag:env-dev + tag:site-home + tag:admin.",
+    "Jackson's laptop gets: tag:env-dev + tag:site-home + tag:admin.",
+    "",
+    "When K3s cutover happens, the Pi adds: tag:k8s-control + tag:k8s-worker.",
+    "Existing tag:companion + tag:env-prod + tag:site-* stay.",
+    "",
+    "Legacy tags (pre-Companion-prod work):",
+    "  tag:central, tag:edge, tag:operator — kept for K3s + Karmada bootstrap",
+    "  compatibility. Eventually fold into the new taxonomy."
+  ],
+
   "tagOwners": {
-    "tag:central": ["autogroup:admin"],
-    "tag:edge":    ["autogroup:admin"],
-    "tag:operator": ["autogroup:admin"]
+    "tag:central":         ["autogroup:admin"],
+    "tag:edge":            ["autogroup:admin"],
+    "tag:operator":        ["autogroup:admin"],
+
+    "tag:companion":       ["autogroup:admin"],
+    "tag:satellite":       ["autogroup:admin"],
+    "tag:k8s-control":     ["autogroup:admin"],
+    "tag:k8s-worker":      ["autogroup:admin"],
+
+    "tag:env-prod":        ["autogroup:admin"],
+    "tag:env-dev":         ["autogroup:admin"],
+
+    "tag:site-yibc":       ["autogroup:admin"],
+    "tag:site-saitama":    ["autogroup:admin"],
+    "tag:site-home":       ["autogroup:admin"],
+
+    "tag:admin":           ["autogroup:admin"],
+    "tag:onsite-helper":   ["autogroup:admin"],
+
+    "tag:maintenance":     ["autogroup:admin"]
   },
 
   "grants": [
     {
-      "src": ["autogroup:member", "tag:operator"],
-      "dst": ["*"],
+      "//-rule": "ADMIN — outside of production. Members + tag:admin reach everything tag:env-dev or tag:site-home.",
+      "src": ["autogroup:member", "tag:admin", "tag:operator"],
+      "dst": ["tag:env-dev", "tag:site-home"],
       "ip":  ["*"]
     },
     {
+      "//-rule": "MAINTENANCE GATE — when tag:maintenance is on a Pi, tag:admin reaches it on operational ports only. Removing the tag closes the window.",
+      "src": ["tag:admin", "autogroup:member"],
+      "dst": ["tag:maintenance"],
+      "ip":  ["tcp:22", "tcp:80", "tcp:443", "tcp:8000", "tcp:6443", "tcp:16622"]
+    },
+    {
+      "//-rule": "SATELLITE — your home Mac (tag:satellite) connects to Companion brains during a maintenance window only. tag:maintenance must be on the Companion Pi for satellite to reach it.",
+      "src": ["tag:satellite"],
+      "dst": ["tag:maintenance"],
+      "ip":  ["tcp:16622"]
+    },
+    {
+      "//-rule": "ON-SITE HELPER — local engineer laptops at a church can reach their site's Pi on Companion web UI port only, only during maintenance.",
+      "src": ["tag:onsite-helper"],
+      "dst": ["tag:maintenance"],
+      "ip":  ["tcp:8000"]
+    },
+    {
+      "//-rule": "K3S CONTROL PLANE — K3s servers talk among themselves for cluster ops. Always allowed. Workers reach control on apiserver port.",
+      "src": ["tag:k8s-control"],
+      "dst": ["tag:k8s-control", "tag:k8s-worker"],
+      "ip":  ["*"]
+    },
+    {
+      "//-rule": "K3S WORKER → CONTROL — agents always need apiserver.",
+      "src": ["tag:k8s-worker"],
+      "dst": ["tag:k8s-control"],
+      "ip":  ["tcp:6443", "tcp:10250"]
+    },
+    {
+      "//-rule": "LEGACY central/edge — kept for K3s + Karmada bootstrap. Will fold into k8s-control / k8s-worker over time.",
       "src": ["tag:central"],
       "dst": ["tag:edge", "tag:central"],
       "ip":  ["*"]
     },
     {
+      "//-rule": "LEGACY edge → central.",
       "src": ["tag:edge"],
-      "dst": ["tag:central"],
-      "ip":  ["*"]
-    },
-    {
-      "src": ["tag:edge"],
-      "dst": ["tag:edge"],
+      "dst": ["tag:central", "tag:edge"],
       "ip":  ["*"]
     }
   ],
 
   "ssh": [
     {
+      "//-rule": "Self-SSH check — owner can shell into their own machines via Tailscale SSH.",
       "action": "check",
       "src":    ["autogroup:member"],
       "dst":    ["autogroup:self"],
       "users":  ["autogroup:nonroot", "root"]
     },
     {
+      "//-rule": "Admin → maintenance window only. Tag:admin can SSH a Pi only when tag:maintenance is on the Pi.",
+      "action": "accept",
+      "src":    ["tag:admin", "autogroup:member"],
+      "dst":    ["tag:maintenance"],
+      "users":  ["admin", "root"]
+    },
+    {
+      "//-rule": "Legacy central/edge SSH — bootstrap-time access. Phase out after K3s cutover proves stable.",
       "action": "accept",
       "src":    ["tag:central", "autogroup:member"],
       "dst":    ["tag:edge", "tag:central"],
@@ -45,10 +157,42 @@
 
   "tests": [
     {
+      "//-test": "Default-deny: admin CANNOT reach a production Pi without maintenance tag.",
+      "src":    "tag:admin",
+      "deny":   ["tag:env-prod:22", "tag:env-prod:8000", "tag:env-prod:16622"]
+    },
+    {
+      "//-test": "Maintenance window: admin CAN reach a Pi tagged with both env-prod AND maintenance.",
+      "src":    "tag:admin",
+      "accept": ["tag:maintenance:22", "tag:maintenance:8000", "tag:maintenance:16622"]
+    },
+    {
+      "//-test": "Satellite cannot reach Companion outside maintenance.",
+      "src":    "tag:satellite",
+      "deny":   ["tag:env-prod:16622", "tag:companion:16622"]
+    },
+    {
+      "//-test": "Satellite reaches Companion during maintenance.",
+      "src":    "tag:satellite",
+      "accept": ["tag:maintenance:16622"]
+    },
+    {
+      "//-test": "Onsite helper cannot reach SSH or K3s API even with maintenance.",
+      "src":    "tag:onsite-helper",
+      "deny":   ["tag:maintenance:22", "tag:maintenance:6443"]
+    },
+    {
+      "//-test": "Onsite helper reaches Companion UI during maintenance.",
+      "src":    "tag:onsite-helper",
+      "accept": ["tag:maintenance:8000"]
+    },
+    {
+      "//-test": "Legacy edge → central still works for ongoing bootstrap.",
       "src":    "tag:edge",
       "accept": ["tag:central:443", "tag:central:6443"]
     },
     {
+      "//-test": "Legacy central → edge still works.",
       "src":    "tag:central",
       "accept": ["tag:edge:6443"]
     }

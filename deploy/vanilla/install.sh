@@ -21,6 +21,15 @@
 #                      (default: /var/lib/companion).
 #   --no-tailscale     Skip Tailscale install (you'll handle remote access
 #                      another way, e.g. Ubiquiti VPN).
+#   --tailscale-auth-key <KEY>
+#                      Pre-authorize Tailscale registration. Mint this in
+#                      the Tailscale admin console with the correct base
+#                      tags pre-approved:
+#                        tag:companion, tag:env-prod, tag:site-<site>
+#                      Do NOT include tag:maintenance — that's added later
+#                      via web UI on demand.
+#                      If omitted: Tailscale installs but doesn't auto-
+#                      register; operator runs `sudo tailscale up` later.
 
 set -euo pipefail
 
@@ -33,6 +42,7 @@ COMPANION_VERSION="4.2.0"
 COMPANION_USER="companion"
 COMPANION_DATA="/var/lib/companion"
 INSTALL_TAILSCALE=1
+TAILSCALE_AUTH_KEY=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -41,6 +51,7 @@ while [[ $# -gt 0 ]]; do
         --user) COMPANION_USER="$2"; shift 2 ;;
         --data-dir) COMPANION_DATA="$2"; shift 2 ;;
         --no-tailscale) INSTALL_TAILSCALE=0; shift ;;
+        --tailscale-auth-key) TAILSCALE_AUTH_KEY="$2"; shift 2 ;;
         --help|-h)
             sed -n '2,/^set -euo pipefail/p' "$0"; exit 0 ;;
         *) echo "Unknown arg: $1" >&2; exit 1 ;;
@@ -220,9 +231,44 @@ if [[ $INSTALL_TAILSCALE -eq 1 ]]; then
     if ! command -v tailscale >/dev/null 2>&1; then
         log "Installing Tailscale..."
         curl -fsSL https://tailscale.com/install.sh | sh
-        warn "Run 'sudo tailscale up' to register this Pi with the tailnet."
     else
         log "Tailscale already installed — leaving alone"
+    fi
+
+    # Build the tag set from --site argument. These are the BASE tags
+    # the Pi advertises every time it brings up Tailscale. Maintenance
+    # is added separately via the Tailscale admin console; never auto-
+    # applied by the Pi to itself (security boundary).
+    TAGS="tag:companion,tag:env-prod,tag:site-${SITE}"
+
+    if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
+        # Auth key minted in https://login.tailscale.com/admin/settings/keys
+        # MUST have the matching tags pre-authorized at mint time
+        # (Tailscale rejects --advertise-tags that the auth key isn't
+        # authorized to apply).
+        log "Registering Tailscale with tags: $TAGS"
+        tailscale up \
+            --auth-key="$TAILSCALE_AUTH_KEY" \
+            --advertise-tags="$TAGS" \
+            --hostname="pi-${SITE}" \
+            --accept-routes \
+            --ssh
+    else
+        warn "No --tailscale-auth-key — Tailscale not registered yet."
+        warn ""
+        warn "To register manually:"
+        warn "  1. Mint an auth key at https://login.tailscale.com/admin/settings/keys"
+        warn "  2. Pre-approve tags: $TAGS"
+        warn "  3. Run on the Pi:"
+        warn "       sudo tailscale up \\"
+        warn "         --auth-key=tskey-... \\"
+        warn "         --advertise-tags='$TAGS' \\"
+        warn "         --hostname='pi-${SITE}' \\"
+        warn "         --accept-routes --ssh"
+        warn ""
+        warn "Do NOT include tag:maintenance — that's added later via the"
+        warn "Tailscale admin web UI on demand. See"
+        warn "docs/companion/guides/maintenance-access.md."
     fi
 fi
 

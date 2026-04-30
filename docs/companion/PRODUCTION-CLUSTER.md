@@ -1,211 +1,176 @@
 # Production Cluster Architecture
 
 When State 1 (vanilla Companion at YIBC + Saitama) gives way to State 2
-(full kube-world stack in production), the production cluster needs to
-exist somewhere. This doc evaluates the options and lays out the path.
+(full kube-world stack in production), the question is where the cluster
+lives. The path settles into a clear default thanks to two enablers:
 
-For the staged approach explaining when this transition happens, see
-[ENVIRONMENT-STRATEGY.md](ENVIRONMENT-STRATEGY.md). For why we're
-running vanilla today, see [guides/site-handoff.md](guides/site-handoff.md).
+1. **Stream Decks use the Network module.** Connection is to a TCP
+   endpoint, not a process. The endpoint can move from systemd
+   Companion → in-pod Companion in seconds; Stream Decks reconnect on
+   their next outbound TCP attempt. No re-pairing.
+2. **Tailscale ACL is default-deny.** Even when K3s is running on a
+   production Pi, Tailscale network isolation guarantees nothing
+   reaches it unless `tag:maintenance` is explicitly toggled on.
+   Operating with K3s on the production Pi does not weaken security
+   compared to vanilla.
 
----
+These together mean **in-place K3s on the existing production Pi** is
+the simplest, most direct path to State 2. No cloud cluster needed for
+production to work.
 
-## Decision matrix
-
-| Option | Latency to Stream Decks | Operator-self-service when broken? | Cost / month | Sovereignty |
-|---|---|---|---|---|
-| **A. On-Pi K3s, in the church** | local LAN, < 1ms | Operator can power-cycle Pi; you fix anything else | hardware-only | full local |
-| **B. Cloud K3s (Hetzner / DO / GCP)** | ~50-200ms to Tokyo | Cloud is up; Stream Decks reach via tunnel | $5-20 + bandwidth | cloud-dependent |
-| **C. Hybrid — cloud control plane + on-Pi data plane** | local for Companion, cloud for orchestration | Pi keeps Companion running standalone if cloud is down | $5-15 | mixed |
-| **D. Fully on-prem with you-in-Japan as ops** | local | You ARE the operator | hardware-only | full local |
-
-The decision changes based on **where you live**:
-
-- **You in US / not Japan**: **Option C** is best. Cloud control plane
-  = always reachable for you to push changes; on-Pi data plane keeps
-  the church running regardless of cloud connectivity. Edge clusters
-  in Karmada is exactly this pattern.
-- **You in Japan, near the churches**: **Option D** is best. Skip
-  the cloud roundtrip. Treat the production Pi cluster like dev —
-  local, on-prem, you operate it.
-- **You traveling between**: **Option C** (until you settle).
-
-The default plan: **start with C, simplify to D once you're permanent
-in Japan.** The C → D transition is mostly removing the cloud control
-plane Pod — the on-Pi cluster is the same.
+For the strategic context see
+[ENVIRONMENT-STRATEGY.md](ENVIRONMENT-STRATEGY.md). For the cutover
+procedure see [guides/k3s-cutover.md](guides/k3s-cutover.md). For why
+we're running vanilla today see
+[guides/site-handoff.md](guides/site-handoff.md).
 
 ---
 
-## Option C in detail (recommended near-term)
-
-### Topology
+## Recommended path: in-place K3s on the production Pi
 
 ```
 ┌────────────────────────────────────────────────────────────────────┐
-│  Cloud (Hetzner CX22 = €4.51/mo, 2 vCPU + 4GB RAM)                 │
+│  Production site (e.g. YIBC)                                      │
 │                                                                    │
-│  ┌────────────────────────────────────────────────────────────┐   │
-│  │ pi-central-cloud (K3s server, control plane only)          │   │
-│  │   - Karmada control plane                                  │   │
-│  │   - Flux + GitLab/GitHub mirror                            │   │
-│  │   - Rancher (UI for you to monitor from anywhere)          │   │
-│  │   - Sealed Secrets controller (for prod cluster keypair)   │   │
-│  │   - cert-manager + Traefik (only for the cloud's services) │   │
-│  └────────────────────────────────────────────────────────────┘   │
-│       ↑ Tailscale + Karmada agent register from edge clusters     │
+│  ┌──────────────────────────────────────────────────────────────┐ │
+│  │ pi-yibc (Pi 5 16GB, single-node K3s server + agent)          │ │
+│  │                                                              │ │
+│  │   - K3s server (1-node cluster — no Karmada needed at first) │ │
+│  │   - Companion (in-pod, hostNetwork: true)                    │ │
+│  │     ↓ TCP/5343 outbound to Stream Decks (LAN)                │ │
+│  │   - companion-deploy (init container — auto-import on        │ │
+│  │     ConfigMap hash change)                                   │ │
+│  │   - Sealed Secrets controller (per-cluster keypair)          │ │
+│  │   - Local Flux GitRepository → tag-gated `prod-v*`           │ │
+│  │                                                              │ │
+│  │   Tailscale tags: companion + env-prod + site-yibc           │ │
+│  │                   + k8s-control + k8s-worker                 │ │
+│  │   Default-deny inbound except local LAN                      │ │
+│  └──────────────────────────────────────────────────────────────┘ │
+│       ↑                                                            │
+│       │  Stream Decks (LAN, network module on TCP/5343)            │
+│       │  AV systems (mixer, OBS, ProPresenter — LAN only)          │
 └────────────────────────────────────────────────────────────────────┘
                                 ↑
-                                │ Tailscale (tail-scaled k8s API auth)
+                                │  Tailscale (admin only, during
+                                │  maintenance windows; default-deny
+                                │  otherwise)
                                 ↓
-┌────────────────────────────────────────────────────────────────────┐
-│  Production sites (each Pi an independent K3s cluster)             │
-│                                                                    │
-│  ┌──────────────────────┐  ┌──────────────────────┐                │
-│  │ pi-yibc (Pi 5 16GB)  │  │ pi-saitama (Pi 5)    │                │
-│  │   K3s server (1-node)│  │   K3s server         │                │
-│  │   Companion + auto-  │  │   Companion + auto-  │                │
-│  │   import init cont.  │  │   import init cont.  │                │
-│  │   Sealed Secrets ctrl│  │   Sealed Secrets ctrl│                │
-│  │   Karmada agent      │  │   Karmada agent      │                │
-│  └──────────────────────┘  └──────────────────────┘                │
-│       ↑                          ↑                                 │
-│       │  Stream Decks (LAN)      │  Stream Decks (LAN)             │
-└────────────────────────────────────────────────────────────────────┘
+                         Your Mac / laptop
 ```
 
-### Why this works
+### Properties
 
-- **Stream Decks talk to Companion locally.** Sub-millisecond response.
-  Cloud disconnect doesn't affect a live service.
-- **You push changes from anywhere.** Git push → cloud Flux reconciles
-  → Karmada propagates to edge clusters. Edge clusters cache the spec
-  in their local etcd; if they lose cloud connectivity mid-reconcile,
-  they keep running the last-known-good config.
-- **Edge clusters are autonomous for runtime.** The Karmada agent
-  syncs back to cloud when reachable, but the local K3s + Companion
-  Pod operates independently.
-- **Cloud is the always-reachable bastion** for kubectl / monitoring.
-  When something breaks, you can reach Rancher from any device with
-  Tailscale, see logs, push fixes.
+- **Latency to Stream Decks**: same as vanilla (local LAN).
+- **Operator self-service when broken**: same as vanilla (power-cycle
+  the Pi). K3s adds K3s-specific failure modes but those are visible
+  via `kubectl` only during a maintenance window.
+- **Cost**: hardware only (the Pi you already own).
+- **Sovereignty**: full local. No cloud dependency for runtime.
+- **Reachability for you**: only during a maintenance window via
+  Tailscale. ACL prevents drive-by access.
 
-### What's different from current dev setup
+### Cutover
 
-You're already running this pattern at home, just with pi-central
-playing the cloud's role. The cutover:
+[guides/k3s-cutover.md](guides/k3s-cutover.md) walks the procedure.
+~3-5 minutes downtime. Stream Decks reconnect automatically because
+they're on the LAN to the same Pi IP.
 
-1. Provision a cheap cloud VM (Hetzner CX22 or similar — €4.51/mo).
-2. Bootstrap K3s + Karmada + Flux + Rancher + Zitadel on it (existing
-   `bootstrap.sh` works — just point at the cloud node).
-3. Migrate the Karmada API endpoint from pi-central LAN to the cloud
-   public IP (over Tailscale).
-4. Edge Pis (pi-yibc, pi-saitama) join the cloud Karmada via
-   Tailscale — same `karmadactl join` command you already use, just
-   different control plane.
-5. Decommission pi-central. Or keep it as a backup control plane.
+### Limitations
 
-The repo's manifests don't change.
+- **Single point of failure per site.** If the Pi dies hardware-wise,
+  that site is dark. Mitigation: ship a spare Pi to each site
+  pre-imaged with the same vanilla install. Cutover the spare to K3s
+  on demand.
+- **No multi-site scheduling primitives.** Each site's cluster is
+  independent. If you want cross-site Karmada workload migration,
+  you need a separate control plane (see Phase C below).
+- **Per-site Sealed Secrets keypair.** Each cluster has its own keypair,
+  so a SealedSecret from YIBC cluster does NOT decrypt at Saitama.
+  This is the intended security boundary.
 
-### Failure modes
+---
 
-| Failure | Effect | Mitigation |
-|---|---|---|
-| Cloud down | Edge clusters keep running last-known config; you can't push new changes for the duration | Cloud provider chosen for high availability; cheap VMs from established providers (Hetzner, DO) hit ~99.9% |
-| Edge cluster (Pi) down | That site is dark; other site still works; you can push changes to the surviving site | Mixer + Pi power redundancy; ship spare Pi to each site for hot replacement |
-| Tailscale down | Cloud and edge can't sync; same as cloud down for that edge | Tailscale failures rare; LAN-direct fallback possible if you cache control plane addresses |
-| Pushed broken YAML | Flux reconciles → broken state → Companion stops responding | Validate stage in CI catches most; live test runbook catches the rest; rollback by re-tagging |
-| Cloud provider account suspended | All edge clusters lose control plane | Bootstrap script + git is portable to any new cloud provider in <1hr |
+## Phase plan
 
-### Costs
+### Phase A: Today — Vanilla
+Both YIBC and Saitama run vanilla Companion. Pi has Tailscale with base
+tags (no `tag:maintenance`). Operators run their services. You support
+remotely via [maintenance-access.md](guides/maintenance-access.md).
 
-| Item | Monthly |
+### Phase B: First site cuts over to K3s in-place
+Pick one site to migrate first (recommend YIBC — closer to your dev
+home setup). Open maintenance window, run cutover script, verify, close
+window. Now YIBC has full kube-world stack with auto-import GitOps.
+
+Saitama stays vanilla until you're confident in YIBC's K3s operation.
+
+### Phase C: Second site cuts over
+Saitama gets the same treatment. Both production sites now on full
+stack. Each is its own independent cluster.
+
+### Phase D (optional, only when needed): separate control plane
+You add a third site, OR you want centralized monitoring across sites,
+OR you want cross-site Karmada workload scheduling. Then bring up a
+**separate Karmada control plane** somewhere:
+
+- **Phase D1 (preferred when you live in Japan)**: a fourth Pi at your
+  home in Japan as the Karmada control plane. Existing church Pis
+  re-register as Karmada members. No site-side cutover.
+- **Phase D2 (alternative, for ergonomics if you're abroad)**: a cheap
+  cloud VM (Hetzner CX22 ~€4.51/mo) as the Karmada control plane. Same
+  re-registration; no site-side cutover.
+
+Phase D is **not required** to get production benefits. A 2-site
+deployment without a separate control plane works fine — each site is
+a Karmada-less single-cluster K3s with its own Flux pulling from the
+shared GitLab repo.
+
+---
+
+## Cloud control plane (Phase D2) — when it makes sense
+
+Demoted from the previous draft. The case for it is narrower than I
+thought before:
+
+| Triggers a cloud control plane | Notes |
 |---|---|
-| Hetzner CX22 (cloud control plane) | ~€4.51 |
-| Tailscale | $0 (free tier ≤3 users, ≤100 devices) |
-| Cloudflare DNS | $0 |
-| Cloudflare Tunnel (if used instead of public IP) | $0 |
-| Backups (Hetzner snapshots) | ~€1 |
-| Total | **< €6** |
+| Three or more production sites | Per-site Flux + Sealed Secrets duplication starts to hurt |
+| You want one Rancher to monitor all sites | Convenience, not necessity |
+| You want cross-site workload migration (e.g. failover mixer-state-deploy) | Mostly hypothetical; never needed yet |
+| You want a stable identity provider (Zitadel) reachable from sites' OIDC clients | Only if you're using OIDC for AV systems |
+
+For a 2-site deployment, none of these are urgent. Stay flat.
 
 ---
 
-## Option D — fully on-prem (your-in-Japan future state)
+## Failure modes per phase
 
-When you live near the churches, the cloud bastion isn't load-bearing.
-Simplification:
-
-- Drop the cloud control plane.
-- Keep the existing pi-central in your home in Japan as control plane,
-  OR run Karmada control plane co-located on one of the church Pis
-  (single-cluster mode, no Karmada).
-- Tailscale still useful for your laptop → cluster API access from
-  outside the home LAN.
-
-The repo manifests don't change. The transition is removing the cloud
-node from the inventory.
+| Phase | What can break | Recovery |
+|---|---|---|
+| A vanilla | Pi hardware, Companion crash, OS issue | Hot-swap spare Pi pre-imaged; restore from `/etc/default/companion` backup + Companion DB export |
+| B/C k3s in-place | Pi hardware, K3s control plane crash, etcd corruption, Pod scheduling | `cutover.sh --rollback` reverts to vanilla in ~2min if you can't fix K3s. Hot-swap Pi same as vanilla. |
+| D centralized | All of the above + control plane network partition | Edge clusters keep running last-known config (etcd is local on each Pi); reconnect when control plane returns. |
 
 ---
 
-## Path to get there
+## Decommission paths
 
-### Phase A: Today
-Vanilla Companion at YIBC + Saitama (operator-owned). You build kube-
-world stack at home for development. No production K3s anywhere yet.
-
-### Phase B: Cloud prod cluster up (pre-move-to-Japan)
-- Provision Hetzner CX22 (or equivalent).
-- Run `bootstrap.sh --platform cloud --stack karmada` (or whatever
-  the cloud-mode flag becomes — TODO add cloud platform support to
-  bootstrap.sh).
-- Bring up Sealed Secrets, Flux GitRepository tracking `prod-v*` tags.
-- DOES NOT CUT OVER any production site yet — cloud cluster is empty
-  except for the platform.
-
-### Phase C: First production site cut over to k3s
-- Pick one (probably YIBC since you're more familiar with it).
-- Procedure: see [guides/site-handoff.md](guides/site-handoff.md)
-  §"When to flip a site to k3s mode". Stop systemd Companion, install
-  K3s on Pi, join cloud Karmada, apply manifests.
-- Run for several services without touching anything to confirm
-  stability.
-
-### Phase D: Second site cut over
-Same procedure for Saitama. Both production sites now on full kube-
-world stack.
-
-### Phase E: You move to Japan
-Keep cloud cluster temporarily. Add a Pi cluster at your home in
-Japan. When the home cluster is the primary control plane,
-decommission cloud. Or keep cloud as a backup control plane.
-
----
-
-## Open questions (will need decisions when Phase B starts)
-
-- **Cloud provider choice**: Hetzner (cheapest, EU region) vs DigitalOcean
-  (Tokyo region, slightly higher latency to your laptop in US, cheaper
-  for the churches) vs GCP (in-Japan region, higher cost). Latency
-  for *your push* doesn't matter much — what matters is provider
-  reliability + region near the churches for control plane reachability
-  during issues.
-- **DNS**: Cloudflare with `kubew.dev` already in place. Add `prod.kubew.dev`
-  for the cloud cluster control plane (Rancher / Karmada API).
-- **Backups**: Velero already in repo manifests. Confirm Hetzner storage
-  bucket vs S3-compatible alternative for backup target.
-- **Disaster recovery**: time-to-recover from total cloud loss = bootstrap
-  script + git repo. Should be <1hr if practiced quarterly.
-- **Karmada or single-cluster?**: With 2 production sites, Karmada gives
-  multi-cluster scheduling that's mostly overkill. Single cluster per
-  site + Flux pulling from the same repo would be simpler. Tradeoff:
-  loss of cross-cluster scheduling primitives that we're not actually
-  using yet.
-
-These are not blocking — they get answered when Phase B starts.
+| Want | Path |
+|---|---|
+| Take a site offline temporarily | `kubectl scale deployment/companion -n companion --replicas=0` (k3s mode) or `systemctl stop companion` (vanilla) |
+| Move a site to a different facility | Image the Pi, ship to new location, update LAN IP if changed (DHCP reservation handles this), Stream Decks re-discover the Pi |
+| Replace the Pi entirely | Vanilla path: re-run install.sh on new Pi + restore env file + re-import seed. K3s path: provision new Pi with cutover.sh, migrate PVC data |
+| Fully retire the project | Stop the cluster, archive the repo, hand the operators a final exported Companion config blob they can import on any future Companion install |
 
 ---
 
 ## Cross-references
 
-- Environment strategy: [ENVIRONMENT-STRATEGY.md](ENVIRONMENT-STRATEGY.md)
-- Vanilla mode (current state): [guides/site-handoff.md](guides/site-handoff.md)
-- Karmada propagation: `karmada/propagation-policies/companion.yaml`
-- Bootstrap: `bootstrap.sh`
+- Environment + dev/prod strategy: [ENVIRONMENT-STRATEGY.md](ENVIRONMENT-STRATEGY.md)
+- Vanilla install (state today): [guides/site-handoff.md](guides/site-handoff.md)
+- K3s cutover procedure: [guides/k3s-cutover.md](guides/k3s-cutover.md)
+- Tailscale default-deny ACL: [`infrastructure/tailscale-acl.json`](../../infrastructure/tailscale-acl.json)
+- Maintenance access: [guides/maintenance-access.md](guides/maintenance-access.md)
+- Karmada propagation policies (multi-cluster mode): `karmada/propagation-policies/companion.yaml`
+- Bootstrap script: `bootstrap.sh`

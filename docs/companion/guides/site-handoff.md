@@ -38,7 +38,14 @@ What the site does **NOT** get:
 - [ ] Headless setup: SSH enabled, hostname set (`pi-yibc` or `pi-saitama`).
 - [ ] Static LAN IP reservation in the church's router (or DHCP-with-
       reservation) — Stream Decks need a stable address to connect.
-- [ ] (Optional) Tailscale auth key ready if you want remote SSH.
+- [ ] **Tailscale auth key minted** at
+      https://login.tailscale.com/admin/settings/keys with these tags
+      pre-approved (NO `tag:maintenance`):
+      - YIBC Pi: `tag:companion,tag:env-prod,tag:site-yibc`
+      - Saitama Pi: `tag:companion,tag:env-prod,tag:site-saitama`
+      The auth key is single-use; the Pi consumes it during install.
+      If you skip this, the operator can register manually later but
+      the default-deny ACL won't apply correctly until tags are added.
 - [ ] Latest seed config exported:
 
       ```bash
@@ -75,12 +82,16 @@ ssh admin@<pi-lan-ip>
 
 ### 2. Run the installer
 
-One-liner from a fresh Pi:
+One-liner from a fresh Pi (substitute the Tailscale auth key you minted
+in the pre-handoff step):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jasondashaer/kube-world/main/deploy/vanilla/install.sh \
-  | sudo bash -s -- --site yibc      # or --site saitama
+  | sudo bash -s -- --site yibc \
+                    --tailscale-auth-key tskey-auth-XXXXXXXX
 ```
+
+(Or `--site saitama` for Saitama.)
 
 This:
 - Installs deps (curl, libusb, avahi-daemon).
@@ -205,36 +216,40 @@ After handoff:
 - **On-demand updates.** If they want a new feature, you build it in
   the repo, generate a fresh seed for their site, send to them, they
   re-import. Their drift gets reset to your latest.
-- **Read-only insurance.** Tailscale or Ubiquiti VPN gives you SSH +
-  web UI access for occasional troubleshooting requests.
+- **Maintenance-gated remote access.** Default state: nothing on your
+  Tailscale tailnet can reach the production Pi. When the operator
+  requests help: open the maintenance window via Tailscale admin web
+  UI (add `tag:maintenance` to the Pi), do the work, close the window.
+  See [maintenance-access.md](maintenance-access.md).
+- **Stream Deck mirror from home.** During a maintenance window, your
+  home Mac running Companion Satellite (see
+  [`deploy/satellite/install.sh`](../../../deploy/satellite/install.sh))
+  can plug a Stream Deck into your Mac and mirror the production
+  Companion's pages. Lets you debug button behavior without flying to
+  the church. Latency ~150-300ms US ↔ Japan — fine for diagnosis,
+  not for live tight ops.
 
 ---
 
 ## When to flip a site to k3s mode
 
-Trigger: you've moved to Japan and can self-service the K3s stack
-directly. NOT before.
+Trigger: you want GitOps-driven config updates instead of seed-import
+roundtrips, OR you're adding observability across multiple sites, OR
+operating both vanilla sites manually has become a maintenance tax.
 
-Procedure:
+The cutover is in-place on the same Pi — no hardware change, ~3-5 min
+downtime, Stream Decks reconnect automatically because they use the
+Network module. Full procedure with rollback:
+[guides/k3s-cutover.md](k3s-cutover.md). One-liner:
 
-1. On the Pi: `sudo systemctl stop companion`. Vanilla install paused.
-2. Export current Companion state:
-   `python3 apps/companion/scripts/companion-deploy.py export --url http://<pi-ip>:8000 -o /tmp/site-export.json`
-3. Diff against repo: anything operator added that you want in repo,
-   convert to YAML and commit.
-4. Install K3s on the Pi (or join an existing cluster):
-   `curl -sfL https://get.k3s.io | sh -`
-5. Apply kube-world manifests via Flux (set up GitRepository pointing at
-   `prod-v*` tag pattern + Kustomization at
-   `./apps/companion/overlays/prod`).
-6. K3s Companion takes over. Vanilla systemd service can be removed:
-   `sudo systemctl disable --now companion && rm /etc/systemd/system/companion.service`.
-7. Redirect Stream Decks to the new in-cluster Companion endpoint
-   (web UI → Surfaces → re-pair).
+```bash
+sudo /opt/kube-world/deploy/k3s-cutover/cutover.sh --site yibc
+```
 
-This is a planned, deliberate cutover, not an emergency procedure.
-Read [ENVIRONMENT-STRATEGY.md](../ENVIRONMENT-STRATEGY.md) §2 for the
-full design.
+(Run during a maintenance window via SSH over Tailscale.)
+
+For the architectural design see
+[../PRODUCTION-CLUSTER.md](../PRODUCTION-CLUSTER.md).
 
 ---
 

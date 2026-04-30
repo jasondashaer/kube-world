@@ -96,6 +96,61 @@ def load_yaml_configs():
     return config
 
 
+def _substitute_env_in_value(val, env, subs_log):
+    """Replace ${VAR} or $VAR refs in a string value. Mutates subs_log."""
+    if not isinstance(val, str):
+        return val
+    import re
+    pattern = re.compile(r"\$\{([A-Z_][A-Z0-9_]*)\}|\$([A-Z_][A-Z0-9_]*)")
+    result = val
+    for m in pattern.finditer(val):
+        var = m.group(1) or m.group(2)
+        if var in env and env[var]:
+            result = result.replace(m.group(0), env[var])
+            subs_log.append(f"    {var} → ({len(env[var])} chars)")
+        else:
+            subs_log.append(f"    {var} → MISSING (left as literal)")
+    return result
+
+
+def substitute_env(yaml_config, env=None):
+    """Replace ${VAR} placeholders in connection config + secrets fields.
+
+    Allows connections.yaml to reference env vars for credentials:
+
+        config:
+          host: "${OBS_HOST}"
+          password: "${OBS_PASSWORD}"
+
+    The companion-deploy Pod has these env vars populated from a
+    SealedSecret-backed K8s Secret (see infrastructure/sealed-secrets).
+    For vanilla mode, the env vars come from /etc/default/companion.
+    For local dev, you can `source` a .env file before running.
+
+    Missing env vars are left as literal `${VAR}` strings — Companion
+    will show them in the UI so the operator notices and pastes the
+    real value. NEVER fail-open by emitting a Companion config with a
+    placeholder credential silently substituted to empty.
+
+    Returns list of substitution log lines (for printing).
+    """
+    import os as _os
+    env = env if env is not None else dict(_os.environ)
+    log = []
+    conns_doc = yaml_config.get("connections", {})
+    if isinstance(conns_doc, dict) and "connections" in conns_doc:
+        for c in conns_doc["connections"]:
+            cfg = c.get("config", {})
+            if isinstance(cfg, dict):
+                for k in list(cfg.keys()):
+                    cfg[k] = _substitute_env_in_value(cfg[k], env, log)
+            secrets = c.get("secrets", {})
+            if isinstance(secrets, dict):
+                for k in list(secrets.keys()):
+                    secrets[k] = _substitute_env_in_value(secrets[k], env, log)
+    return log
+
+
 def yaml_to_companionconfig(yaml_config):
     """Convert YAML config structure to Companion's native format."""
     companion = {
@@ -422,6 +477,18 @@ def generate(args):
     pages = len(yaml_config.get("pages", {}))
     connections = len(yaml_config.get("connections", {}).get("connections", []))
     print(f"  Pages: {pages}, Connections: {connections}")
+
+    # Env-var substitution in connection config + secrets.
+    # Always-on — if a YAML field has no ${VAR} reference, this is a
+    # no-op. Documenting credentials as ${VAR} placeholders is the
+    # supported pattern; baking secrets into YAML is not.
+    subs = substitute_env(yaml_config)
+    if subs:
+        print(f"  Env-var substitutions: {len(subs)}")
+        for s in subs[:30]:
+            print(s)
+        if len(subs) > 30:
+            print(f"    ... and {len(subs) - 30} more")
 
     companion_config = yaml_to_companionconfig(yaml_config)
 

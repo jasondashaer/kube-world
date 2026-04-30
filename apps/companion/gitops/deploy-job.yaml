@@ -105,6 +105,15 @@ spec:
               value: /work/config
             - name: COMPANION_OUTPUT_FILE
               value: /tmp/companion.companionconfig
+          # Pull credentials from the SealedSecret-backed Secret.
+          # `optional: true` so the Pod still starts when the Secret
+          # is missing (yields literal `${VAR}` placeholders in
+          # Companion config — operator sees them in the UI and knows
+          # to fix). Fail-loud over fail-silent for credentials.
+          envFrom:
+            - secretRef:
+                name: companion-credentials
+                optional: true
           volumeMounts:
             - name: config
               mountPath: /work/config

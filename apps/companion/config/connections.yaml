@@ -3,6 +3,18 @@
 # Both YIBC and Saitama instances defined simultaneously.
 # At each location, only the local connections will succeed —
 # the others will show as disconnected. This is expected.
+#
+# Credentials in this file MUST be `${VAR}` placeholders. Real values
+# come from environment at deploy time:
+#   - K3s mode: SealedSecret → K8s Secret → companion-deploy Pod env vars
+#   - Vanilla mode: /etc/default/companion (loaded by systemd EnvironmentFile)
+#   - Local dev: `source <site>/.env` before running companion-deploy.py
+# See docs/companion/guides/secrets-and-credentials.md for setup.
+#
+# A missing env var is left as the literal `${VAR}` string in the
+# generated Companion config — operators will see the placeholder in
+# the web UI and can fix it. We refuse to silently substitute empty
+# values, which would corrupt connections without warning.
 
 meta:
   companion_version: "4.2"
@@ -48,14 +60,15 @@ connections:
     config:
       host: "192.168.1.2"
       port: "1025"
-      pass: "YIBC"
+      pass: "${PROPRESENTER_PASSWORD_YIBC}"   # env-injected
       use_sd: "yes"
       sdpass: ""
       sendPresentationCurrentMsgs: "disabled"
       timerPolling: "enabled"
 
-  # OBS Studio — YIBC. Placeholder host/port; update after install.
-  # Module requires obs-websocket plugin v5+ on the OBS host.
+  # OBS Studio — YIBC. Module requires obs-websocket plugin v5+ on
+  # the OBS host. Password from SealedSecret (k3s) or
+  # /etc/default/companion (vanilla).
   - id: obs_yibc
     module: "bitfocus-obs-websocket"
     label: "OBS (YIBC)"
@@ -63,18 +76,20 @@ connections:
     config:
       host: "192.168.1.50"
       port: "4455"
-      password: ""
+      password: "${OBS_PASSWORD_YIBC}"        # env-injected
 
-  # Spotify — YIBC. OAuth happens via Companion UI on first connect.
-  # Premium account required for playback control. Account-scoped, not
-  # device-scoped — re-auth needed when swapping accounts but no code change.
+  # Spotify — YIBC. Premium account required for playback control.
+  # OAuth handshake happens once via Companion web UI on first connect;
+  # the resulting refresh token is stored in Companion's DB. The
+  # clientId/clientSecret are the developer-app credentials, not user
+  # credentials — they're "what app this is", not "who's logged in".
   - id: spotify_yibc
     module: "bitfocus-spotify-premium"
     label: "Spotify (YIBC)"
     enabled: true
     config:
-      clientId: ""
-      clientSecret: ""
+      clientId: "${SPOTIFY_CLIENT_ID}"        # env-injected
+      clientSecret: "${SPOTIFY_CLIENT_SECRET}" # env-injected
 
   # ═══════════════════════════════════════════
   # Saitama connections (used by XL)
@@ -97,13 +112,13 @@ connections:
     config:
       host: "192.168.68.55"
       port: "53678"
-      pass: "test1234"
+      pass: "${PROPRESENTER_PASSWORD_SAITAMA}"   # env-injected
       use_sd: "yes"
       sdpass: ""
       sendPresentationCurrentMsgs: "disabled"
       timerPolling: "enabled"
 
-  # OBS Studio — Saitama. Placeholder host/port.
+  # OBS Studio — Saitama.
   - id: obs_saitama
     module: "bitfocus-obs-websocket"
     label: "OBS (Saitama)"
@@ -111,9 +126,9 @@ connections:
     config:
       host: "192.168.10.50"
       port: "4455"
-      password: ""
+      password: "${OBS_PASSWORD_SAITAMA}"        # env-injected
 
-  # ATEM switcher — Saitama. Placeholder host.
+  # ATEM switcher — Saitama. No password on the protocol itself.
   - id: atem_saitama
     module: "bmd-atem"
     label: "ATEM (Saitama)"
@@ -121,13 +136,13 @@ connections:
     config:
       host: "192.168.10.40"
 
-  # Spotify — Saitama (separate account). OAuth via Companion UI.
+  # Spotify — Saitama (separate account from YIBC).
   - id: spotify_saitama
     module: "bitfocus-spotify-premium"
     label: "Spotify (Saitama)"
     enabled: true
     config:
-      clientId: ""
-      clientSecret: ""
+      clientId: "${SPOTIFY_CLIENT_ID_SAITAMA}"    # env-injected
+      clientSecret: "${SPOTIFY_CLIENT_SECRET_SAITAMA}" # env-injected
 
   # Future: ATEM YIBC, Blackmagic HyperDeck recorder

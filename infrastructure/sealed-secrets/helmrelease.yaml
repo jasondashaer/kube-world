@@ -1,0 +1,73 @@
+# Sealed Secrets controller — Bitnami implementation.
+#
+# How it works:
+#   1. kubeseal CLI on developer Mac fetches the controller's public cert
+#      from the cluster (one-time per cluster).
+#   2. Developer encrypts a Secret YAML against that cert:
+#        kubeseal --controller-namespace sealed-secrets \
+#          --controller-name sealed-secrets-controller \
+#          -f my-secret.yaml -w my-sealedsecret.yaml
+#   3. Commit the SealedSecret CR to git (encrypted, safe to publish).
+#   4. Flux applies the SealedSecret. Controller decrypts to a normal
+#      K8s Secret in the same namespace.
+#   5. Pods consume the Secret normally (envFrom / volumeMount).
+#
+# Cluster-scoped: one controller serves all namespaces. Each cluster
+# has its own keypair — secrets sealed against dev cluster's pubkey
+# do NOT decrypt on prod cluster (and vice versa). This is the
+# intended security boundary.
+#
+# Backup: the controller's private key lives in the
+# `sealed-secrets-key*` Secret in the controller namespace. BACK IT
+# UP — losing it means re-sealing every secret. Velero captures it
+# automatically when sealed-secrets namespace is in backup scope.
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: sealed-secrets
+  namespace: flux-system
+spec:
+  interval: 24h
+  url: https://bitnami-labs.github.io/sealed-secrets
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sealed-secrets
+  labels:
+    app.kubernetes.io/part-of: kube-world
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: sealed-secrets
+  namespace: sealed-secrets
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: sealed-secrets
+      version: "2.16.x"   # Renovate auto-bumps
+      sourceRef:
+        kind: HelmRepository
+        name: sealed-secrets
+        namespace: flux-system
+  values:
+    fullnameOverride: sealed-secrets-controller
+    # Run on iot-tolerant nodes when on edge clusters
+    tolerations:
+      - key: "iot-only"
+        operator: "Equal"
+        value: "true"
+        effect: "NoSchedule"
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "10m"
+      limits:
+        memory: "256Mi"
+        cpu: "200m"
+    metrics:
+      serviceMonitor:
+        enabled: false  # enable when Prometheus stack lands

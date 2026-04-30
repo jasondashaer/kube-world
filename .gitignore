@@ -68,3 +68,11 @@ terraform.tfvars
 apps/companion/config/companion.companionconfig
 apps/companion/config/companion.json
 apps/companion/config/companion-export.json
+
+# Cleartext secrets — never commit. Only the .sealed.yaml output of
+# kubeseal goes into git.
+apps/companion/secrets/*.unsealed.yaml
+!apps/companion/secrets/*.unsealed.example.yaml
+
+# Vanilla site env files — only commit .env.example, never .env
+deploy/vanilla/site/*/.env

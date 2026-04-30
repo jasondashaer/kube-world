@@ -221,27 +221,36 @@ buttons:
         - action: propresenter_saitama:clockReset
           options: { clockIndex: "0" }
 
+  # Worship → TF1 Bank A scene 2 (matches scenes/saitama/02-worship.yaml).
+  # Bank A is engineer-owned working scenes; engineers can edit content
+  # between services without touching this YAML. See scene-strategy.md.
   - row: 2
     col: 3
     style:
-      text: "Worship\n賛美(TBD)"
+      text: "Worship\n賛美"
       bgcolor: "#664400"
       size: 10
     actions:
       down:
         - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
-          options: { X: 1, Y: 1 }
+          options: { X: 2, Y: 1 }
+        - action: internal:custom_variable_set_value
+          options: { name: "service_mode", value: "Worship" }
 
+  # Speaking (= Sermon) → TF1 Bank A scene 3
+  # (matches scenes/saitama/03-sermon.yaml).
   - row: 2
     col: 4
     style:
-      text: "Speaking\n説教(TBD)"
+      text: "Speaking\n説教"
       bgcolor: "#664400"
       size: 10
     actions:
       down:
         - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
-          options: { X: 1, Y: 2 }
+          options: { X: 3, Y: 1 }
+        - action: internal:custom_variable_set_value
+          options: { name: "service_mode", value: "Sermon" }
 
   - row: 2
     col: 5

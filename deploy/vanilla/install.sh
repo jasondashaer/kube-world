@@ -38,6 +38,7 @@ set -euo pipefail
 # ─────────────────────────────────────────────────────────────────────
 
 SITE=""
+HOSTNAME_OVERRIDE=""
 COMPANION_VERSION="4.2.0"
 COMPANION_USER="companion"
 COMPANION_DATA="/var/lib/companion"
@@ -47,6 +48,7 @@ TAILSCALE_AUTH_KEY=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --site) SITE="$2"; shift 2 ;;
+        --hostname) HOSTNAME_OVERRIDE="$2"; shift 2 ;;
         --version) COMPANION_VERSION="$2"; shift 2 ;;
         --user) COMPANION_USER="$2"; shift 2 ;;
         --data-dir) COMPANION_DATA="$2"; shift 2 ;;
@@ -57,6 +59,9 @@ while [[ $# -gt 0 ]]; do
         *) echo "Unknown arg: $1" >&2; exit 1 ;;
     esac
 done
+
+# Tailscale hostname defaults to pi-<site> but caller may override.
+TS_HOSTNAME="${HOSTNAME_OVERRIDE:-pi-${SITE}}"
 
 if [[ -z "$SITE" ]]; then
     echo "ERROR: --site is required (e.g. --site yibc)" >&2
@@ -246,11 +251,11 @@ if [[ $INSTALL_TAILSCALE -eq 1 ]]; then
         # MUST have the matching tags pre-authorized at mint time
         # (Tailscale rejects --advertise-tags that the auth key isn't
         # authorized to apply).
-        log "Registering Tailscale with tags: $TAGS"
+        log "Registering Tailscale with tags: $TAGS, hostname: $TS_HOSTNAME"
         tailscale up \
             --auth-key="$TAILSCALE_AUTH_KEY" \
             --advertise-tags="$TAGS" \
-            --hostname="pi-${SITE}" \
+            --hostname="$TS_HOSTNAME" \
             --accept-routes \
             --ssh
     else
@@ -263,7 +268,7 @@ if [[ $INSTALL_TAILSCALE -eq 1 ]]; then
         warn "       sudo tailscale up \\"
         warn "         --auth-key=tskey-... \\"
         warn "         --advertise-tags='$TAGS' \\"
-        warn "         --hostname='pi-${SITE}' \\"
+        warn "         --hostname='$TS_HOSTNAME' \\"
         warn "         --accept-routes --ssh"
         warn ""
         warn "Do NOT include tag:maintenance — that's added later via the"

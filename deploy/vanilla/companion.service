@@ -1,0 +1,43 @@
+[Unit]
+Description=Bitfocus Companion (vanilla site install)
+Documentation=https://bitfocus.io/companion
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@COMPANION_USER@
+Group=@COMPANION_USER@
+
+# Companion data directory — DB, modules, logs.
+Environment=COMPANION_CONFIG_BASEDIR=@COMPANION_DATA@
+
+# Site-specific overrides (Spotify token, OBS password, etc.) live here.
+# Edit /etc/default/companion to set values; restart this service.
+EnvironmentFile=-/etc/default/companion
+
+ExecStart=@INSTALL_DIR@/companion-launcher --headless
+
+# Restart on failure but back off if the binary itself is broken
+Restart=on-failure
+RestartSec=10s
+StartLimitInterval=120
+StartLimitBurst=3
+
+# Resource caps — Pi has limited RAM
+MemoryHigh=2G
+MemoryMax=3G
+CPUWeight=50
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=@COMPANION_DATA@
+PrivateTmp=true
+
+# Stream Deck access requires plugdev group membership and the udev
+# rule installed by install.sh — leave default supplementary groups.
+
+[Install]
+WantedBy=multi-user.target

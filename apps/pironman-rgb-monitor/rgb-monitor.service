@@ -1,0 +1,26 @@
+[Unit]
+Description=Pironman 5 metric-driven RGB monitor (kube-world)
+After=network-online.target pironman5.service
+Wants=network-online.target
+Documentation=https://github.com/jasondashaer/kube-world
+
+[Service]
+Type=simple
+# Use pironman5's venv — the NeoPixel SPI deps are already installed there.
+ExecStart=/opt/pironman5/venv/bin/python3 /opt/pironman-rgb-monitor/rgb_monitor.py
+Restart=on-failure
+RestartSec=5
+# Needs SPI access (root) and kubectl read for k3s health probe (root via /etc/rancher).
+User=root
+
+# Resource caps — script is tiny but cap regardless.
+MemoryHigh=64M
+MemoryMax=128M
+CPUWeight=10
+
+# Log to journald
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

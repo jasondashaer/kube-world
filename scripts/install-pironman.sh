@@ -175,6 +175,37 @@ if d.get('system', {}).get('rgb_enable') is not False:
     print('disabled pironman5 rgb')
 "
 
+    # Patch pm_auto/ws2812.py: when rgb_enable=False, skip the
+    # clear()+show() write that races with our monitor. Default
+    # behavior blanks the LEDs every 1s, fighting any external SPI
+    # writes — visible as flicker / brightness pulse.
+    WS2812_PY=/opt/pironman5/venv/lib/python3.13/site-packages/pm_auto/ws2812.py
+    if [[ -f "$WS2812_PY" ]] && ! grep -q "kube-world rgb-monitor patch" "$WS2812_PY"; then
+        log "Patching ws2812.py to release SPI when rgb_enable=False..."
+        python3 <<'PY'
+p = '/opt/pironman5/venv/lib/python3.13/site-packages/pm_auto/ws2812.py'
+s = open(p).read()
+old = """        while self.running:
+            if not self.enable:
+                self.clear()
+                self.strip.show()
+                time.sleep(1)
+                continue"""
+new = """        while self.running:
+            if not self.enable:
+                # kube-world rgb-monitor patch: when rgb_enable=False,
+                # do NOT write to LEDs. Default clear()+show() blanks
+                # the chain every 1s, racing with external monitors.
+                time.sleep(1)
+                continue"""
+if old in s:
+    open(p, 'w').write(s.replace(old, new))
+    print('patched')
+else:
+    print('pattern not found')
+PY
+    fi
+
     # Install monitor script
     INSTALL_DIR=/opt/pironman-rgb-monitor
     mkdir -p "$INSTALL_DIR"

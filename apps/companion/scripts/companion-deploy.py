@@ -469,6 +469,82 @@ def _load_surface_page_map():
     return result
 
 
+def _load_surface_outbound_list():
+    """Load outbound surface entries from surfaces.yaml.
+
+    Returns list of dicts: {address, port, name, group_id} for surfaces
+    that have an `address` field. Used by import_config to auto-add
+    missing outbound entries against a fresh-PVC Companion (e.g. after
+    a vanilla install or a k3s cutover with empty data).
+    """
+    surfaces_file = os.path.join(CONFIG_DIR, "surfaces.yaml")
+    if not os.path.exists(surfaces_file):
+        return []
+    with open(surfaces_file) as f:
+        data = yaml.safe_load(f)
+    if not data or "surfaces" not in data:
+        return []
+    result = []
+    for surface in data["surfaces"]:
+        address = surface.get("address")
+        if not address:
+            continue
+        result.append({
+            "address": address,
+            "port": surface.get("port", 5343),
+            "name": surface.get("name", ""),
+            "group_id": surface.get("group_id", ""),
+        })
+    return result
+
+
+def _detect_companion_version(url):
+    """Best-effort version detection — returns "4.2" / "4.3" / "5.0" / None.
+
+    Queries /int/export/full and reads companionBuild. Falls back to
+    None on failure; caller should default to the newer schema.
+    """
+    import urllib.request
+    import gzip
+    try:
+        ctx = __import__("ssl").create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = __import__("ssl").CERT_NONE
+        req = urllib.request.Request(url.rstrip("/") + "/int/export/full")
+        with urllib.request.urlopen(req, context=ctx, timeout=8) as resp:
+            data = json.loads(gzip.decompress(resp.read()))
+        build = data.get("companionBuild", "")
+        # Format: "4.2.6+8823-stable-..." or "5.0.0+9266-beta..."
+        ver = build.split("+", 1)[0]
+        return ver
+    except Exception as e:
+        print(f"    (version detect failed: {e})")
+        return None
+
+
+def _surface_instance_id(url):
+    """Find the surface plugin instance nanoid for elgato-stream-deck.
+
+    4.3 outbound add requires this. Returns None if not found —
+    caller should skip outbound auto-add and warn.
+    """
+    import urllib.request
+    import gzip
+    try:
+        ctx = __import__("ssl").create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = __import__("ssl").CERT_NONE
+        req = urllib.request.Request(url.rstrip("/") + "/int/export/full")
+        with urllib.request.urlopen(req, context=ctx, timeout=8) as resp:
+            data = json.loads(gzip.decompress(resp.read()))
+        for iid, ic in (data.get("surfaceInstances", {}) or {}).items():
+            if ic.get("moduleId") == "elgato-stream-deck":
+                return iid
+    except Exception:
+        pass
+    return None
+
+
 def generate(args):
     """Generate .companionconfig from YAML sources."""
     print(f"Loading YAML configs from {CONFIG_DIR}...")
@@ -710,7 +786,80 @@ def import_config(args):
         if import_result:
             print(f"    Result: {import_result}")
 
-        # Step 5: Reassign surfaces to their startup pages
+        # Step 5a: Auto-add outbound surface entries from surfaces.yaml
+        # for fresh-PVC Companion (vanilla install OR k3s cutover with
+        # empty data dir). Idempotent — skips entries already present.
+        # Schema-version-aware: 4.2 uses (type, address, port, name);
+        # 4.3 uses (instanceId) + saveConfig({address, port}).
+        outbound_list = _load_surface_outbound_list()
+        if outbound_list:
+            print("  Step 5a/5: Ensuring outbound surface entries...")
+            companion_ver = _detect_companion_version(args.url) or "4.3.0"
+            major_minor = ".".join(companion_ver.split(".")[:2])
+            print(f"    Detected Companion: {companion_ver} (using {major_minor} schema)")
+
+            # Subscribe briefly to outbound watch to learn existing entries
+            existing = {}
+            try:
+                ws.send(json.dumps({"id": 9000, "method": "subscription",
+                                    "params": {"path": "surfaces.outbound.watch"}}))
+                time.sleep(1.5)
+                if 9000 in responses:
+                    items = responses[9000].get("result", {}).get("data", {}).get("items", {})
+                    for entry_id, entry in (items or {}).items():
+                        addr = entry.get("address") or entry.get("config", {}).get("address")
+                        existing[addr] = entry_id
+            except Exception as ex:
+                print(f"    (could not list existing outbound: {ex})")
+
+            # 4.3-only: get the surface plugin instance id once
+            instance_id = None
+            if major_minor >= "4.3":
+                instance_id = _surface_instance_id(args.url)
+                if not instance_id:
+                    print("    WARN: no elgato-stream-deck surface instance found; "
+                          "skipping outbound auto-add")
+                    outbound_list = []
+
+            for ob in outbound_list:
+                addr = ob["address"]
+                if addr in existing:
+                    print(f"    {addr}:{ob['port']} already registered; skipping")
+                    continue
+                try:
+                    if major_minor < "4.3":
+                        # 4.2 schema
+                        send_trpc(ws, "mutation", "surfaces.outbound.add", {
+                            "type": "elgato",
+                            "address": addr,
+                            "port": ob["port"],
+                            "name": ob["name"] or "",
+                        })
+                        print(f"    added {addr}:{ob['port']} (4.2 schema)")
+                    else:
+                        # 4.3 schema: add then saveConfig
+                        add_resp = send_trpc(ws, "mutation",
+                                             "surfaces.outbound.add",
+                                             {"instanceId": instance_id})
+                        if not (isinstance(add_resp, dict) and add_resp.get("ok")):
+                            print(f"    {addr}: add failed ({add_resp})")
+                            continue
+                        new_id = add_resp["id"]
+                        send_trpc(ws, "mutation", "surfaces.outbound.saveConfig", {
+                            "id": new_id,
+                            "name": ob["name"] or f"Surface {addr}",
+                            "config": {"address": addr, "port": ob["port"]},
+                        })
+                        print(f"    added {addr}:{ob['port']} (4.3 schema, id={new_id})")
+                except Exception as ex:
+                    print(f"    {addr}: outbound add failed ({ex})")
+
+            # Give Companion a moment to establish the new connections
+            # before page reassignment (which needs the surface to be
+            # paired so the surface ID exists).
+            time.sleep(8)
+
+        # Step 5b: Reassign surfaces to their startup pages
         # Page IDs change on each import, so we need to update surface assignments.
         # Load the surface-to-page mapping from the YAML config.
         surface_map = _load_surface_page_map()

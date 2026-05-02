@@ -29,6 +29,13 @@ buttons:
       size: 12
     actions:
       down:
+        # Snapshot current scene BEFORE recall — PANIC can revert.
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "previous_segment_scene"
+            expression: "$(Yamaha_TF1__Saitama_:curScene)"
+        - action: internal:custom_variable_set_value
+          options: { name: "abort_active", value: "0" }
         - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
           options: { X: 1, Y: 1 }
         - action: internal:custom_variable_set_value
@@ -43,6 +50,13 @@ buttons:
       size: 12
     actions:
       down:
+        # Snapshot current scene BEFORE recall — PANIC can revert.
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "previous_segment_scene"
+            expression: "$(Yamaha_TF1__Saitama_:curScene)"
+        - action: internal:custom_variable_set_value
+          options: { name: "abort_active", value: "0" }
         - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
           options: { X: 2, Y: 1 }
         - action: internal:custom_variable_set_value
@@ -57,6 +71,13 @@ buttons:
       size: 12
     actions:
       down:
+        # Snapshot current scene BEFORE recall — PANIC can revert.
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "previous_segment_scene"
+            expression: "$(Yamaha_TF1__Saitama_:curScene)"
+        - action: internal:custom_variable_set_value
+          options: { name: "abort_active", value: "0" }
         - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
           options: { X: 3, Y: 1 }
         - action: internal:custom_variable_set_value
@@ -71,6 +92,13 @@ buttons:
       size: 12
     actions:
       down:
+        # Snapshot current scene BEFORE recall — PANIC can revert.
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "previous_segment_scene"
+            expression: "$(Yamaha_TF1__Saitama_:curScene)"
+        - action: internal:custom_variable_set_value
+          options: { name: "abort_active", value: "0" }
         - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
           options: { X: 4, Y: 1 }
         - action: internal:custom_variable_set_value
@@ -114,6 +142,13 @@ buttons:
       size: 12
     actions:
       down:
+        # Snapshot current scene BEFORE recall — PANIC can revert.
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "previous_segment_scene"
+            expression: "$(Yamaha_TF1__Saitama_:curScene)"
+        - action: internal:custom_variable_set_value
+          options: { name: "abort_active", value: "0" }
         - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
           options: { X: 5, Y: 1 }
         - action: internal:custom_variable_set_value
@@ -128,6 +163,13 @@ buttons:
       size: 12
     actions:
       down:
+        # Snapshot current scene BEFORE recall — PANIC can revert.
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "previous_segment_scene"
+            expression: "$(Yamaha_TF1__Saitama_:curScene)"
+        - action: internal:custom_variable_set_value
+          options: { name: "abort_active", value: "0" }
         - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
           options: { X: 6, Y: 1 }
         - action: internal:custom_variable_set_value
@@ -142,6 +184,13 @@ buttons:
       size: 12
     actions:
       down:
+        # Snapshot current scene BEFORE recall — PANIC can revert.
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "previous_segment_scene"
+            expression: "$(Yamaha_TF1__Saitama_:curScene)"
+        - action: internal:custom_variable_set_value
+          options: { name: "abort_active", value: "0" }
         - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
           options: { X: 7, Y: 1 }
         - action: internal:custom_variable_set_value
@@ -156,6 +205,13 @@ buttons:
       size: 12
     actions:
       down:
+        # Snapshot current scene BEFORE recall — PANIC can revert.
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "previous_segment_scene"
+            expression: "$(Yamaha_TF1__Saitama_:curScene)"
+        - action: internal:custom_variable_set_value
+          options: { name: "abort_active", value: "0" }
         - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
           options: { X: 8, Y: 1 }
         - action: internal:custom_variable_set_value
@@ -195,6 +251,13 @@ buttons:
       size: 11
     actions:
       down:
+        # Snapshot current scene BEFORE recall — PANIC can revert.
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "previous_segment_scene"
+            expression: "$(Yamaha_TF1__Saitama_:curScene)"
+        - action: internal:custom_variable_set_value
+          options: { name: "abort_active", value: "0" }
         - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
           options: { X: 1, Y: 2 }   # bank B
         - action: internal:custom_variable_set_value
@@ -209,6 +272,13 @@ buttons:
       size: 11
     actions:
       down:
+        # Snapshot current scene BEFORE recall — PANIC can revert.
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "previous_segment_scene"
+            expression: "$(Yamaha_TF1__Saitama_:curScene)"
+        - action: internal:custom_variable_set_value
+          options: { name: "abort_active", value: "0" }
         - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
           options: { X: 2, Y: 2 }
         - action: internal:custom_variable_set_value
@@ -223,6 +293,13 @@ buttons:
       size: 11
     actions:
       down:
+        # Snapshot current scene BEFORE recall — PANIC can revert.
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "previous_segment_scene"
+            expression: "$(Yamaha_TF1__Saitama_:curScene)"
+        - action: internal:custom_variable_set_value
+          options: { name: "abort_active", value: "0" }
         - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
           options: { X: 3, Y: 2 }
         - action: internal:custom_variable_set_value
@@ -237,6 +314,13 @@ buttons:
       size: 11
     actions:
       down:
+        # Snapshot current scene BEFORE recall — PANIC can revert.
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "previous_segment_scene"
+            expression: "$(Yamaha_TF1__Saitama_:curScene)"
+        - action: internal:custom_variable_set_value
+          options: { name: "abort_active", value: "0" }
         - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
           options: { X: 4, Y: 2 }
         - action: internal:custom_variable_set_value
@@ -315,11 +399,56 @@ buttons:
         - action: internal:set_page
           options: { controller: "self", page: 43 }
 
+  # PANIC / FREEZE — abort any in-flight transition + revert to the
+  # previous segment scene. Two-step confirm to prevent accidents.
+  #
+  # Step 0 (dim red, "PANIC"): Press → advances to step 1; no destructive
+  #   action yet.
+  # Step 1 (bright red, "ABORT?"): Press to commit:
+  #   1. internal:abort_actions — stops queued actions (active fades,
+  #      waits, queued RCP sends).
+  #   2. abort_active=1 — flag for future smooth-fade macros to poll
+  #      between steps and bail early.
+  #   3. Recall previous_segment_scene (snapshotted by every segment
+  #      button BEFORE its recall). Mixer reverts to the prior segment.
+  #   4. service_mode → "Aborted" so other-page status pads reflect.
+  #   5. Returns to step 0 (resting).
+  # Press once and don't confirm = nothing destructive happens.
   - row: 3
     col: 4
     style:
-      text: ""
-      bgcolor: "#1A1A1A"
+      text: "PANIC\n緊急"
+      bgcolor: "#990000"
+      color: "#FFFFFF"
+      size: 12
+    steps:
+      - style:
+          text: "PANIC\n緊急"
+          bgcolor: "#990000"
+          color: "#FFFFFF"
+          size: 12
+        actions:
+          down:
+            - action: internal:step_delta
+              options: { amount: 1 }
+      - style:
+          text: "ABORT?\n中止確認"
+          bgcolor: "#FF0000"
+          color: "#FFFFFF"
+          size: 11
+        actions:
+          down:
+            - action: internal:abort_actions
+            - action: internal:custom_variable_set_value
+              options: { name: "abort_active", value: "1" }
+            - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
+              options:
+                X: "$(internal:custom_previous_segment_scene)"
+                Y: 1
+            - action: internal:custom_variable_set_value
+              options: { name: "service_mode", value: "Aborted" }
+            - action: internal:step_delta
+              options: { amount: -1 }
 
   - row: 3
     col: 5

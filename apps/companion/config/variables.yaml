@@ -85,3 +85,27 @@ variables:
   - name: close_stage
     default: "Idle"
     persist: false
+
+  # ═══════════════════════════════════════════
+  # Segment-transition snapshot
+  # ═══════════════════════════════════════════
+  # Captured BEFORE each segment recall on the Saitama segments page.
+  # Stores the mixer's current scene number so PANIC can restore.
+  # Default 0 = "Initial Data" — recalling 0 mid-service is a hard
+  # reset, so the segment buttons should set this BEFORE the first
+  # transition (capturing whatever the mixer was on at boot).
+  - name: previous_segment_scene
+    default: "1"
+    persist: false
+
+  # Captured master fader level (units) before a transition starts.
+  # PANIC restore writes this back to St/Fader/Level X=1.
+  - name: snapshot_master_fader
+    default: "0"
+    persist: false
+
+  # Abort/freeze flag. Set 1 by PANIC. Future smooth-transition macros
+  # can poll this between fade steps and bail early if set.
+  - name: abort_active
+    default: "0"
+    persist: false

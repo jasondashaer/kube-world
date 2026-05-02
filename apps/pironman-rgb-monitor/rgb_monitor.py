@@ -238,10 +238,19 @@ def hostname() -> str:
         return "?"
 
 
+SEVERITY = {OFF: -1, GREEN: 0, YELLOW: 1, RED: 2, PURPLE: 3}
+
+
+def worst_of(*colors: tuple[int, int, int]) -> tuple[int, int, int]:
+    """Pick the most-severe color from N inputs. PURPLE > RED > YELLOW > GREEN."""
+    return max(colors, key=lambda c: SEVERITY.get(c, -1))
+
+
 def main() -> None:
     print(f"[rgb-monitor] starting on {hostname()}")
     print(f"[rgb-monitor] poll interval {POLL_INTERVAL_SEC}s, brightness {BRIGHTNESS}")
     print(f"[rgb-monitor] thresholds: {THRESHOLDS}")
+    print(f"[rgb-monitor] mode: all-{NUM_LEDS}-LEDs same color (worst-of metrics)")
 
     # First read primes the cpu_pct delta calculation
     cpu_pct()
@@ -254,14 +263,22 @@ def main() -> None:
             temp = temp_c()
             sysc = k8s_health_color()  # falls through to internet if no k3s
 
-            pixels[0] = threshold_color(cpu, "cpu_pct")
-            pixels[1] = threshold_color(ram, "ram_pct")
-            pixels[2] = threshold_color(temp, "temp_c")
-            pixels[3] = sysc
+            cpu_c  = threshold_color(cpu,  "cpu_pct")
+            ram_c  = threshold_color(ram,  "ram_pct")
+            temp_c_= threshold_color(temp, "temp_c")
+
+            # All 4 LEDs same color = worst-of every metric. Strategy:
+            # overpower the fan-mounted RGB ambient (uncontrollable
+            # firmware cycling) with a unified status signal across
+            # the entire SPI-controlled chain.
+            unified = worst_of(cpu_c, ram_c, temp_c_, sysc)
+
+            for i in range(NUM_LEDS):
+                pixels[i] = unified
             pixels.show()
 
             print(f"[rgb-monitor] cpu={cpu:5.1f}% ram={ram:5.1f}% temp={temp:5.1f}C "
-                  f"sys={sysc}")
+                  f"sys={sysc} → all={unified}")
         except KeyboardInterrupt:
             break
         except Exception as e:

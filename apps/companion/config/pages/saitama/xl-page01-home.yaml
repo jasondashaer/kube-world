@@ -338,48 +338,155 @@ buttons:
             - action: internal:step_delta
               options: { amount: -1 }
 
-  # ═══ Row 3: Utilities + navigation + safety ═══
+  # ═══ Row 3: Service control row ═══
+  # Layout intent: left half = service flow control (Startup → Preset →
+  # Service Start → Shutdown). Right half = nav + PANIC safety.
+  # ProP + Stream nav drop from row 3 — reach via Audio page nav row.
+  #
+  # Philosophy: Companion only references slots/indices/names. Operators
+  # tune actual values in the integrated systems (PP timers, mixer
+  # scenes, OBS scenes) without ever touching Companion UI.
+
+  # ── Startup (generic) ──
+  # Press once. Stages gear in a default "ready" state. Idempotent —
+  # safe to press multiple times. Doesn't start any timer.
   - row: 3
     col: 0
     style:
       text: "Startup\n起動"
       bgcolor: "#006600"
+      color: "#FFFFFF"
       size: 12
     actions:
       down:
+        - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
+          options: { X: 0, Y: 1 }            # scene 0 = Initial Data (quiet)
+        - action: obs_saitama:set_current_scene
+          options: { scene: "Pre-Service" }
         - action: internal:custom_variable_set_value
-          options: { name: "startup_phase", value: "Starting" }
+          options: { name: "service_mode", value: "Ready" }
+        - action: internal:custom_variable_set_value
+          options: { name: "active_service_preset", value: "none" }
 
+  # ── Shutdown ──
+  # Two-step confirm + 5s auto-timeout (same pattern as PANIC).
+  # Step 1 commits the full close: stop OBS rec/stream, recall mixer
+  # to scene 0, mute master, pause Spotify, mark service Off.
   - row: 3
     col: 1
     style:
       text: "Shutdown\n終了"
       bgcolor: "#660000"
+      color: "#FFFFFF"
       size: 12
     steps:
       - style:
           text: "Shutdown\n終了"
           bgcolor: "#660000"
+          color: "#FFFFFF"
+          size: 12
         actions:
           down:
             - action: internal:step_delta
               options: { amount: 1 }
+            - action: internal:wait
+              options: { time: "5000" }
+            - action: internal:step_delta
+              options: { amount: -1 }
       - style:
           text: "CONFIRM?\n確認？"
           bgcolor: "#FF0000"
+          color: "#FFFFFF"
+          size: 11
         actions:
           down:
+            - action: internal:abort_actions       # cancels timeout + any in-flight
+            - action: obs_saitama:stop_recording
+            - action: obs_saitama:stop_streaming
+            - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
+              options: { X: 0, Y: 1 }              # Initial Data — quiet
+            - action: yamaha_saitama:MIXER_Current/St/Fader/On
+              options: { X: 1, Val: 0 }            # mute master
+            - action: spotify_saitama:pause
+            - action: internal:custom_variable_set_value
+              options: { name: "service_mode", value: "Off" }
+            - action: internal:custom_variable_set_value
+              options: { name: "close_stage", value: "Stopped" }
+            - action: internal:custom_variable_set_value
+              options: { name: "active_service_preset", value: "none" }
+            - action: internal:custom_variable_set_value
+              options: { name: "service_armed", value: "0" }
             - action: internal:step_delta
               options: { amount: -1 }
 
+  # ── SUN AM (Sunday Service preset) ──
+  # Selects PP clockIndex 0 (Sunday). Operator sets the actual target
+  # time in PP UI. Companion only routes which clock SVC START fires.
   - row: 3
     col: 2
     style:
-      text: ""
-      bgcolor: "#1A1A1A"
+      text: "SUN AM\n日曜"
+      bgcolor: "#553388"
+      color: "#FFFFFF"
+      size: 12
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
+          options: { X: 1, Y: 1 }              # scene 1 = Announcements
+        - action: obs_saitama:set_current_scene
+          options: { scene: "Pre-Service" }
+        - action: internal:custom_variable_set_value
+          options: { name: "active_service_clock_index", value: "0" }
+        - action: internal:custom_variable_set_value
+          options: { name: "active_service_preset", value: "Sunday" }
+        - action: internal:custom_variable_set_value
+          options: { name: "service_mode", value: "Sunday Prep" }
 
+  # ── THU PM (Thursday Bible Study preset) ──
+  # Selects PP clockIndex 1. Operator sets target in PP.
   - row: 3
     col: 3
+    style:
+      text: "THU PM\n木曜"
+      bgcolor: "#335588"
+      color: "#FFFFFF"
+      size: 12
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
+          options: { X: 1, Y: 1 }              # same speech-config scene
+        - action: obs_saitama:set_current_scene
+          options: { scene: "Pre-Service" }
+        - action: internal:custom_variable_set_value
+          options: { name: "active_service_clock_index", value: "1" }
+        - action: internal:custom_variable_set_value
+          options: { name: "active_service_preset", value: "Thursday" }
+        - action: internal:custom_variable_set_value
+          options: { name: "service_mode", value: "Thursday Prep" }
+
+  # ── SVC START ──
+  # Kicks off the active preset's countdown clock. Sets service_armed=1
+  # so ARM-gated triggers fire. Single press (no confirm) — operator
+  # already chose preset deliberately.
+  - row: 3
+    col: 4
+    style:
+      text: "SVC\nSTART"
+      bgcolor: "#118800"
+      color: "#FFFFFF"
+      size: 14
+    actions:
+      down:
+        - action: internal:custom_variable_set_value
+          options: { name: "service_armed", value: "1" }
+        - action: propresenter_saitama:clockStart
+          options:
+            clockIndex: "$(internal:custom_active_service_clock_index)"
+        - action: internal:custom_variable_set_value
+          options: { name: "service_mode", value: "Armed" }
+
+  - row: 3
+    col: 5
     style:
       text: "→ Segments\n場面"
       bgcolor: "#003366"
@@ -390,7 +497,7 @@ buttons:
           options: { controller: "self", page: 44 }
 
   - row: 3
-    col: 4
+    col: 6
     style:
       text: "→ Audio\n音響"
       bgcolor: "#003366"
@@ -400,28 +507,7 @@ buttons:
         - action: internal:set_page
           options: { controller: "self", page: 41 }
 
-  - row: 3
-    col: 5
-    style:
-      text: "→ ProP\nスライド"
-      bgcolor: "#003366"
-      size: 10
-    actions:
-      down:
-        - action: internal:set_page
-          options: { controller: "self", page: 42 }
-
-  - row: 3
-    col: 6
-    style:
-      text: "→ Stream\n配信"
-      bgcolor: "#003366"
-      size: 10
-    actions:
-      down:
-        - action: internal:set_page
-          options: { controller: "self", page: 43 }
-
+  # ── PANIC (existing) ──
   - row: 3
     col: 7
     style:

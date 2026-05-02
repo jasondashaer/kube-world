@@ -109,3 +109,24 @@ variables:
   - name: abort_active
     default: "0"
     persist: false
+
+  # ═══════════════════════════════════════════
+  # Service-day preset selection
+  # ═══════════════════════════════════════════
+  # Operator picks SUN AM or THU PM preset. Each just selects which
+  # ProPresenter clockIndex SVC START will fire. Times themselves
+  # live in PP — operator updates the clock target in PP UI directly,
+  # never touches Companion config.
+  #
+  # Convention:
+  #   clockIndex 0 = Sunday Service (target time set in PP)
+  #   clockIndex 1 = Thursday Bible Study (target time set in PP)
+  - name: active_service_clock_index
+    default: "0"
+    persist: false
+
+  # Human-readable preset label. Used by status pads.
+  # Values: "none" | "Sunday" | "Thursday"
+  - name: active_service_preset
+    default: "none"
+    persist: false

@@ -1,18 +1,39 @@
-# Surface-to-page assignments
-# After each import, surfaces are reassigned to their startup pages.
+# Surface registry — Stream Deck network module addresses + startup pages.
+#
+# Each entry is per-deck. The `site` field segments which Companion
+# instance owns this surface. companion-deploy.py + seed-export.py
+# filter by COMPANION_SITE env (or --site flag). Without filtering,
+# all entries would propagate to every Companion → outbound add of
+# wrong-LAN IPs.
+#
+# Address format: LAN IP of the Stream Deck Network Module on the
+# physical site's LAN. When a Stream Deck is moved between LANs (e.g.
+# YIBC test → Saitama production), update the address to match the
+# new subnet's DHCP/reservation, then re-import.
+#
+# Subnets:
+#   YIBC LAN     : 192.168.1.0/24 (Stream Deck Modules at .41, .42, .43
+#                                 historically; .41 has moved to Saitama)
+#   Saitama LAN  : 10.0.0.0/24    (Cloud Fiber router subnet)
 
 surfaces:
   - group_id: "streamdeck:A00NA53835A5F1"
+    site: saitama
     name: "Stream Deck XL"
-    address: "192.168.1.41"
+    address: "10.0.0.110"           # Saitama LAN — confirm via Cloud Fiber DHCP table
+    port: 5343
     startup_page: 40
 
   - group_id: "streamdeck:A00WA5241MWHZB"
+    site: yibc
     name: "Stream Deck+"
     address: "192.168.1.42"
+    port: 5343
     startup_page: 20
 
   - group_id: "streamdeck:A00SA5432NCLFZ"
+    site: yibc
     name: "Stream Deck MK2"
     address: "192.168.1.43"
+    port: 5343
     startup_page: 30

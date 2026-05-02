@@ -102,7 +102,7 @@ buttons:
     style:
       text: "$(internal:time_hms)"
       bgcolor: "#222222"
-      size: 12
+      size: 16
 
   # ═══ Row 1: Auxiliary segments ═══
   - row: 1

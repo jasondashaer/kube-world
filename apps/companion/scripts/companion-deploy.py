@@ -451,8 +451,26 @@ def yaml_to_companionconfig(yaml_config):
     return companion
 
 
+def _site_filter():
+    """Resolve the current target site for surface filtering.
+
+    Reads COMPANION_SITE env (set per-deployment, e.g. "yibc" /
+    "saitama"). If unset, returns None — caller treats as no filter
+    (all surfaces propagate). Setting COMPANION_SITE on a deployed
+    Companion is the supported way to scope surfaces.yaml entries
+    to that site only — prevents YIBC IPs leaking into Saitama and
+    vice versa.
+    """
+    s = os.environ.get("COMPANION_SITE", "").strip().lower()
+    return s or None
+
+
 def _load_surface_page_map():
-    """Load surface-to-page assignments from surfaces.yaml."""
+    """Load surface-to-page assignments from surfaces.yaml.
+
+    Filters by COMPANION_SITE env if set — only returns entries whose
+    `site` field matches.
+    """
     surfaces_file = os.path.join(CONFIG_DIR, "surfaces.yaml")
     if not os.path.exists(surfaces_file):
         return {}
@@ -460,8 +478,11 @@ def _load_surface_page_map():
         data = yaml.safe_load(f)
     if not data or "surfaces" not in data:
         return {}
+    site = _site_filter()
     result = {}
     for surface in data["surfaces"]:
+        if site and surface.get("site", "").lower() != site:
+            continue
         group_id = surface.get("group_id")
         page = surface.get("startup_page")
         if group_id and page:
@@ -472,10 +493,9 @@ def _load_surface_page_map():
 def _load_surface_outbound_list():
     """Load outbound surface entries from surfaces.yaml.
 
-    Returns list of dicts: {address, port, name, group_id} for surfaces
-    that have an `address` field. Used by import_config to auto-add
-    missing outbound entries against a fresh-PVC Companion (e.g. after
-    a vanilla install or a k3s cutover with empty data).
+    Filters by COMPANION_SITE env if set. Each entry: {address, port,
+    name, group_id}. Used by import_config to auto-add missing outbound
+    entries against a fresh-PVC Companion.
     """
     surfaces_file = os.path.join(CONFIG_DIR, "surfaces.yaml")
     if not os.path.exists(surfaces_file):
@@ -484,8 +504,11 @@ def _load_surface_outbound_list():
         data = yaml.safe_load(f)
     if not data or "surfaces" not in data:
         return []
+    site = _site_filter()
     result = []
     for surface in data["surfaces"]:
+        if site and surface.get("site", "").lower() != site:
+            continue
         address = surface.get("address")
         if not address:
             continue

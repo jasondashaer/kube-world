@@ -431,6 +431,16 @@ buttons:
           down:
             - action: internal:step_delta
               options: { amount: 1 }
+            # Auto-timeout: queue a 5s wait then step back to step 0.
+            # If user confirms within 5s, step 1's down begins with
+            # internal:abort_actions which cancels this queued wait +
+            # step_delta — chain stops, confirm proceeds. If 5s elapses
+            # with no confirm, queued step_delta -1 fires → button
+            # returns to PANIC resting state.
+            - action: internal:wait
+              options: { time: "5000" }
+            - action: internal:step_delta
+              options: { amount: -1 }
       - style:
           text: "ABORT?\n中止確認"
           bgcolor: "#FF0000"
@@ -438,6 +448,8 @@ buttons:
           size: 11
         actions:
           down:
+            # First action ALSO cancels the pending timeout chain queued
+            # by step 0 — operator's confirm wins over the auto-revert.
             - action: internal:abort_actions
             - action: internal:custom_variable_set_value
               options: { name: "abort_active", value: "1" }

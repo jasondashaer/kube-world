@@ -135,30 +135,61 @@ def k8s_available() -> bool:
 
 
 def k8s_health_color() -> tuple[int, int, int]:
-    """Green if all pods Running, yellow if some pending, red if any failing."""
+    """Green if all controller-owned pods Running. Yellow if some pending.
+    Red if any failing.
+
+    Filters out one-shot Job/CronJob pods — those reach terminal states
+    (Error/Completed) and stay around as historical records, not live
+    health signals. Restart count above a threshold also flags via
+    yellow even if pod is currently Running (recent crashloop).
+    """
     if not k8s_available():
-        # Fall through to internet probe color
         return internet_health_color()
     try:
+        # Use -o wide to also get RESTART column; filter via custom format.
+        # Skip CronJob-owned pods (kind=Pod with ownerReferences kind=Job).
         out = subprocess.run(
-            ["k3s", "kubectl", "get", "pods", "-A", "--no-headers"],
-            capture_output=True, text=True, timeout=4,
+            ["k3s", "kubectl", "get", "pods", "-A",
+             "-o=jsonpath={range .items[*]}"
+             "{.metadata.namespace}/{.metadata.name}|"
+             "{.status.phase}|"
+             "{.status.containerStatuses[0].ready}|"
+             "{.status.containerStatuses[0].restartCount}|"
+             "{.metadata.ownerReferences[0].kind}{'\\n'}{end}"],
+            capture_output=True, text=True, timeout=5,
         )
         if out.returncode != 0:
             return PURPLE
         bad = 0
         warn = 0
-        for line in out.stdout.splitlines():
-            cols = line.split()
-            if len(cols) < 4:
+        running_total = 0
+        for line in out.stdout.strip().splitlines():
+            parts = line.split("|")
+            if len(parts) < 5:
                 continue
-            status = cols[3]
-            if status in ("Running", "Completed", "Succeeded"):
+            name, phase, ready, restarts, owner = parts
+            # Filter out Job/CronJob historical pods
+            if owner == "Job":
                 continue
-            if status in ("Pending", "ContainerCreating", "PodInitializing"):
+            # Treat Succeeded as healthy (one-shot init containers)
+            if phase == "Succeeded":
+                continue
+            running_total += 1
+            if phase == "Running" and ready == "true":
+                # Recent crashloop signal: high restart count
+                try:
+                    if int(restarts) > 5:
+                        warn += 1
+                except ValueError:
+                    pass
+                continue
+            if phase in ("Pending",):
                 warn += 1
-            else:
-                bad += 1
+                continue
+            # Anything else = failing (CrashLoopBackOff, ImagePullBackOff,
+            # Failed, Unknown, Running-but-not-ready, etc.)
+            bad += 1
+
         if bad > 0:
             return RED
         if warn > 0:

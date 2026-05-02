@@ -35,6 +35,12 @@ deployment:
   # Use cluster DNS even with hostNetwork so Traefik can resolve
   # cluster-internal service names (needed for ForwardAuth middleware).
   dnsPolicy: ClusterFirstWithHostNet
+  # hostNetwork + single-node + default RollingUpdate (maxSurge=1) gets
+  # stuck: the new pod tries to bind 80/443 already held by the old.
+  # Force kill-before-create so the rollout completes cleanly.
+  rollingUpdate:
+    maxSurge: 0
+    maxUnavailable: 1
 
 # hostNetwork puts the Traefik pod directly on the node's network stack.
 # With this, the ports below bind to 0.0.0.0 on the host (all interfaces).

@@ -6,6 +6,9 @@ Documentation=https://github.com/jasondashaer/kube-world
 
 [Service]
 Type=simple
+# Force line-buffered output so each cycle's log line lands in journald
+# immediately. Default Python block-buffers when stdout isn't a TTY.
+Environment=PYTHONUNBUFFERED=1
 # Use pironman5's venv — the NeoPixel SPI deps are already installed there.
 ExecStart=/opt/pironman5/venv/bin/python3 /opt/pironman-rgb-monitor/rgb_monitor.py
 Restart=on-failure

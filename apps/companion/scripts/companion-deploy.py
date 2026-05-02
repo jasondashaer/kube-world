@@ -685,11 +685,20 @@ def import_config(args):
                 print(f"    Summary: {s}")
 
         # Step 4: Execute full import
+        # Schema (Companion 4.3+): zodClientImportOrResetSelection in
+        # shared-lib/lib/Model/ImportExport.ts. surfaces is an object
+        # with three keys (known, instances, remote). connections +
+        # userconfig accept only "unchanged"|"reset" (zodResetType).
+        # Other fields accept "unchanged"|"reset-and-import"|"reset".
         print("  Step 4/4: Executing full import...")
         import_result = send_trpc(ws, "mutation", "importExport.importFull", {
             "config": {
                 "buttons": "reset-and-import",
-                "surfaces": {"known": "unchanged"},
+                "surfaces": {
+                    "known": "unchanged",
+                    "instances": "unchanged",
+                    "remote": "unchanged",
+                },
                 "triggers": "reset-and-import",
                 "customVariables": "reset-and-import",
                 "expressionVariables": "reset-and-import",

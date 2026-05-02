@@ -77,7 +77,7 @@ buttons:
     style:
       text: "$(internal:time_hms)"
       bgcolor: "#222222"
-      size: 18
+      size: 12
 
   # ═══ Row 1: OBS scenes (expanded) ═══
   - row: 1

@@ -172,4 +172,4 @@ buttons:
     style:
       text: "$(internal:time_hms)"
       bgcolor: "#222222"
-      size: 14
+      size: 12

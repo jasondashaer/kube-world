@@ -80,7 +80,7 @@ buttons:
     style:
       text: "$(internal:time_hms)"
       bgcolor: "#222222"
-      size: 18
+      size: 12
 
   # ═══ Row 1: Slides + Stream/Rec + Intro/Outro ═══
   - row: 1

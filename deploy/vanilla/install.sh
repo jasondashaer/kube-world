@@ -41,7 +41,13 @@ set -euo pipefail
 
 SITE=""
 HOSTNAME_OVERRIDE=""
-COMPANION_BUILD="stable"
+# Default to a pinned stable 4.x version. companion-pi's installer
+# accepts: "beta" or "experimental" (latest pre-release of those
+# tracks), OR a specific stable version string like "4.3.1". Passing
+# the literal "stable" results in an invalid arg combo
+# (`update.sh stable stable`) — the picker can't resolve. Pin a real
+# version and let users override with --build.
+COMPANION_BUILD="4.3.1"
 INSTALL_TAILSCALE=1
 TAILSCALE_AUTH_KEY=""
 

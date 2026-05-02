@@ -768,3 +768,51 @@
           All nodes are ready and namespaces created.
           Kubeconfig available at: ~/.kube/config
           ============================================
+
+# ───────────────────────────────────────────────────────────────────
+# Pironman 5 case integration (opt-in)
+# ───────────────────────────────────────────────────────────────────
+# Install SunFounder pironman5 service for OLED + fan control on
+# Pis housed in a Pironman 5 case. Gated by inventory var
+# `install_pironman: true` (set per-host or in group_vars).
+#
+# `install_pironman_rgb_monitor: true` adds the kube-world
+# metric-driven RGB monitor service that maps live system stats
+# (CPU/RAM/temp/k8s-health) to the case LEDs.
+- name: Install Pironman 5 case integration (opt-in)
+  hosts: k3s_cluster
+  become: yes
+  gather_facts: no
+  vars:
+    ansible_ssh_timeout: 60
+    install_pironman: false
+    install_pironman_rgb_monitor: false
+  tasks:
+    - name: Check if Pironman should be installed
+      debug:
+        msg: "install_pironman={{ install_pironman }} rgb_monitor={{ install_pironman_rgb_monitor }}"
+      when: install_pironman | bool
+
+    - name: Run Pironman installer script
+      shell: |
+        curl -fsSL https://raw.githubusercontent.com/jasondashaer/kube-world/main/scripts/install-pironman.sh \
+          | bash -s -- \
+            {% if install_pironman_rgb_monitor | bool %}--with-rgb-monitor{% endif %} \
+            --skip-reboot
+      args:
+        creates: /opt/pironman5/venv/bin/python3
+      when: install_pironman | bool
+      register: pironman_install
+
+    - name: Pironman install output
+      debug:
+        var: pironman_install.stdout_lines
+      when: install_pironman | bool and pironman_install.changed | default(false)
+
+    - name: Note reboot requirement
+      debug:
+        msg: |
+          Pironman case install needs a reboot to apply config.txt
+          changes (I2C + sunfounder-pironman5 dtoverlay). Reboot at
+          your convenience: sudo reboot
+      when: install_pironman | bool and pironman_install.changed | default(false)

@@ -890,12 +890,26 @@ setup_pi_cluster() {
             domain_args="-e domain=${DOMAIN}"
         fi
 
+        # Pironman 5 case integration (opt-in via env vars).
+        # WITH_PIRONMAN=1 enables OLED + fan controller install.
+        # WITH_PIRONMAN_RGB_MONITOR=1 also installs the kube-world
+        # metric-driven RGB monitor service (CPU/RAM/temp/k8s-health
+        # mapped to case LEDs). Requires WITH_PIRONMAN=1.
+        local pironman_args=""
+        if [[ "${WITH_PIRONMAN:-0}" == "1" ]]; then
+            pironman_args="-e install_pironman=true"
+            if [[ "${WITH_PIRONMAN_RGB_MONITOR:-0}" == "1" ]]; then
+                pironman_args="${pironman_args} -e install_pironman_rgb_monitor=true"
+            fi
+        fi
+
         ANSIBLE_CONFIG="${SCRIPT_DIR}/pi-setup/ansible/ansible.cfg" \
         ansible-playbook -i "$inventory" "$playbook" \
             -e "k3s_version=${K3S_VERSION}" \
             -e "mode=${MODE}" \
             ${tailscale_args} \
-            ${domain_args}
+            ${domain_args} \
+            ${pironman_args}
 
         # Copy kubeconfig from Pi to Mac
         log "Fetching kubeconfig from Pi..."
@@ -943,12 +957,21 @@ setup_pi_cluster() {
                 domain_args="-e domain=${DOMAIN}"
             fi
 
+            local pironman_args=""
+            if [[ "${WITH_PIRONMAN:-0}" == "1" ]]; then
+                pironman_args="-e install_pironman=true"
+                if [[ "${WITH_PIRONMAN_RGB_MONITOR:-0}" == "1" ]]; then
+                    pironman_args="${pironman_args} -e install_pironman_rgb_monitor=true"
+                fi
+            fi
+
             ANSIBLE_CONFIG="${SCRIPT_DIR}/pi-setup/ansible/ansible.cfg" \
             ansible-playbook -i "$inventory" "$playbook" \
                 -e "k3s_version=${K3S_VERSION}" \
                 -e "mode=${MODE}" \
                 ${tailscale_args} \
                 ${domain_args} \
+                ${pironman_args} \
                 --connection=local
         fi
 

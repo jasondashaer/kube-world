@@ -1,40 +1,20 @@
-# YIBC — Stream Deck MK2 Page 32: PP Messages Layout A
-# 5x3 grid — operator types a number (1-20) and sends as a message
-# to ProPresenter where the PP message has a token named "name".
-#
-# THREE LAYOUT VARIANTS — operator picks favorite by viewing each.
-#   Layout A (page 32, this file): 1-4 / 5-8 / 9-0+ctrl. Sequential
-#                                  rows of 4 digits, controls scattered.
-#   Layout B (page 33):            1-5 / 6-0 / controls all in row 2.
-#   Layout C (page 34):            phone keypad 3x3 (1-9), 0 with controls.
-# Each layout has a "Layout X →" button bottom-right that cycles to
-# the next variant.
-#
-# Workflow:
-#   1. Press digit buttons to compose the number (e.g. press 1 then 5
-#      to compose "15").
-#   2. The Display pad shows the current input.
-#   3. Press SHOW — sends `messageSend` with messageKeys=name,
-#      messageValues=<input>. PP renders the message with the number
-#      substituted.
-#   4. Press HIDE — sends `messageHide` to clear the message from PP.
-#   5. Press CLR — resets input to empty (does not affect PP state).
+# YIBC — Stream Deck MK2 Page 33: PP Messages Layout B
+# 5x3 grid. Layout B = digits 1-5 row 0, 6-0 row 1, controls row 2.
+# All controls grouped on bottom row for clear separation between
+# digit-input and action zones.
 #
 # Layout:
-#   Row 0: [1]  [2]  [3]  [4]   [SHOW]
-#   Row 1: [5]  [6]  [7]  [8]   [Display: 12]
-#   Row 2: [9]  [0]  [CLR][HIDE][→ OPS]
-#
-# v2 (deferred): auto-hide after N seconds via toggle button.
-# Currently SHOW always stays until HIDE pressed manually.
+#   Row 0: [1] [2] [3] [4] [5]
+#   Row 1: [6] [7] [8] [9] [0]
+#   Row 2: [Display:12]  [SHOW]  [HIDE]  [CLR]  [Layout B → C]
 
 page:
-  number: 32
-  name: "PP Messages"
+  number: 33
+  name: "PP Messages B"
   device: mk2
 
 buttons:
-  # ═══ Row 0: Digits 1-4 + SHOW ═══
+  # ═══ Row 0: Digits 1-5 ═══
   - row: 0
     col: 0
     style:
@@ -91,28 +71,8 @@ buttons:
             name: "pp_message_input"
             expression: "concat($(internal:custom_pp_message_input), '4')"
 
-  # SHOW: send messageSend to PP with the composed number as 'name'.
-  # messageIndex defaults to 0 (first message in PP's message list).
-  # If PP has multiple messages and the target is at a different
-  # index, change here.
   - row: 0
     col: 4
-    style:
-      text: "SHOW"
-      bgcolor: "#118800"
-      color: "#FFFFFF"
-      size: 18
-    actions:
-      down:
-        - action: propresenter_yibc:messageSend
-          options:
-            messageIndex: "0"
-            messageKeys: "name"
-            messageValues: "$(internal:custom_pp_message_input)"
-
-  # ═══ Row 1: Digits 5-8 + Display ═══
-  - row: 1
-    col: 0
     style:
       text: "5"
       bgcolor: "#222244"
@@ -125,8 +85,9 @@ buttons:
             name: "pp_message_input"
             expression: "concat($(internal:custom_pp_message_input), '5')"
 
+  # ═══ Row 1: Digits 6-0 ═══
   - row: 1
-    col: 1
+    col: 0
     style:
       text: "6"
       bgcolor: "#222244"
@@ -140,7 +101,7 @@ buttons:
             expression: "concat($(internal:custom_pp_message_input), '6')"
 
   - row: 1
-    col: 2
+    col: 1
     style:
       text: "7"
       bgcolor: "#222244"
@@ -154,7 +115,7 @@ buttons:
             expression: "concat($(internal:custom_pp_message_input), '7')"
 
   - row: 1
-    col: 3
+    col: 2
     style:
       text: "8"
       bgcolor: "#222244"
@@ -167,19 +128,8 @@ buttons:
             name: "pp_message_input"
             expression: "concat($(internal:custom_pp_message_input), '8')"
 
-  # Display pad: shows the current composed input. Read-only — no
-  # press action. If empty, shows "(empty)".
   - row: 1
-    col: 4
-    style:
-      text: "Msg:\n$(internal:custom_pp_message_input)"
-      bgcolor: "#222222"
-      color: "#FFFFFF"
-      size: 14
-
-  # ═══ Row 2: Digits 9, 0, CLR, HIDE, nav ═══
-  - row: 2
-    col: 0
+    col: 3
     style:
       text: "9"
       bgcolor: "#222244"
@@ -192,8 +142,8 @@ buttons:
             name: "pp_message_input"
             expression: "concat($(internal:custom_pp_message_input), '9')"
 
-  - row: 2
-    col: 1
+  - row: 1
+    col: 4
     style:
       text: "0"
       bgcolor: "#222244"
@@ -206,10 +156,45 @@ buttons:
             name: "pp_message_input"
             expression: "concat($(internal:custom_pp_message_input), '0')"
 
-  # CLR: reset input to empty. Does NOT affect any active PP message
-  # (use HIDE for that). Lets operator start composing a new number.
+  # ═══ Row 2: Controls ═══
+  - row: 2
+    col: 0
+    style:
+      text: "Msg:\n$(internal:custom_pp_message_input)"
+      bgcolor: "#222222"
+      color: "#FFFFFF"
+      size: 14
+
+  - row: 2
+    col: 1
+    style:
+      text: "SHOW"
+      bgcolor: "#118800"
+      color: "#FFFFFF"
+      size: 18
+    actions:
+      down:
+        - action: propresenter_yibc:messageSend
+          options:
+            messageIndex: "0"
+            messageKeys: "name"
+            messageValues: "$(internal:custom_pp_message_input)"
+
   - row: 2
     col: 2
+    style:
+      text: "HIDE"
+      bgcolor: "#990000"
+      color: "#FFFFFF"
+      size: 18
+    actions:
+      down:
+        - action: propresenter_yibc:messageHide
+          options:
+            messageIndex: "0"
+
+  - row: 2
+    col: 3
     style:
       text: "CLR"
       bgcolor: "#664400"
@@ -222,30 +207,14 @@ buttons:
             name: "pp_message_input"
             value: ""
 
-  # HIDE: clear the active message in PP. messageIndex must match
-  # whatever index is currently showing.
-  - row: 2
-    col: 3
-    style:
-      text: "HIDE"
-      bgcolor: "#990000"
-      color: "#FFFFFF"
-      size: 18
-    actions:
-      down:
-        - action: propresenter_yibc:messageHide
-          options:
-            messageIndex: "0"
-
-  # Cycle to Layout B (page 33).
   - row: 2
     col: 4
     style:
-      text: "Layout A\n→ B"
+      text: "Layout B\n→ C"
       bgcolor: "#444444"
       color: "#FFFFFF"
       size: 11
     actions:
       down:
         - action: internal:set_page
-          options: { controller: "self", page: 33 }
+          options: { controller: "self", page: 34 }

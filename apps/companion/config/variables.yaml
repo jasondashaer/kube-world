@@ -130,3 +130,15 @@ variables:
   - name: active_service_preset
     default: "none"
     persist: false
+
+  # ═══════════════════════════════════════════
+  # ProPresenter message numpad input (MK2 page 32)
+  # ═══════════════════════════════════════════
+  # Operator types digits 1-20 on MK2 numpad. Each digit button
+  # appends to this string. CLR resets to empty. SHOW sends to PP
+  # via messageSend with name=<this value>. HIDE clears the message
+  # in PP. Autohide-after-N-seconds is a v2 enhancement; v1 is
+  # manual show/hide only.
+  - name: pp_message_input
+    default: ""
+    persist: false

@@ -1,0 +1,244 @@
+# YIBC — Stream Deck MK2 Page 32: ProPresenter Message Numpad
+# 5x3 grid — operator types a number (1-20) and sends as a message
+# to ProPresenter where the PP message has a token named "name".
+#
+# Workflow:
+#   1. Press digit buttons to compose the number (e.g. press 1 then 5
+#      to compose "15").
+#   2. The Display pad shows the current input.
+#   3. Press SHOW — sends `messageSend` with messageKeys=name,
+#      messageValues=<input>. PP renders the message with the number
+#      substituted.
+#   4. Press HIDE — sends `messageHide` to clear the message from PP.
+#   5. Press CLR — resets input to empty (does not affect PP state).
+#
+# Layout:
+#   Row 0: [1]  [2]  [3]  [4]   [SHOW]
+#   Row 1: [5]  [6]  [7]  [8]   [Display: 12]
+#   Row 2: [9]  [0]  [CLR][HIDE][→ OPS]
+#
+# v2 (deferred): auto-hide after N seconds via toggle button.
+# Currently SHOW always stays until HIDE pressed manually.
+
+page:
+  number: 32
+  name: "PP Messages"
+  device: mk2
+
+buttons:
+  # ═══ Row 0: Digits 1-4 + SHOW ═══
+  - row: 0
+    col: 0
+    style:
+      text: "1"
+      bgcolor: "#222244"
+      color: "#FFFFFF"
+      size: 24
+    actions:
+      down:
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "pp_message_input"
+            expression: "concat($(internal:custom_pp_message_input), '1')"
+
+  - row: 0
+    col: 1
+    style:
+      text: "2"
+      bgcolor: "#222244"
+      color: "#FFFFFF"
+      size: 24
+    actions:
+      down:
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "pp_message_input"
+            expression: "concat($(internal:custom_pp_message_input), '2')"
+
+  - row: 0
+    col: 2
+    style:
+      text: "3"
+      bgcolor: "#222244"
+      color: "#FFFFFF"
+      size: 24
+    actions:
+      down:
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "pp_message_input"
+            expression: "concat($(internal:custom_pp_message_input), '3')"
+
+  - row: 0
+    col: 3
+    style:
+      text: "4"
+      bgcolor: "#222244"
+      color: "#FFFFFF"
+      size: 24
+    actions:
+      down:
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "pp_message_input"
+            expression: "concat($(internal:custom_pp_message_input), '4')"
+
+  # SHOW: send messageSend to PP with the composed number as 'name'.
+  # messageIndex defaults to 0 (first message in PP's message list).
+  # If PP has multiple messages and the target is at a different
+  # index, change here.
+  - row: 0
+    col: 4
+    style:
+      text: "SHOW"
+      bgcolor: "#118800"
+      color: "#FFFFFF"
+      size: 18
+    actions:
+      down:
+        - action: propresenter_yibc:messageSend
+          options:
+            messageIndex: "0"
+            messageKeys: "name"
+            messageValues: "$(internal:custom_pp_message_input)"
+
+  # ═══ Row 1: Digits 5-8 + Display ═══
+  - row: 1
+    col: 0
+    style:
+      text: "5"
+      bgcolor: "#222244"
+      color: "#FFFFFF"
+      size: 24
+    actions:
+      down:
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "pp_message_input"
+            expression: "concat($(internal:custom_pp_message_input), '5')"
+
+  - row: 1
+    col: 1
+    style:
+      text: "6"
+      bgcolor: "#222244"
+      color: "#FFFFFF"
+      size: 24
+    actions:
+      down:
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "pp_message_input"
+            expression: "concat($(internal:custom_pp_message_input), '6')"
+
+  - row: 1
+    col: 2
+    style:
+      text: "7"
+      bgcolor: "#222244"
+      color: "#FFFFFF"
+      size: 24
+    actions:
+      down:
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "pp_message_input"
+            expression: "concat($(internal:custom_pp_message_input), '7')"
+
+  - row: 1
+    col: 3
+    style:
+      text: "8"
+      bgcolor: "#222244"
+      color: "#FFFFFF"
+      size: 24
+    actions:
+      down:
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "pp_message_input"
+            expression: "concat($(internal:custom_pp_message_input), '8')"
+
+  # Display pad: shows the current composed input. Read-only — no
+  # press action. If empty, shows "(empty)".
+  - row: 1
+    col: 4
+    style:
+      text: "Msg:\n$(internal:custom_pp_message_input)"
+      bgcolor: "#222222"
+      color: "#FFFFFF"
+      size: 14
+
+  # ═══ Row 2: Digits 9, 0, CLR, HIDE, nav ═══
+  - row: 2
+    col: 0
+    style:
+      text: "9"
+      bgcolor: "#222244"
+      color: "#FFFFFF"
+      size: 24
+    actions:
+      down:
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "pp_message_input"
+            expression: "concat($(internal:custom_pp_message_input), '9')"
+
+  - row: 2
+    col: 1
+    style:
+      text: "0"
+      bgcolor: "#222244"
+      color: "#FFFFFF"
+      size: 24
+    actions:
+      down:
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "pp_message_input"
+            expression: "concat($(internal:custom_pp_message_input), '0')"
+
+  # CLR: reset input to empty. Does NOT affect any active PP message
+  # (use HIDE for that). Lets operator start composing a new number.
+  - row: 2
+    col: 2
+    style:
+      text: "CLR"
+      bgcolor: "#664400"
+      color: "#FFFFFF"
+      size: 18
+    actions:
+      down:
+        - action: internal:custom_variable_set_value
+          options:
+            name: "pp_message_input"
+            value: ""
+
+  # HIDE: clear the active message in PP. messageIndex must match
+  # whatever index is currently showing.
+  - row: 2
+    col: 3
+    style:
+      text: "HIDE"
+      bgcolor: "#990000"
+      color: "#FFFFFF"
+      size: 18
+    actions:
+      down:
+        - action: propresenter_yibc:messageHide
+          options:
+            messageIndex: "0"
+
+  # Nav back to original Ops page (30). Lets operator switch to old
+  # OBS / audio / segment controls if needed.
+  - row: 2
+    col: 4
+    style:
+      text: "→ OPS"
+      bgcolor: "#003366"
+      color: "#FFFFFF"
+      size: 14
+    actions:
+      down:
+        - action: internal:set_page
+          options: { controller: "self", page: 30 }

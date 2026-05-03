@@ -177,7 +177,7 @@ buttons:
         - action: propresenter_yibc:messageSend
           options:
             messageIndex: "0"
-            messageKeys: "name"
+            messageKeys: "Name"
             messageValues: "$(custom:pp_message_input)"
         - action: internal:custom_variable_set_value
           options:

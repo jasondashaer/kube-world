@@ -34,6 +34,6 @@ surfaces:
   - group_id: "streamdeck:A00SA5432NCLFZ"
     site: yibc
     name: "Stream Deck MK2"
-    address: "192.168.1.43"
+    address: "192.168.1.13"           # YIBC DHCP gave .13 (was .43; address can shift without reservation)
     port: 5343
     startup_page: 30

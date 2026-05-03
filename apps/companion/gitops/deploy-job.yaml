@@ -105,6 +105,13 @@ spec:
               value: /work/config
             - name: COMPANION_OUTPUT_FILE
               value: /tmp/companion.companionconfig
+            # Site filter for surfaces.yaml — companion-deploy.py only
+            # auto-adds outbound surface entries matching this site.
+            # Default value is for edge1 (YIBC). Override per-cluster
+            # via kustomize overlay when deploying elsewhere (e.g.
+            # apps/companion/overlays/saitama/).
+            - name: COMPANION_SITE
+              value: "yibc"
           # Pull credentials from the SealedSecret-backed Secret.
           # `optional: true` so the Pod still starts when the Secret
           # is missing (yields literal `${VAR}` placeholders in

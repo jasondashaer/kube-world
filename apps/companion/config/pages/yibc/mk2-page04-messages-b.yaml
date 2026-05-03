@@ -27,7 +27,7 @@ buttons:
         - action: internal:custom_variable_set_expression
           options:
             name: "pp_message_input"
-            expression: "concat($(internal:custom_pp_message_input), '1')"
+            expression: "concat($(custom:pp_message_input), '1')"
 
   - row: 0
     col: 1
@@ -41,7 +41,7 @@ buttons:
         - action: internal:custom_variable_set_expression
           options:
             name: "pp_message_input"
-            expression: "concat($(internal:custom_pp_message_input), '2')"
+            expression: "concat($(custom:pp_message_input), '2')"
 
   - row: 0
     col: 2
@@ -55,7 +55,7 @@ buttons:
         - action: internal:custom_variable_set_expression
           options:
             name: "pp_message_input"
-            expression: "concat($(internal:custom_pp_message_input), '3')"
+            expression: "concat($(custom:pp_message_input), '3')"
 
   - row: 0
     col: 3
@@ -69,7 +69,7 @@ buttons:
         - action: internal:custom_variable_set_expression
           options:
             name: "pp_message_input"
-            expression: "concat($(internal:custom_pp_message_input), '4')"
+            expression: "concat($(custom:pp_message_input), '4')"
 
   - row: 0
     col: 4
@@ -83,7 +83,7 @@ buttons:
         - action: internal:custom_variable_set_expression
           options:
             name: "pp_message_input"
-            expression: "concat($(internal:custom_pp_message_input), '5')"
+            expression: "concat($(custom:pp_message_input), '5')"
 
   # ═══ Row 1: Digits 6-0 ═══
   - row: 1
@@ -98,7 +98,7 @@ buttons:
         - action: internal:custom_variable_set_expression
           options:
             name: "pp_message_input"
-            expression: "concat($(internal:custom_pp_message_input), '6')"
+            expression: "concat($(custom:pp_message_input), '6')"
 
   - row: 1
     col: 1
@@ -112,7 +112,7 @@ buttons:
         - action: internal:custom_variable_set_expression
           options:
             name: "pp_message_input"
-            expression: "concat($(internal:custom_pp_message_input), '7')"
+            expression: "concat($(custom:pp_message_input), '7')"
 
   - row: 1
     col: 2
@@ -126,7 +126,7 @@ buttons:
         - action: internal:custom_variable_set_expression
           options:
             name: "pp_message_input"
-            expression: "concat($(internal:custom_pp_message_input), '8')"
+            expression: "concat($(custom:pp_message_input), '8')"
 
   - row: 1
     col: 3
@@ -140,7 +140,7 @@ buttons:
         - action: internal:custom_variable_set_expression
           options:
             name: "pp_message_input"
-            expression: "concat($(internal:custom_pp_message_input), '9')"
+            expression: "concat($(custom:pp_message_input), '9')"
 
   - row: 1
     col: 4
@@ -154,13 +154,13 @@ buttons:
         - action: internal:custom_variable_set_expression
           options:
             name: "pp_message_input"
-            expression: "concat($(internal:custom_pp_message_input), '0')"
+            expression: "concat($(custom:pp_message_input), '0')"
 
   # ═══ Row 2: Controls ═══
   - row: 2
     col: 0
     style:
-      text: "Msg:\n$(internal:custom_pp_message_input)"
+      text: "Msg:\n$(custom:pp_message_input)"
       bgcolor: "#222222"
       color: "#FFFFFF"
       size: 14
@@ -178,7 +178,11 @@ buttons:
           options:
             messageIndex: "0"
             messageKeys: "name"
-            messageValues: "$(internal:custom_pp_message_input)"
+            messageValues: "$(custom:pp_message_input)"
+        - action: internal:custom_variable_set_value
+          options:
+            name: "pp_message_input"
+            value: ""
 
   - row: 2
     col: 2
@@ -192,6 +196,10 @@ buttons:
         - action: propresenter_yibc:messageHide
           options:
             messageIndex: "0"
+        - action: internal:custom_variable_set_value
+          options:
+            name: "pp_message_input"
+            value: ""
 
   - row: 2
     col: 3

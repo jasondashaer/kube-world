@@ -167,15 +167,20 @@ buttons:
             name: "pp_message_input"
             expression: "concat($(internal:custom_pp_message_input), '8')"
 
-  # Display pad: shows the current composed input. Read-only — no
-  # press action. If empty, shows "(empty)".
+  # HIDE: clear the active message in PP. messageIndex must match
+  # whatever index is currently showing.
   - row: 1
     col: 4
     style:
-      text: "Msg:\n$(internal:custom_pp_message_input)"
-      bgcolor: "#222222"
+      text: "HIDE"
+      bgcolor: "#990000"
       color: "#FFFFFF"
-      size: 14
+      size: 18
+    actions:
+      down:
+        - action: propresenter_yibc:messageHide
+          options:
+            messageIndex: "0"
 
   # ═══ Row 2: Digits 9, 0, CLR, HIDE, nav ═══
   - row: 2
@@ -222,20 +227,14 @@ buttons:
             name: "pp_message_input"
             value: ""
 
-  # HIDE: clear the active message in PP. messageIndex must match
-  # whatever index is currently showing.
+  # Display pad: shows the current composed input. Read-only.
   - row: 2
     col: 3
     style:
-      text: "HIDE"
-      bgcolor: "#990000"
+      text: "Msg:\n$(internal:custom_pp_message_input)"
+      bgcolor: "#222222"
       color: "#FFFFFF"
-      size: 18
-    actions:
-      down:
-        - action: propresenter_yibc:messageHide
-          options:
-            messageIndex: "0"
+      size: 14
 
   # Cycle to Layout B (page 33).
   - row: 2

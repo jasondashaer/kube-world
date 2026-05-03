@@ -125,19 +125,6 @@ buttons:
   - row: 1
     col: 3
     style:
-      text: "HIDE"
-      bgcolor: "#990000"
-      color: "#FFFFFF"
-      size: 18
-    actions:
-      down:
-        - action: propresenter_yibc:messageHide
-          options:
-            messageIndex: "0"
-
-  - row: 1
-    col: 4
-    style:
       text: "CLR"
       bgcolor: "#664400"
       color: "#FFFFFF"
@@ -148,6 +135,19 @@ buttons:
           options:
             name: "pp_message_input"
             value: ""
+
+  - row: 1
+    col: 4
+    style:
+      text: "HIDE"
+      bgcolor: "#990000"
+      color: "#FFFFFF"
+      size: 18
+    actions:
+      down:
+        - action: propresenter_yibc:messageHide
+          options:
+            messageIndex: "0"
 
   # ═══ Row 2: Digits 7-9 + 0 + Layout cycle ═══
   - row: 2

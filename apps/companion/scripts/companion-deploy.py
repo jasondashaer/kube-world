@@ -638,7 +638,16 @@ def export_config(args):
 
 
 def import_config(args):
-    """Import .companionconfig to Companion via tRPC WebSocket API."""
+    """Import .companionconfig to Companion via tRPC WebSocket API.
+
+    Always regenerates from YAML first unless --file overrides. Skipping
+    regen leads to stale config bugs that are hard to spot — the file
+    looks valid but reflects an older revision of the YAML sources.
+    """
+    if not args.file:
+        print("Regenerating .companionconfig from current YAML sources...")
+        generate(args)
+        print()
     config_file = args.file or OUTPUT_FILE
     if not os.path.exists(config_file):
         print(f"Config file not found: {config_file}")

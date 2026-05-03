@@ -104,11 +104,18 @@ buttons:
       size: 18
     actions:
       down:
+        # Actions in a down-set run in PARALLEL by default. The clear
+        # races with messageSend's variable parsing — without the wait,
+        # clear can win the race and zero out pp_message_input before
+        # the PP module reads it via parseVariablesInString. The wait
+        # forces messageSend to complete first.
         - action: propresenter_yibc:messageSend
           options:
             messageIndex: "0"
             messageKeys: "Name"
             messageValues: "$(custom:pp_message_input)"
+        - action: internal:wait
+          options: { time: "100" }
         - action: internal:custom_variable_set_value
           options:
             name: "pp_message_input"
@@ -185,6 +192,8 @@ buttons:
         - action: propresenter_yibc:messageHide
           options:
             messageIndex: "0"
+        - action: internal:wait
+          options: { time: "100" }
         - action: internal:custom_variable_set_value
           options:
             name: "pp_message_input"

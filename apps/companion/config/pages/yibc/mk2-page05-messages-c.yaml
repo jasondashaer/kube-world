@@ -78,6 +78,8 @@ buttons:
             messageIndex: "0"
             messageKeys: "Name"
             messageValues: "$(custom:pp_message_input)"
+        - action: internal:wait
+          options: { time: "100" }
         - action: internal:custom_variable_set_value
           options:
             name: "pp_message_input"
@@ -152,6 +154,8 @@ buttons:
         - action: propresenter_yibc:messageHide
           options:
             messageIndex: "0"
+        - action: internal:wait
+          options: { time: "100" }
         - action: internal:custom_variable_set_value
           options:
             name: "pp_message_input"

@@ -1,611 +1,260 @@
-# YIBC — Stream Deck MK2 Page 30: Operations
-# 5x3 grid — testing ProPresenter + Yamaha TF5 control
+# YIBC — Stream Deck MK2 Page 30: Operations (post-Yamaha-removal)
+# 5x3 grid. Yamaha mixer buttons retired 2026-05-04 — operator
+# controls Yamaha directly on the TF5 surface, Companion no longer
+# routes audio. Yamaha YAML preserved under
+# config/pages/yibc/archive/ for future resurrection.
+#
+# Layout intent:
+#   Row 0: integration status indicators (no actions, just feedback
+#          colors based on connection health).
+#   Row 1: service automation flow (startup → start → stop → shutdown).
+#   Row 2: nav (bottom-right → page 32 PP Messages).
+#
+# Layout:
+#   Row 0: [PP]    [OBS]    [PTZ]    [HA]      [Spotify]
+#   Row 1: [START] [SVC ▶]  [SVC ■]  [SHUTDWN] [—]
+#   Row 2: [—]     [—]      [—]      [—]       [→ MSG]
 
 page:
   number: 30
   name: "Ops"
-  device: mk2  # 5x3 = 15 buttons
+  device: mk2
 
 buttons:
-  # ═══ Row 0: Stream control (unchanged) ═══
+  # ═══ Row 0: Integration status indicators ═══
+  # Each cell shows label + connection-health color via
+  # internal:instance_status feedback. No action on press (just visual
+  # so operator can spot a dropped connection at a glance).
+
   - row: 0
     col: 0
     style:
-      text: "STREAM"
-      bgcolor: "#555555"
+      text: "ProP"
+      bgcolor: "#222222"
+      color: "#FFFFFF"
       size: 14
-    actions:
-      down:
-        - action: obs:toggle_streaming
     feedbacks:
-      - type: obs:streaming
-        style:
-          bgcolor: "#CC0000"
-          text: "● LIVE"
+      - type: internal:instance_status
+        options:
+          instance_id: "propresenter_yibc"
+          ok_fg: 16777215
+          ok_bg: 35840       # 0x008C00 dark green
+          warning_fg: 0
+          warning_bg: 16776960
+          error_fg: 16777215
+          error_bg: 13107200 # 0xC80000 red
+          disabled_fg: 10066329
+          disabled_bg: 2236962
 
   - row: 0
     col: 1
     style:
-      text: "REC"
-      bgcolor: "#555555"
+      text: "OBS"
+      bgcolor: "#222222"
+      color: "#FFFFFF"
       size: 14
-    actions:
-      down:
-        - action: obs:toggle_recording
     feedbacks:
-      - type: obs:recording
-        style:
-          bgcolor: "#CC0000"
-          text: "● REC"
+      - type: internal:instance_status
+        options:
+          instance_id: "obs_yibc"
+          ok_fg: 16777215
+          ok_bg: 35840
+          warning_fg: 0
+          warning_bg: 16776960
+          error_fg: 16777215
+          error_bg: 13107200
+          disabled_fg: 10066329
+          disabled_bg: 2236962
 
   - row: 0
     col: 2
     style:
-      text: "Main"
-      bgcolor: "#004499"
+      text: "PTZ"
+      bgcolor: "#222222"
+      color: "#FFFFFF"
       size: 14
-    actions:
-      down:
-        - action: obs:set_current_scene
-          options: { scene: "Main" }
     feedbacks:
-      - type: obs:scene_active
-        options: { scene: "Main" }
-        style:
-          bgcolor: "#00AA00"
-          text: "● Main"
+      - type: internal:instance_status
+        options:
+          instance_id: "ptz"
+          ok_fg: 16777215
+          ok_bg: 35840
+          warning_fg: 0
+          warning_bg: 16776960
+          error_fg: 16777215
+          error_bg: 13107200
+          disabled_fg: 10066329
+          disabled_bg: 2236962
 
   - row: 0
     col: 3
     style:
-      text: "Camera"
-      bgcolor: "#004499"
+      text: "HA"
+      bgcolor: "#222222"
+      color: "#FFFFFF"
       size: 14
-    actions:
-      down:
-        - action: obs:set_current_scene
-          options: { scene: "Camera" }
     feedbacks:
-      - type: obs:scene_active
-        options: { scene: "Camera" }
-        style:
-          bgcolor: "#00AA00"
-          text: "● Cam"
+      - type: internal:instance_status
+        options:
+          instance_id: "homeassistant"
+          ok_fg: 16777215
+          ok_bg: 35840
+          warning_fg: 0
+          warning_bg: 16776960
+          error_fg: 16777215
+          error_bg: 13107200
+          disabled_fg: 10066329
+          disabled_bg: 2236962
 
-  # Nav to PP message numpad (page 32 — MK2 default page).
-  # Was the JST clock; clock available on segments/messages pages,
-  # quick path back to default page is more useful here.
   - row: 0
     col: 4
     style:
-      text: "→ MSG\nメッセージ"
+      text: "Spotify"
+      bgcolor: "#222222"
+      color: "#FFFFFF"
+      size: 12
+    feedbacks:
+      - type: internal:instance_status
+        options:
+          instance_id: "spotify_yibc"
+          ok_fg: 16777215
+          ok_bg: 35840
+          warning_fg: 0
+          warning_bg: 16776960
+          error_fg: 16777215
+          error_bg: 13107200
+          disabled_fg: 10066329
+          disabled_bg: 2236962
+
+  # ═══ Row 1: Service automation flow ═══
+
+  # ── STARTUP ──
+  # Stages OBS to Pre-Service scene + marks service_mode = Ready.
+  # Idempotent — safe to repeat.
+  - row: 1
+    col: 0
+    style:
+      text: "Startup\n起動"
+      bgcolor: "#006600"
+      color: "#FFFFFF"
+      size: 12
+    actions:
+      down:
+        - action: obs_yibc:set_current_scene
+          options: { scene: "Pre-Service" }
+        - action: internal:custom_variable_set_value
+          options: { name: "service_mode", value: "Ready" }
+
+  # ── SVC START ──
+  # Begin live service: PP timer + OBS stream + OBS recording.
+  - row: 1
+    col: 1
+    style:
+      text: "SVC\nSTART"
+      bgcolor: "#118800"
+      color: "#FFFFFF"
+      size: 14
+    actions:
+      down:
+        - action: propresenter_yibc:clockReset
+          options: { clockIndex: "0" }
+        - action: propresenter_yibc:clockStart
+          options: { clockIndex: "0" }
+        - action: obs_yibc:start_streaming
+        - action: obs_yibc:start_recording
+        - action: internal:custom_variable_set_value
+          options: { name: "service_mode", value: "Live" }
+        - action: internal:custom_variable_set_value
+          options: { name: "service_armed", value: "1" }
+
+  # ── SVC STOP ──
+  # End service: stop OBS stream/record + clear PP + stop clock.
+  - row: 1
+    col: 2
+    style:
+      text: "SVC\nSTOP"
+      bgcolor: "#883300"
+      color: "#FFFFFF"
+      size: 14
+    actions:
+      down:
+        - action: obs_yibc:stop_recording
+        - action: obs_yibc:stop_streaming
+        - action: propresenter_yibc:clockStop
+          options: { clockIndex: "0" }
+        - action: propresenter_yibc:clearall
+        - action: internal:custom_variable_set_value
+          options: { name: "service_mode", value: "Stopped" }
+        - action: internal:custom_variable_set_value
+          options: { name: "service_armed", value: "0" }
+
+  # ── SHUTDOWN ──
+  # Two-step confirm with 5s auto-timeout. Step 1 primes (changes
+  # color + label). Step 2 (within 5s) commits the close: stop
+  # OBS rec/stream, clear PP, mark service Off. Long-press also
+  # commits in one step for emergency.
+  - row: 1
+    col: 3
+    style:
+      text: "Shutdown\n終了"
+      bgcolor: "#660000"
+      color: "#FFFFFF"
+      size: 12
+    steps:
+      - style:
+          text: "Shutdown\n終了"
+          bgcolor: "#660000"
+          color: "#FFFFFF"
+          size: 12
+        actions:
+          down:
+            - action: internal:step_delta
+              options: { amount: 1 }
+            - action: internal:wait
+              options: { time: "5000" }
+            - action: internal:step_delta
+              options: { amount: -1 }
+      - style:
+          text: "CONFIRM?\n確認？"
+          bgcolor: "#FF0000"
+          color: "#FFFFFF"
+          size: 12
+        actions:
+          down:
+            - action: obs_yibc:stop_recording
+            - action: obs_yibc:stop_streaming
+            - action: propresenter_yibc:clockStop
+              options: { clockIndex: "0" }
+            - action: propresenter_yibc:clearall
+            - action: internal:custom_variable_set_value
+              options: { name: "service_mode", value: "Off" }
+            - action: internal:custom_variable_set_value
+              options: { name: "service_armed", value: "0" }
+            - action: internal:step_delta
+              options: { amount: -1 }
+
+  # ── Spare slot ──
+  # Reserved for future automation (e.g. PANIC, mid-service action).
+  - row: 1
+    col: 4
+    style:
+      text: "$(internal:custom_service_mode)"
+      bgcolor: "#222222"
+      color: "#888888"
+      size: 14
+
+  # ═══ Row 2: Nav ═══
+  # Bottom-right → PP Messages (page 32). Mirrors page 32's → OPS
+  # button so MK2 has a 2-page swap.
+
+  - row: 2
+    col: 4
+    style:
+      text: "→ MSG"
       bgcolor: "#003366"
       color: "#FFFFFF"
-      size: 11
+      size: 14
     actions:
       down:
         - action: internal:set_page
           options: { controller: "self", page: 32 }
-
-  # ═══ Row 1: ProPresenter test ═══
-  - row: 1
-    col: 0
-    style:
-      text: "PREV\nSlide"
-      bgcolor: "#553300"
-      size: 14
-    actions:
-      down:
-        - action: propresenter_yibc:last
-
-  - row: 1
-    col: 1
-    style:
-      text: "NEXT\nSlide"
-      bgcolor: "#553300"
-      size: 14
-    actions:
-      down:
-        - action: propresenter_yibc:next
-
-  - row: 1
-    col: 2
-    style:
-      text: "CLEAR\nAll"
-      bgcolor: "#993300"
-      size: 14
-    actions:
-      down:
-        - action: propresenter_yibc:clearall
-
-  # ARM button: starts the pre-service automation chain.
-  # Press once to ARM (resets + starts PP timer 0, sets service_armed=1).
-  # Press again to DISARM (stops timer, clears flag) — long-press also
-  # available as panic abort.
-  - row: 1
-    col: 3
-    style:
-      text: "ARM\nService"
-      bgcolor: "#1A1A1A"
-      color: "#888888"
-      size: 12
-    steps:
-      # Step 0: ARMED (red, shows armed state)
-      - style:
-          text: "ARM\nService"
-          bgcolor: "#1A1A1A"
-          color: "#888888"
-          size: 12
-        actions:
-          down:
-            - action: internal:custom_variable_set_value
-              options: { name: "service_armed", value: "1" }
-            - action: propresenter_yibc:clockReset
-              options: { clockIndex: "0" }
-            - action: propresenter_yibc:clockStart
-              options: { clockIndex: "0" }
-            - action: internal:custom_variable_set_value
-              options: { name: "service_mode", value: "Armed" }
-            - action: internal:step_delta
-              options: { amount: 1 }
-      # Step 1: DISARM (red bg = primed)
-      - style:
-          text: "DISARM\n$(ProPresenter__YIBC_:video_countdown_timer)"
-          bgcolor: "#CC0000"
-          color: "#FFFFFF"
-          size: 11
-        actions:
-          down:
-            - action: internal:custom_variable_set_value
-              options: { name: "service_armed", value: "0" }
-            - action: propresenter_yibc:clockStop
-              options: { clockIndex: "0" }
-            - action: internal:custom_variable_set_value
-              options: { name: "service_mode", value: "Ready" }
-            - action: internal:step_delta
-              options: { amount: -1 }
-
-  # Status pad: shows current service_mode + countdown when armed.
-  - row: 1
-    col: 4
-    style:
-      text: "$(internal:custom_service_mode)\n$(ProPresenter__YIBC_:video_countdown_timer)"
-      bgcolor: "#222222"
-      color: "#888888"
-      size: 11
-
-  # ═══ Row 2: Audio + nav ═══
-  - row: 2
-    col: 0
-    style:
-      text: "Master\nMute"
-      bgcolor: "#444444"
-      size: 12
-    actions:
-      down:
-        - action: yamaha_yibc:MIXER_Current/St/Fader/On
-          options: { X: 1, Val: "Toggle" }
-        - action: yamaha_yibc:MIXER_Current/Mix/Fader/On
-          options: { X: 17, Val: "Toggle" }
-    feedbacks:
-      - type: yamaha_yibc:MIXER_Current/St/Fader/On
-        options: { X: 1, Val: 0 }
-        style:
-          bgcolor: "#CC0000"
-          text: "MUTE"
-          size: 14
-
-  - row: 2
-    col: 1
-    style:
-      text: "DUCK\n-20dB"
-      bgcolor: "#664400"
-      size: 12
-    steps:
-      - style:
-          text: "DUCK\n-20dB"
-          bgcolor: "#664400"
-        actions:
-          down:
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -100 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -700 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -200 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -800 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -300 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -900 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -400 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -1000 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -500 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -1100 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -600 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -1200 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -700 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -1300 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -800 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -1400 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -900 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -1500 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -1000 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -1600 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -1100 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -1700 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -1200 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -1800 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -1300 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -1900 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -1400 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -2000 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -1500 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -2100 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -1600 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -2200 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -1700 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -2300 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -1800 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -2400 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -1900 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -2500 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -2000 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -2600 }
-            - action: internal:step_delta
-              options: { amount: 1 }
-      - style:
-          text: "UNDUCK\nRestore"
-          bgcolor: "#CC6600"
-        actions:
-          down:
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -1900 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -2500 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -1800 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -2400 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -1700 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -2300 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -1600 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -2200 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -1500 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -2100 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -1400 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -2000 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -1300 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -1900 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -1200 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -1800 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -1100 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -1700 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -1000 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -1600 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -900 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -1500 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -800 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -1400 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -700 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -1300 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -600 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -1200 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -500 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -1100 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -400 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -1000 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -300 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -900 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -200 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -800 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: -100 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -700 }
-            - action: internal:wait
-              options: { time: "50" }
-            - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-              options: { X: 1, Val: 0 }
-            - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-              options: { X: 17, Val: -600 }
-            - action: internal:step_delta
-              options: { amount: -1 }
-
-  # ───── SERVICE-CLOSE PAIR ─────
-  # Two-button workflow for service close. The first stages the close
-  # (snapshot levels → fade music down → start Spotify playlist → fade
-  # music up to a "talking under music" level). The second concludes
-  # (fade music to fixed final level → trigger PP closing graphic →
-  # 12s hold → fade record bus to -∞ → stop stream + recording, leaving
-  # the room music at the talking-under level).
-
-  # SVC CLOSE 1 — Start the close flow (begin underscore music)
-  - row: 2
-    col: 2
-    style:
-      text: "CLOSE 1\nStart"
-      bgcolor: "#003366"
-      color: "#FFFFFF"
-      size: 11
-    actions:
-      down:
-        # Snapshot current master + record bus levels for restore
-        - action: internal:custom_variable_set_expression
-          options:
-            name: "pre_close_master_level"
-            expression: "0"
-        - action: internal:custom_variable_set_expression
-          options:
-            name: "pre_close_mix_level"
-            expression: "$(internal:custom_record_bus_idx) * 0"
-        - action: internal:custom_variable_set_value
-          options: { name: "close_stage", value: "Closing-Underscore" }
-        # 10-step master fade to -∞ over ~500ms
-        - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-          options: { X: 1, Val: -800 }
-        - action: internal:wait
-          options: { time: "50" }
-        - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-          options: { X: 1, Val: -1500 }
-        - action: internal:wait
-          options: { time: "50" }
-        - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-          options: { X: 1, Val: -2300 }
-        - action: internal:wait
-          options: { time: "50" }
-        - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-          options: { X: 1, Val: -3200 }
-        - action: internal:wait
-          options: { time: "50" }
-        - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-          options: { X: 1, Val: -32768 }
-        # Start Spotify playlist + track. URI placeholder — operator
-        # configures which playlist via the Spotify connection.
-        - action: spotify_yibc:playPlaylist
-          options:
-            uri: "spotify:playlist:PLACEHOLDER_PLAYLIST_URI"
-        - action: internal:wait
-          options: { time: "1500" }
-        # 30-step slow fade up to -10dB ("under-talking" level) over 6s
-        - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-          options: { X: 1, Val: -3000 }
-        - action: internal:wait
-          options: { time: "200" }
-        - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-          options: { X: 1, Val: -2700 }
-        - action: internal:wait
-          options: { time: "200" }
-        - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-          options: { X: 1, Val: -2400 }
-        - action: internal:wait
-          options: { time: "200" }
-        - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-          options: { X: 1, Val: -2100 }
-        - action: internal:wait
-          options: { time: "200" }
-        - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-          options: { X: 1, Val: -1800 }
-        - action: internal:wait
-          options: { time: "200" }
-        - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-          options: { X: 1, Val: -1500 }
-        - action: internal:wait
-          options: { time: "200" }
-        - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-          options: { X: 1, Val: -1200 }
-        - action: internal:wait
-          options: { time: "200" }
-        - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-          options: { X: 1, Val: -1000 }
-
-  # SVC CLOSE 2 — Finish the close flow (graphic → fade record → stop)
-  - row: 2
-    col: 3
-    style:
-      text: "CLOSE 2\nFinish"
-      bgcolor: "#660033"
-      color: "#FFFFFF"
-      size: 11
-    actions:
-      down:
-        # Fade master up to closing target (-3dB by default)
-        - action: yamaha_yibc:MIXER_Current/St/Fader/Level
-          options:
-            X: 1
-            Val: "$(internal:custom_closing_target_db_units)"
-        # Fire PP closing graphic (Pro7 macro UUID — TBD)
-        - action: propresenter_yibc:pro7TriggerMacro
-          options:
-            pro7MacroUUID: "PLACEHOLDER_CLOSING_GRAPHIC_MACRO"
-        # Hold graphic on the stream/recording for 12 seconds
-        - action: internal:wait
-          options: { time: "12000" }
-        # Fade record bus to -∞ (recording goes silent first)
-        - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-          options:
-            X: "$(internal:custom_record_bus_idx)"
-            Val: -800
-        - action: internal:wait
-          options: { time: "100" }
-        - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-          options:
-            X: "$(internal:custom_record_bus_idx)"
-            Val: -1600
-        - action: internal:wait
-          options: { time: "100" }
-        - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-          options:
-            X: "$(internal:custom_record_bus_idx)"
-            Val: -2400
-        - action: internal:wait
-          options: { time: "100" }
-        - action: yamaha_yibc:MIXER_Current/Mix/Fader/Level
-          options:
-            X: "$(internal:custom_record_bus_idx)"
-            Val: -32768
-        # PP fade-to-black on stream/recording output
-        - action: propresenter_yibc:clearall
-        - action: internal:wait
-          options: { time: "800" }
-        # Stop stream + recording. Music in the room stays up.
-        - action: obs_yibc:stop_recording
-        - action: obs_yibc:stop_streaming
-        - action: internal:custom_variable_set_value
-          options: { name: "close_stage", value: "Stopped" }
-        - action: internal:custom_variable_set_value
-          options: { name: "service_mode", value: "Off" }
-
-  # Navigate to segment-transition pad (page 31)
-  - row: 2
-    col: 4
-    style:
-      text: "SEGMENTS\n→"
-      bgcolor: "#444444"
-      color: "#FFFFFF"
-      size: 12
-    actions:
-      down:
-        - action: internal:set_page
-          options: { controller: "self", page: 31 }

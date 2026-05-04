@@ -12,7 +12,7 @@
 #
 # Layout:
 #   Row 0: [PP]    [OBS]    [PTZ]    [—]       [—]
-#   Row 1: [START] [SVC ▶]  [SVC ■]  [SHUTDWN] [—]
+#   Row 1: [START] [SVC ▶]  [SVC ■]  [SHUTDWN] [—]   (col 4 empty)
 #   Row 2: [—]     [—]      [—]      [—]       [→ MSG]
 
 page:
@@ -197,15 +197,9 @@ buttons:
             - action: internal:step_delta
               options: { amount: -1 }
 
-  # ── Spare slot ──
-  # Reserved for future automation (e.g. PANIC, mid-service action).
-  - row: 1
-    col: 4
-    style:
-      text: "$(internal:custom_service_mode)"
-      bgcolor: "#222222"
-      color: "#888888"
-      size: 14
+  # Row 1 col 4 left empty — service_mode is implied by the colored
+  # button states (Startup green, Live yellow on press, Stop orange,
+  # Shutdown red). No standalone status pad needed.
 
   # ═══ Row 2: Nav ═══
   # Bottom-right → PP Messages (page 32). Mirrors page 32's → OPS

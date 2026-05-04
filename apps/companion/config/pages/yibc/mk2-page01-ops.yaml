@@ -11,7 +11,7 @@
 #   Row 2: nav (bottom-right → page 32 PP Messages).
 #
 # Layout:
-#   Row 0: [PP]    [OBS]    [PTZ]    [HA]      [Spotify]
+#   Row 0: [PP]    [OBS]    [PTZ]    [—]       [—]
 #   Row 1: [START] [SVC ▶]  [SVC ■]  [SHUTDWN] [—]
 #   Row 2: [—]     [—]      [—]      [—]       [→ MSG]
 
@@ -86,45 +86,9 @@ buttons:
           disabled_fg: 10066329
           disabled_bg: 2236962
 
-  - row: 0
-    col: 3
-    style:
-      text: "HA"
-      bgcolor: "#222222"
-      color: "#FFFFFF"
-      size: 14
-    feedbacks:
-      - type: internal:instance_status
-        options:
-          instance_id: "homeassistant"
-          ok_fg: 16777215
-          ok_bg: 35840
-          warning_fg: 0
-          warning_bg: 16776960
-          error_fg: 16777215
-          error_bg: 13107200
-          disabled_fg: 10066329
-          disabled_bg: 2236962
-
-  - row: 0
-    col: 4
-    style:
-      text: "Spotify"
-      bgcolor: "#222222"
-      color: "#FFFFFF"
-      size: 12
-    feedbacks:
-      - type: internal:instance_status
-        options:
-          instance_id: "spotify_yibc"
-          ok_fg: 16777215
-          ok_bg: 35840
-          warning_fg: 0
-          warning_bg: 16776960
-          error_fg: 16777215
-          error_bg: 13107200
-          disabled_fg: 10066329
-          disabled_bg: 2236962
+  # Cols 3-4 reserved. HA + Spotify status removed 2026-05-04 — those
+  # connections aren't actively used for live ops yet; can add back
+  # when integrated.
 
   # ═══ Row 1: Service automation flow ═══
 

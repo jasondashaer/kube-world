@@ -142,3 +142,13 @@ variables:
   - name: pp_message_input
     default: ""
     persist: false
+
+  # Tracks whether Companion is currently SHOWING a PP message. "1"
+  # after SHOW pressed (drives green highlight on the display pad);
+  # "0" after HIDE/CLR. Note: Companion-side state only — if the PP
+  # operator clears the message manually in PP, this won't sync (PP
+  # module v3.0.2 doesn't expose message-active state). Future:
+  # generic-http polling against Pro7 REST could close that gap.
+  - name: pp_message_showing
+    default: "0"
+    persist: false

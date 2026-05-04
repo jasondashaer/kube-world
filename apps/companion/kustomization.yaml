@@ -34,8 +34,6 @@ configMapGenerator:
       - config/pages/yibc/mk2-page01-ops.yaml
       - config/pages/yibc/mk2-page02-segments.yaml
       - config/pages/yibc/mk2-page03-messages.yaml
-      - config/pages/yibc/mk2-page04-messages-b.yaml
-      - config/pages/yibc/mk2-page05-messages-c.yaml
       - config/pages/yibc/plus-page01-ptz.yaml
       - config/pages/yibc/plus-page02-dpad.yaml
       - config/pages/saitama/xl-page01-home.yaml

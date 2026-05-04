@@ -70,7 +70,7 @@ SITE_CONNECTIONS = {
 
 # Page numbers per site
 SITE_PAGES = {
-    "yibc": {20, 21, 22, 30, 31, 32, 33, 34},
+    "yibc": {20, 21, 22, 30, 31, 32},
     "saitama": {40, 41, 42, 43, 44},
 }
 

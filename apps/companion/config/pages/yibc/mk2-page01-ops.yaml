@@ -110,7 +110,21 @@ buttons:
           options: { name: "service_mode", value: "Ready" }
 
   # ── SVC START ──
-  # Begin live service: PP timer + OBS stream + OBS recording.
+  # Begin live service: PP timer + PP stream macro + OBS stream/record.
+  #
+  # The pro7TriggerMacro action below has an EMPTY pro7MacroUUID. PP
+  # macros are addressed by UUID and the UUID list is pulled live
+  # from PP at runtime — we can't hardcode it in YAML safely. To wire
+  # it up:
+  #   1. In ProPresenter, create a macro named "Stream Start" whose
+  #      action is the PP "Live → Start Stream" command.
+  #   2. After importing this config, open Companion web UI → page 30
+  #      row 1 col 1 (SVC START) → edit the pro7TriggerMacro action
+  #      → pick "Stream Start" from the live dropdown → save.
+  #   3. Repeat for SVC STOP with a "Stream Stop" macro.
+  # Until UUID is filled in, the pro7TriggerMacro will fall back to
+  # firing the FIRST macro in PP's list (module behavior on empty
+  # UUID) — so leave the action wired but expect to bind it post-import.
   - row: 1
     col: 1
     style:
@@ -124,6 +138,8 @@ buttons:
           options: { clockIndex: "0" }
         - action: propresenter_yibc:clockStart
           options: { clockIndex: "0" }
+        - action: propresenter_yibc:pro7TriggerMacro
+          options: { pro7MacroUUID: "" }   # bind via Companion UI: Stream Start
         - action: obs_yibc:start_streaming
         - action: obs_yibc:start_recording
         - action: internal:custom_variable_set_value
@@ -132,7 +148,9 @@ buttons:
           options: { name: "service_armed", value: "1" }
 
   # ── SVC STOP ──
-  # End service: stop OBS stream/record + clear PP + stop clock.
+  # End service: stop OBS stream/record + PP stream stop macro +
+  # clear PP + stop clock.
+  # See SVC START comment for pro7TriggerMacro UUID-binding workflow.
   - row: 1
     col: 2
     style:
@@ -144,6 +162,8 @@ buttons:
       down:
         - action: obs_yibc:stop_recording
         - action: obs_yibc:stop_streaming
+        - action: propresenter_yibc:pro7TriggerMacro
+          options: { pro7MacroUUID: "" }   # bind via Companion UI: Stream Stop
         - action: propresenter_yibc:clockStop
           options: { clockIndex: "0" }
         - action: propresenter_yibc:clearall
@@ -187,6 +207,8 @@ buttons:
           down:
             - action: obs_yibc:stop_recording
             - action: obs_yibc:stop_streaming
+            - action: propresenter_yibc:pro7TriggerMacro
+              options: { pro7MacroUUID: "" }   # bind via Companion UI: Stream Stop
             - action: propresenter_yibc:clockStop
               options: { clockIndex: "0" }
             - action: propresenter_yibc:clearall

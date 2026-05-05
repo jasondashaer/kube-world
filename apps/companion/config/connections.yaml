@@ -24,11 +24,15 @@ connections:
   # YIBC connections (used by Plus + MK2)
   # ═══════════════════════════════════════════
 
-  # Home Assistant — YIBC
+  # Home Assistant — YIBC. DISABLED 2026-05-05 — config field
+  # mismatch (module reads `url` not `host`, `secrets.access_token`
+  # not `config.access_token`) was generating ~720 errors/hr in main
+  # log. Re-enable once corrected: rename host→url (without http://
+  # prefix), move access_token to a `secrets:` block.
   - id: homeassistant
     module: "homeassistant-server"
     label: "Home Assistant"
-    enabled: true
+    enabled: false
     config:
       host: "http://home-assistant.home-assistant.svc.cluster.local:8123"
       access_token: ""
@@ -43,11 +47,15 @@ connections:
       port: 5678
       protocol: "tcp"
 
-  # Yamaha TF5 — YIBC
+  # Yamaha TF5 — YIBC. DISABLED 2026-05-05 — Yamaha buttons archived
+  # off the MK2 (operator runs the mixer directly on the surface for
+  # now). Connection was generating ~720 EHOSTUNREACH/hr because the
+  # mixer is also off when not in use. Flip enabled→true if Companion
+  # control returns.
   - id: yamaha_yibc
     module: "yamaha-rcp"
     label: "Yamaha TF5 (YIBC)"
-    enabled: true
+    enabled: false
     config:
       host: "192.168.1.54"
       model: "TF"

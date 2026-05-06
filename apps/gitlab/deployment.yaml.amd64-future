@@ -96,8 +96,11 @@ data:
     # Disable Mattermost
     mattermost['enable'] = false
 
-    # Disable Terraform state
-    gitlab_rails['terraform_state_enabled'] = false
+    # Terraform HTTP state backend — used by sibling projects
+    # (e.g. identity-baseline-build) to store TF state in this GitLab.
+    # Stock GitLab default is true; some tunings flip it off, so we
+    # set it explicitly here.
+    gitlab_rails['terraform_state_enabled'] = true
 
     # --- Git LFS (useful for large configs) ---
     gitlab_rails['lfs_enabled'] = true

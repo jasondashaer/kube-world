@@ -425,7 +425,11 @@ prometheus_monitoring['enable'] = false
 registry['enable'] = false
 gitlab_pages['enable'] = false
 mattermost['enable'] = false
-gitlab_rails['terraform_state_enabled'] = false
+# Terraform HTTP state backend — used by sibling projects
+# (e.g. identity-baseline-build) to store TF state in this GitLab.
+# Stock GitLab default is true; some tuning guides flip it off, so
+# we set it explicitly here.
+gitlab_rails['terraform_state_enabled'] = true
 
 # Git LFS enabled
 gitlab_rails['lfs_enabled'] = true

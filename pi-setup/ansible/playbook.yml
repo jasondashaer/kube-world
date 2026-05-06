@@ -361,6 +361,9 @@
       failed_when: false
 
     - name: Add domain DNS entries to /etc/hosts (central node resolution)
+      # Belt-and-suspenders alongside the unbound split-DNS task block
+      # below: glibc consults /etc/hosts before DNS, so this guarantees
+      # auth/gitlab/rancher.kubew.dev resolve even if unbound flaps.
       lineinfile:
         path: /etc/hosts
         regexp: '.*{{ domain | default("kubew.dev") }}'
@@ -369,6 +372,85 @@
       when:
         - central_ts_ip_lookup.stdout | trim | length > 0
         - central_ts_ip_lookup.stdout | trim | regex_search('^100\.') is not none
+
+    # ─────────────────────────────────────────────────────────────────
+    # Split-DNS via unbound. Required because Cloudflare CNAMEs in the
+    # kubew.dev zone resolve to *.tailab53c1.ts.net (tailnet hostnames),
+    # and Tailscale's MagicDNS returns NXDOMAIN for the public side of
+    # the chain — the .ts.net zone's authoritative server (dnsimple)
+    # doesn't host individual tailnet hostnames; only MagicDNS does.
+    # Without a local recursive resolver the CNAME chase breaks.
+    # unbound with a stub-zone for ts.net pointing at MagicDNS resolves
+    # the chain end-to-end. Tailscale must NOT manage /etc/resolv.conf
+    # in this setup (--accept-dns=false), or it will overwrite the
+    # nameserver entry we set.
+    # ─────────────────────────────────────────────────────────────────
+    - name: Install unbound (local recursive resolver for split-DNS)
+      apt:
+        name: unbound
+        state: present
+        update_cache: yes
+      retries: 3
+      delay: 5
+
+    - name: Configure unbound split-DNS (ts.net via MagicDNS, rest via Cloudflare)
+      copy:
+        dest: /etc/unbound/unbound.conf.d/kube-world.conf
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          server:
+              interface: 127.0.0.1
+              access-control: 127.0.0.0/8 allow
+              do-ip6: no
+              do-not-query-localhost: no
+              cache-min-ttl: 60
+              qname-minimisation: no
+              harden-glue: yes
+
+          # Tailnet zone: queries here go to MagicDNS so CNAME chases
+          # into .ts.net resolve correctly.
+          stub-zone:
+              name: "ts.net."
+              stub-addr: 100.100.100.100
+              stub-first: yes
+
+          # Public DNS for everything else.
+          forward-zone:
+              name: "."
+              forward-addr: 1.1.1.1
+              forward-addr: 1.0.0.1
+      notify: Restart unbound
+
+    - name: Stop Tailscale from managing /etc/resolv.conf
+      command: tailscale set --accept-dns=false
+      changed_when: false
+
+    - name: Point /etc/resolv.conf at unbound
+      copy:
+        dest: /etc/resolv.conf
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          # Managed by kube-world Ansible playbook.
+          # unbound on 127.0.0.1 handles split-DNS for kubew.dev/ts.net.
+          nameserver 127.0.0.1
+          search tailab53c1.ts.net localdomain
+          options edns0
+
+    - name: Enable + start unbound
+      systemd:
+        name: unbound
+        enabled: yes
+        state: started
+
+  handlers:
+    - name: Restart unbound
+      systemd:
+        name: unbound
+        state: restarted
 
 - name: Install K3s on master nodes
   hosts: masters

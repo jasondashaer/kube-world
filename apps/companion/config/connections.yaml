@@ -99,6 +99,28 @@ connections:
       clientId: "${SPOTIFY_CLIENT_ID}"        # env-injected
       clientSecret: "${SPOTIFY_CLIENT_SECRET}" # env-injected
 
+  # Philips 6700-series TV (Android TV 14, KTC OEM) — YIBC.
+  # Talks Google's Android TV Remote v2 protocol (ports 6466/6467),
+  # NOT ADB. Companion's web UI handles the pairing handshake — on
+  # first import the operator must:
+  #   1. Open Companion UI → Connections → "TV Philips (YIBC)" → Edit
+  #   2. Click the help/pair button; module sends pair request to TV
+  #   3. TV displays a 6-character code on screen
+  #   4. Operator enters code in Companion UI
+  #   5. TLS cert is exchanged + stored in Companion's DB
+  # The cert is the only piece that doesn't survive a from-scratch
+  # re-import. Plan: post-pair, capture the cert into a SealedSecret
+  # so wipes don't lose pairing.
+  - id: tv_yibc
+    module: "android-tv"
+    label: "TV Philips (YIBC)"
+    enabled: true
+    config:
+      host: "192.168.0.13"
+      macAddress: ""        # filled at pair time, also used for WoL
+      certBool: false       # flips true after pairing
+      retryDuration: 6
+
   # ═══════════════════════════════════════════
   # Saitama connections (used by XL)
   # ═══════════════════════════════════════════

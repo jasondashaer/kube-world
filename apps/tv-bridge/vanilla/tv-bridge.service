@@ -1,0 +1,28 @@
+[Unit]
+Description=tv-bridge — ADB-over-HTTP for Android TV control
+Documentation=https://github.com/jasondashaer/kube-world/tree/main/apps/tv-bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tv-bridge
+Group=tv-bridge
+Environment=HOME=/var/lib/tv-bridge
+Environment=ANDROID_HOME=/var/lib/tv-bridge
+Environment=LISTEN_ADDR=127.0.0.1:9990
+EnvironmentFile=-/etc/default/tv-bridge
+ExecStart=/usr/bin/python3 /opt/tv-bridge/bridge.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+# Modest hardening — bridge needs network + filesystem for adb keys
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/var/lib/tv-bridge
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

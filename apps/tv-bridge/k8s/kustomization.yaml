@@ -1,0 +1,8 @@
+# tv-bridge — k8s deployment kustomization.
+# Edit deployment.yaml's TV_HOST env to point at your TV's IP.
+# Image must be built + pushed; see apps/tv-bridge/README.md.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - deployment.yaml

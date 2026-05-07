@@ -1,0 +1,72 @@
+# tv-bridge — deployed alongside Companion on edge1 (k3s).
+# Talks ADB to the TV at TV_HOST. Companion calls this via generic-http.
+#
+# Pairing: ADB key persisted on the PVC. First-time pair (one-shot) is
+# done out-of-band — see apps/tv-bridge/README.md "First-time pairing".
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tv-bridge
+  labels:
+    app.kubernetes.io/name: tv-bridge
+    app.kubernetes.io/part-of: kube-world
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tv-bridge-data
+  namespace: tv-bridge
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 100Mi
+  storageClassName: local-path
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tv-bridge
+  namespace: tv-bridge
+  labels:
+    app.kubernetes.io/name: tv-bridge
+    app.kubernetes.io/part-of: kube-world
+spec:
+  replicas: 1
+  strategy: {type: Recreate}      # PVC is RWO; avoid two pods at once
+  selector:
+    matchLabels: {app: tv-bridge}
+  template:
+    metadata:
+      labels:
+        app: tv-bridge
+        app.kubernetes.io/name: tv-bridge
+        app.kubernetes.io/part-of: kube-world
+    spec:
+      hostNetwork: true             # adb needs to reach TV on host LAN
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: bridge
+          image: ghcr.io/jasondashaer/tv-bridge:latest   # build + push to registry
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: TV_HOST,        value: "192.168.0.13:5555"}
+            - {name: LISTEN_ADDR,    value: "127.0.0.1:9990"}    # bind loopback only
+            - {name: HOME,           value: "/data"}
+            - {name: ANDROID_HOME,   value: "/data"}
+            # Override INPUT_TVINPUT here if the TV uses a different
+            # TIF service. Default works for Mediatek-based Philips/KTC.
+          volumeMounts:
+            - {name: data, mountPath: /data}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits:   {cpu: 200m, memory: 128Mi}
+          readinessProbe:
+            httpGet: {path: /healthz, port: 9990, host: 127.0.0.1}
+            periodSeconds: 30
+            failureThreshold: 4
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: tv-bridge-data

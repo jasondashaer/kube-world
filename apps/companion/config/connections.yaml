@@ -77,8 +77,11 @@ connections:
   # OBS Studio — YIBC. Module requires obs-websocket plugin v5+ on
   # the OBS host. Password from SealedSecret (k3s) or
   # /etc/default/companion (vanilla).
+  # Module id: was `bitfocus-obs-websocket` pre-Companion-4.x; renamed
+  # to `obs-studio` in the unified module store (no legacyIds mapping
+  # so old id cannot resolve — must use new id verbatim).
   - id: obs_yibc
-    module: "bitfocus-obs-websocket"
+    module: "obs-studio"
     label: "OBS (YIBC)"
     enabled: true
     config:
@@ -150,7 +153,7 @@ connections:
 
   # OBS Studio — Saitama.
   - id: obs_saitama
-    module: "bitfocus-obs-websocket"
+    module: "obs-studio"
     label: "OBS (Saitama)"
     enabled: true
     config:

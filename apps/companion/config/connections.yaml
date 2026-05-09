@@ -87,7 +87,7 @@ connections:
     config:
       host: "192.168.1.10"                    # OBS Mac (YIBC LAN)
       port: "4455"
-      password: "${OBS_PASSWORD_YIBC}"        # env-injected
+      pass: "${OBS_PASSWORD_YIBC}"            # env-injected; obs-studio uses `pass`, not `password`
 
   # Spotify — YIBC. Premium account required for playback control.
   # OAuth handshake happens once via Companion web UI on first connect;
@@ -159,7 +159,7 @@ connections:
     config:
       host: "192.168.10.50"
       port: "4455"
-      password: "${OBS_PASSWORD_SAITAMA}"        # env-injected
+      pass: "${OBS_PASSWORD_SAITAMA}"           # env-injected; obs-studio uses `pass`, not `password`
 
   # ATEM switcher — Saitama. No password on the protocol itself.
   - id: atem_saitama

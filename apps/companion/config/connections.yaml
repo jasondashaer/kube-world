@@ -82,7 +82,7 @@ connections:
     label: "OBS (YIBC)"
     enabled: true
     config:
-      host: "192.168.1.50"
+      host: "192.168.1.10"                    # OBS Mac (YIBC LAN)
       port: "4455"
       password: "${OBS_PASSWORD_YIBC}"        # env-injected
 

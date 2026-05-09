@@ -14,13 +14,15 @@
 # Subnets:
 #   YIBC LAN     : 192.168.1.0/24 (Stream Deck Modules at .41, .42, .43
 #                                 historically; .41 has moved to Saitama)
-#   Saitama LAN  : 10.0.0.0/24    (Cloud Fiber router subnet)
+#   Saitama LAN  : 10.1.1.0/24    (UniFi UCG-Fiber, AV VLAN — production gear,
+#                                  Stream Deck Network Dock + XL reside here.
+#                                  Default 10.0.0.0/24 is infra/management only.)
 
 surfaces:
   - group_id: "streamdeck:A00NA53835A5F1"
     site: saitama
     name: "Stream Deck XL"
-    address: "10.0.0.110"           # Saitama LAN — confirm via Cloud Fiber DHCP table
+    address: "10.1.1.110"           # Saitama AV VLAN — Stream Deck Network Dock (XL pass-through)
     port: 5343
     startup_page: 40
 

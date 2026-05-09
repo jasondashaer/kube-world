@@ -151,15 +151,9 @@ connections:
       sendPresentationCurrentMsgs: "disabled"
       timerPolling: "enabled"
 
-  # OBS Studio — Saitama.
-  - id: obs_saitama
-    module: "obs-studio"
-    label: "OBS (Saitama)"
-    enabled: true
-    config:
-      host: "192.168.10.50"
-      port: "4455"
-      pass: "${OBS_PASSWORD_SAITAMA}"           # env-injected; obs-studio uses `pass`, not `password`
+  # No OBS at Saitama — streaming there is ATEM-driven, no OBS host.
+  # (Removed 2026-05-09. obs_saitama connection deleted; if added back,
+  # use module: obs-studio with config.pass not config.password.)
 
   # ATEM switcher — Saitama. No password on the protocol itself.
   - id: atem_saitama

@@ -104,7 +104,7 @@ buttons:
       size: 12
     actions:
       down:
-        - action: obs_yibc:set_current_scene
+        - action: obs_yibc:set_scene
           options: { scene: "Pre-Service" }
         - action: internal:custom_variable_set_value
           options: { name: "service_mode", value: "Ready" }
@@ -140,8 +140,8 @@ buttons:
           options: { clockIndex: "0" }
         - action: propresenter_yibc:pro7TriggerMacro
           options: { pro7MacroUUID: "" }   # bind via Companion UI: Stream Start
-        - action: obs_yibc:start_streaming
-        - action: obs_yibc:start_recording
+        - action: obs_yibc:StartStream
+        - action: obs_yibc:StartRecord
         - action: internal:custom_variable_set_value
           options: { name: "service_mode", value: "Live" }
         - action: internal:custom_variable_set_value
@@ -160,8 +160,8 @@ buttons:
       size: 14
     actions:
       down:
-        - action: obs_yibc:stop_recording
-        - action: obs_yibc:stop_streaming
+        - action: obs_yibc:StopRecord
+        - action: obs_yibc:StopStream
         - action: propresenter_yibc:pro7TriggerMacro
           options: { pro7MacroUUID: "" }   # bind via Companion UI: Stream Stop
         - action: propresenter_yibc:clockStop
@@ -205,8 +205,8 @@ buttons:
           size: 12
         actions:
           down:
-            - action: obs_yibc:stop_recording
-            - action: obs_yibc:stop_streaming
+            - action: obs_yibc:StopRecord
+            - action: obs_yibc:StopStream
             - action: propresenter_yibc:pro7TriggerMacro
               options: { pro7MacroUUID: "" }   # bind via Companion UI: Stream Stop
             - action: propresenter_yibc:clockStop

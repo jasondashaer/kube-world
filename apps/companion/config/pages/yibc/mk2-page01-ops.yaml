@@ -228,10 +228,67 @@ buttons:
   # button states (Startup green, Live yellow on press, Stop orange,
   # Shutdown red). No standalone status pad needed.
 
-  # ═══ Row 2: Nav ═══
+  # ═══ Row 2: Live status + Nav ═══
+  # Cols 0-1: real-time status of recording + live stream.
+  # Col 4:    nav → page 32 (PP Messages).
+
+  # ── REC ──
+  # OBS recording status. Pulls live state via obs-studio module's
+  # `recording` feedback — fires green when OBS is recording, gray
+  # otherwise. No press action; pure indicator.
+  - row: 2
+    col: 0
+    style:
+      text: "REC\n録画"
+      bgcolor: "#222222"
+      color: "#FFFFFF"
+      size: 14
+    feedbacks:
+      - type: obs_yibc:recording
+        options:
+          fg: 16777215            # white text when recording
+          bg: 13107200            # 0xC80000 red when recording
+          fg_paused: 16777215     # white text when paused
+        style:
+          text: "● REC\n録画中"
+          size: 14
+          color: 16777215
+          bgcolor: 13107200
+          alignment: "center:center"
+          show_topbar: false
+
+  # ── STREAM ──
+  # Live-stream status. Companion's renewedvision-propresenter v3.0.2
+  # does not expose a stream-active feedback, so we don't tie this to
+  # PP — instead we monitor the actual destination URL and surface
+  # that in a custom variable `stream_live` (0 or 1). The polling
+  # trigger that drives this variable is in triggers.yaml; until that
+  # trigger is wired (waiting on confirmed destination + channel id),
+  # this button reads as offline. See triggers.yaml stream_live_*.
+  - row: 2
+    col: 1
+    style:
+      text: "STREAM\n配信"
+      bgcolor: "#222222"
+      color: "#FFFFFF"
+      size: 14
+    feedbacks:
+      - type: internal:variable_value
+        options:
+          variable: "internal:custom_stream_live"
+          op: "eq"
+          value: "1"
+        style:
+          text: "● LIVE\n配信中"
+          size: 14
+          color: 16777215
+          bgcolor: 14483456       # 0xDD0000 (slightly different red so REC vs STREAM read distinct)
+          alignment: "center:center"
+          show_topbar: false
+
+  # ── → MSG ──
   # Bottom-right → PP Messages (page 32). Mirrors page 32's → OPS
   # button so MK2 has a 2-page swap.
-
   - row: 2
     col: 4
     style:

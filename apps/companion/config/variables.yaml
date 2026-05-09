@@ -152,3 +152,16 @@ variables:
   - name: pp_message_showing
     default: "0"
     persist: false
+
+  # ═══════════════════════════════════════════
+  # Live stream status (driven by external poll)
+  # ═══════════════════════════════════════════
+  # 1 if the YIBC live stream destination is currently broadcasting,
+  # 0 otherwise. Updated by a polling trigger in triggers.yaml that
+  # GETs the destination's "is live" probe URL every ~30 seconds.
+  # PP module doesn't expose stream-state, so we monitor the
+  # destination directly — independent of how the stream got started.
+  # Trigger wired only after destination platform is confirmed.
+  - name: stream_live
+    default: "0"
+    persist: false

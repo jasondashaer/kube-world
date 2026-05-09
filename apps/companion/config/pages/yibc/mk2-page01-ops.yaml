@@ -146,7 +146,7 @@ buttons:
         #   options: { clockIndex: "0" }
         # - action: propresenter_yibc:pro7TriggerMacro
         #   options: { pro7MacroUUID: "" }   # bind via Companion UI: Stream Start
-        - action: obs_yibc:StartRecord
+        - action: obs_yibc:start_recording
         - action: internal:custom_variable_set_value
           options: { name: "service_mode", value: "Live" }
         - action: internal:custom_variable_set_value
@@ -165,7 +165,7 @@ buttons:
       size: 14
     actions:
       down:
-        - action: obs_yibc:StopRecord
+        - action: obs_yibc:stop_recording
         # TEMP-DISABLED 2026-05-09: see SVC START.
         # - action: propresenter_yibc:pro7TriggerMacro
         #   options: { pro7MacroUUID: "" }   # bind via Companion UI: Stream Stop
@@ -210,7 +210,7 @@ buttons:
           size: 12
         actions:
           down:
-            - action: obs_yibc:StopRecord
+            - action: obs_yibc:stop_recording
             # TEMP-DISABLED 2026-05-09: see SVC START.
             # - action: propresenter_yibc:pro7TriggerMacro
             #   options: { pro7MacroUUID: "" }   # bind via Companion UI: Stream Stop

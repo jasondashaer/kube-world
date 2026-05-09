@@ -137,12 +137,15 @@ buttons:
       size: 14
     actions:
       down:
-        - action: propresenter_yibc:clockReset
-          options: { clockIndex: "0" }
-        - action: propresenter_yibc:clockStart
-          options: { clockIndex: "0" }
-        - action: propresenter_yibc:pro7TriggerMacro
-          options: { pro7MacroUUID: "" }   # bind via Companion UI: Stream Start
+        # TEMP-DISABLED 2026-05-09: PP actions parked while operator
+        # smoke-tests OBS recording in isolation. Restore exactly as
+        # commented when PP testing slot is available.
+        # - action: propresenter_yibc:clockReset
+        #   options: { clockIndex: "0" }
+        # - action: propresenter_yibc:clockStart
+        #   options: { clockIndex: "0" }
+        # - action: propresenter_yibc:pro7TriggerMacro
+        #   options: { pro7MacroUUID: "" }   # bind via Companion UI: Stream Start
         - action: obs_yibc:StartRecord
         - action: internal:custom_variable_set_value
           options: { name: "service_mode", value: "Live" }
@@ -163,11 +166,12 @@ buttons:
     actions:
       down:
         - action: obs_yibc:StopRecord
-        - action: propresenter_yibc:pro7TriggerMacro
-          options: { pro7MacroUUID: "" }   # bind via Companion UI: Stream Stop
-        - action: propresenter_yibc:clockStop
-          options: { clockIndex: "0" }
-        - action: propresenter_yibc:clearall
+        # TEMP-DISABLED 2026-05-09: see SVC START.
+        # - action: propresenter_yibc:pro7TriggerMacro
+        #   options: { pro7MacroUUID: "" }   # bind via Companion UI: Stream Stop
+        # - action: propresenter_yibc:clockStop
+        #   options: { clockIndex: "0" }
+        # - action: propresenter_yibc:clearall
         - action: internal:custom_variable_set_value
           options: { name: "service_mode", value: "Stopped" }
         - action: internal:custom_variable_set_value
@@ -207,11 +211,12 @@ buttons:
         actions:
           down:
             - action: obs_yibc:StopRecord
-            - action: propresenter_yibc:pro7TriggerMacro
-              options: { pro7MacroUUID: "" }   # bind via Companion UI: Stream Stop
-            - action: propresenter_yibc:clockStop
-              options: { clockIndex: "0" }
-            - action: propresenter_yibc:clearall
+            # TEMP-DISABLED 2026-05-09: see SVC START.
+            # - action: propresenter_yibc:pro7TriggerMacro
+            #   options: { pro7MacroUUID: "" }   # bind via Companion UI: Stream Stop
+            # - action: propresenter_yibc:clockStop
+            #   options: { clockIndex: "0" }
+            # - action: propresenter_yibc:clearall
             - action: internal:custom_variable_set_value
               options: { name: "service_mode", value: "Off" }
             - action: internal:custom_variable_set_value

@@ -110,7 +110,10 @@ buttons:
           options: { name: "service_mode", value: "Ready" }
 
   # ── SVC START ──
-  # Begin live service: PP timer + PP stream macro + OBS stream/record.
+  # Begin live service: PP timer + PP stream macro (PP/ATEM drive the
+  # actual live stream) + OBS *recording* as a local backup capture.
+  # OBS at YIBC is record-only — there's no OBS streaming, so
+  # StartStream/StopStream are intentionally absent.
   #
   # The pro7TriggerMacro action below has an EMPTY pro7MacroUUID. PP
   # macros are addressed by UUID and the UUID list is pulled live
@@ -140,7 +143,6 @@ buttons:
           options: { clockIndex: "0" }
         - action: propresenter_yibc:pro7TriggerMacro
           options: { pro7MacroUUID: "" }   # bind via Companion UI: Stream Start
-        - action: obs_yibc:StartStream
         - action: obs_yibc:StartRecord
         - action: internal:custom_variable_set_value
           options: { name: "service_mode", value: "Live" }
@@ -148,8 +150,8 @@ buttons:
           options: { name: "service_armed", value: "1" }
 
   # ── SVC STOP ──
-  # End service: stop OBS stream/record + PP stream stop macro +
-  # clear PP + stop clock.
+  # End service: stop OBS recording + PP stream stop macro +
+  # clear PP + stop clock. (No OBS streaming at YIBC; record-only.)
   # See SVC START comment for pro7TriggerMacro UUID-binding workflow.
   - row: 1
     col: 2
@@ -161,7 +163,6 @@ buttons:
     actions:
       down:
         - action: obs_yibc:StopRecord
-        - action: obs_yibc:StopStream
         - action: propresenter_yibc:pro7TriggerMacro
           options: { pro7MacroUUID: "" }   # bind via Companion UI: Stream Stop
         - action: propresenter_yibc:clockStop
@@ -175,7 +176,7 @@ buttons:
   # ── SHUTDOWN ──
   # Two-step confirm with 5s auto-timeout. Step 1 primes (changes
   # color + label). Step 2 (within 5s) commits the close: stop
-  # OBS rec/stream, clear PP, mark service Off. Long-press also
+  # OBS recording, clear PP, mark service Off. Long-press also
   # commits in one step for emergency.
   - row: 1
     col: 3
@@ -206,7 +207,6 @@ buttons:
         actions:
           down:
             - action: obs_yibc:StopRecord
-            - action: obs_yibc:StopStream
             - action: propresenter_yibc:pro7TriggerMacro
               options: { pro7MacroUUID: "" }   # bind via Companion UI: Stream Stop
             - action: propresenter_yibc:clockStop

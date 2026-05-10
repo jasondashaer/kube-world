@@ -1,0 +1,23 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Bootstrap RC Claude",
+      "type": "shell",
+      "command": "unset CLAUDECODE CLAUDE_CODE_ENVIRONMENT_KIND CLAUDE_CODE_SESSION_ACCESS_TOKEN CLAUDE_CODE_WORKER_EPOCH CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_SSE_PORT CLAUDE_CODE_USE_CCR_V2 CLAUDE_CODE_POST_FOR_SESSION_INGRESS_V2 CLAUDE_CODE_EXECPATH CLAUDE_CODE_SESSION_ID CLAUDE_CODE_BRIDGE_SESSION_ID; claude remote-control --name \"${workspaceFolderBasename}\" < /dev/null",
+      "isBackground": true,
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": true,
+        "panel": "dedicated",
+        "showReuseMessage": false,
+        "clear": false
+      },
+      "runOptions": {
+        "runOn": "folderOpen"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

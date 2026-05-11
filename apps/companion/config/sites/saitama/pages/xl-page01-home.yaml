@@ -8,6 +8,16 @@ page:
 
 buttons:
   # ═══ Row 0: Status bar ═══
+  # Default style is red ("not OK"). Companion exposes a per-connection
+  # status variable `internal:connection_<label>_status` that holds
+  # one of "good" | "warning" | "error" | "disabled" | null. We match
+  # against "good" via `internal:variable_value` — sidesteps the
+  # connection-id-remap problem that breaks instance_custom_state
+  # (Companion regenerates connection nanoids on every full import,
+  # leaving the option's saved instance_id pointing at a stale id).
+  #
+  # Variable name = "connection_" + sanitized label + "_status".
+  # Sanitization: non-alphanumeric → "_", consecutive runs collapsed.
   - row: 0
     col: 0
     style:
@@ -15,7 +25,11 @@ buttons:
       bgcolor: "#991111"
       size: 14
     feedbacks:
-      - type: atem:connected
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "internal:connection_ATEM_Mini_Pro__Saitama__status"
+          value: "good"
         style:
           bgcolor: "#116611"
           text: "ATEM\n● OK"
@@ -23,38 +37,40 @@ buttons:
   - row: 0
     col: 1
     style:
-      text: "OBS"
-      bgcolor: "#991111"
-      size: 14
-    feedbacks:
-      - type: obs:connected
-        style:
-          bgcolor: "#116611"
-          text: "OBS\n● OK"
-
-  - row: 0
-    col: 2
-    style:
       text: "Audio\n音響"
       bgcolor: "#991111"
       size: 12
     feedbacks:
-      - type: yamaha_saitama:connected
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "internal:connection_Yamaha_TF1__Saitama__status"
+          value: "good"
         style:
           bgcolor: "#116611"
           text: "Audio\n● OK"
 
   - row: 0
-    col: 3
+    col: 2
     style:
       text: "ProP"
       bgcolor: "#991111"
       size: 14
     feedbacks:
-      - type: propresenter_saitama:connected
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "internal:connection_ProPresenter__Saitama__status"
+          value: "good"
         style:
           bgcolor: "#116611"
           text: "ProP\n● OK"
+
+  - row: 0
+    col: 3
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
 
   - row: 0
     col: 4
@@ -82,36 +98,26 @@ buttons:
       bgcolor: "#222222"
       size: 16
 
-  # ═══ Row 1: Slides + Stream/Rec + Intro/Outro ═══
+  # ═══ Row 1: ATEM + ProP CLEAR ═══
+  # PREV/NEXT/GO dropped 2026-05-10 — operator drives ProP from the
+  # laptop directly. CLEAR retained as a blank-the-slides shortcut.
   - row: 1
     col: 0
     style:
-      text: "PREV\n前へ"
-      bgcolor: "#553300"
-      size: 14
-    actions:
-      down:
-        - action: propresenter_saitama:last
+      text: ""
+      bgcolor: "#1A1A1A"
 
   - row: 1
     col: 1
     style:
-      text: "NEXT\n次へ"
-      bgcolor: "#553300"
-      size: 14
-    actions:
-      down:
-        - action: propresenter_saitama:next
+      text: ""
+      bgcolor: "#1A1A1A"
 
   - row: 1
     col: 2
     style:
-      text: "GO\n進む"
-      bgcolor: "#00AA00"
-      size: 18
-    actions:
-      down:
-        - action: propresenter_saitama:next
+      text: ""
+      bgcolor: "#1A1A1A"
 
   - row: 1
     col: 3
@@ -123,6 +129,10 @@ buttons:
       down:
         - action: propresenter_saitama:clearslide
 
+  # 1/4–1/7: ATEM Mini Pro stream/record + Graphic/Aux input shortcuts.
+  # Action ids verified against bmd-atem 4.0.1 on msn-saitama 2026-05-10.
+  # Input numbering (3=Graphic, 4=Aux) is a placeholder — confirm against
+  # the on-site Mini Pro source mapping and update labels if needed.
   - row: 1
     col: 4
     style:
@@ -131,9 +141,11 @@ buttons:
       size: 12
     actions:
       down:
-        - action: obs:toggle_streaming
+        - action: atem_saitama:streamStartStop
+          options: { stream: "toggle" }
     feedbacks:
-      - type: obs:streaming
+      - type: atem_saitama:streamStatus
+        options: { state: 4 }
         style:
           bgcolor: "#CC0000"
           text: "● LIVE\n配信中"
@@ -146,80 +158,76 @@ buttons:
       size: 14
     actions:
       down:
-        - action: obs:toggle_recording
+        - action: atem_saitama:recordStartStop
+          options: { record: "toggle" }
     feedbacks:
-      - type: obs:recording
+      - type: atem_saitama:recordStatus
+        options: { state: 1 }
         style:
           bgcolor: "#CC0000"
           text: "● REC\n録画中"
 
+  # 1/6, 1/7 dropped 2026-05-10 — ATEM input shortcuts moved off home
+  # page (use page 43 stream view for full input grid).
   - row: 1
     col: 6
     style:
-      text: "Intro\nイントロ"
-      bgcolor: "#004499"
-      size: 12
-    actions:
-      down:
-        - action: obs:set_current_scene
-          options: { scene: "Intro" }
-    feedbacks:
-      - type: obs:scene_active
-        options: { scene: "Intro" }
-        style:
-          bgcolor: "#00AA00"
-          text: "● Intro"
+      text: ""
+      bgcolor: "#1A1A1A"
 
   - row: 1
     col: 7
     style:
-      text: "Outro\nアウトロ"
-      bgcolor: "#004499"
-      size: 12
-    actions:
-      down:
-        - action: obs:set_current_scene
-          options: { scene: "Outro" }
-    feedbacks:
-      - type: obs:scene_active
-        options: { scene: "Outro" }
-        style:
-          bgcolor: "#00AA00"
-          text: "● Outro"
+      text: ""
+      bgcolor: "#1A1A1A"
 
-  # ═══ Row 2: Timers + Scenes + Mute/Duck ═══
+  # ═══ Row 2: PP Clock + Scenes + Mute/Duck ═══
+  # 2/0–2/2 manually drive whichever PP timer the SUN AM / THU PM
+  # preset selected ($(active_timer_name)). Operator override for
+  # cases where they want the timer running without arming the
+  # trigger flow. Falls through with a no-op if no preset selected
+  # (active_timer_name = "").
   - row: 2
     col: 0
     style:
-      text: "Timer\n開始"
+      text: "PP Clock\nStart"
       bgcolor: "#006600"
       size: 12
     actions:
       down:
-        - action: propresenter_saitama:clockStart
-          options: { clockIndex: "0" }
+        - action: propresenter_saitama:timerOperation
+          options:
+            timer_id_dropdown: "manually_specify_timerid"
+            timer_id_text: "$(internal:custom_active_timer_name)"
+            timer_operation: "start"
 
   - row: 2
     col: 1
     style:
-      text: "Timer\n停止"
+      text: "PP Clock\nStop"
       bgcolor: "#660000"
       size: 12
     actions:
       down:
-        - action: propresenter_saitama:clockStop
-          options: { clockIndex: "0" }
+        - action: propresenter_saitama:timerOperation
+          options:
+            timer_id_dropdown: "manually_specify_timerid"
+            timer_id_text: "$(internal:custom_active_timer_name)"
+            timer_operation: "stop"
 
   - row: 2
     col: 2
     style:
-      text: "Timer\nリセット"
+      text: "PP Clock\nReset"
       bgcolor: "#444444"
-      size: 10
+      size: 12
     actions:
       down:
-        - action: propresenter_saitama:clockReset
-          options: { clockIndex: "0" }
+        - action: propresenter_saitama:timerOperation
+          options:
+            timer_id_dropdown: "manually_specify_timerid"
+            timer_id_text: "$(internal:custom_active_timer_name)"
+            timer_operation: "reset"
 
   # Worship → TF1 Bank A scene 2 (matches scenes/saitama/02-worship.yaml).
   # Bank A is engineer-owned working scenes; engineers can edit content
@@ -350,6 +358,12 @@ buttons:
   # ── Startup (generic) ──
   # Press once. Stages gear in a default "ready" state. Idempotent —
   # safe to press multiple times. Doesn't start any timer.
+  #   1. Recall TF1 quiet baseline scene (0 = Initial Data).
+  #   2. Point ATEM Media Player 1 at slot 1 (Mustard Seed logo, loaded
+  #      by atem-media-bridge on Pi boot from /opt/atem-media/).
+  #   3. Put MP1 on program (source id 3010 = MP1 fill, ATEM standard).
+  #      mixeffect=0 in YAML → 1 post-bmd-atem-upgrade-script.
+  #   4. Set service_mode = Ready, clear active_service_preset.
   - row: 3
     col: 0
     style:
@@ -359,10 +373,31 @@ buttons:
       size: 12
     actions:
       down:
+        # 1. Refresh ATEM still slots from /opt/atem-media/ — guards
+        #    against the pool having been wiped by an ATEM hard cycle
+        #    since the last bridge run. POST is fire-and-forget; the
+        #    upload completes asynchronously while the rest of the chain
+        #    runs (~300 ms per slot for the current single-slot config).
+        - action: atem_media_bridge:post
+          options:
+            url: "/refresh"
+            body: ""
+            contenttype: "application/json"
+        # 2. TF1 quiet baseline (scene 0 = Initial Data).
         - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
-          options: { X: 0, Y: 1 }            # scene 0 = Initial Data (quiet)
-        - action: obs_saitama:set_current_scene
-          options: { scene: "Pre-Service" }
+          options: { X: 0, Y: 1 }
+        # 3. Point ATEM Media Player 1 at slot 1.
+        #    mediaplayer: 1-indexed (1 = MP1). bmd-atem upgrade scripts
+        #    auto-increment, so send 0 in YAML → lands as 1.
+        #    source: 1-indexed label "still1" parses to API slot 0
+        #    (= ATEM Software Control's slot 01).
+        - action: atem_saitama:mediaPlayerSource
+          options: { mediaplayer: 0, source: "still1" }
+        # 4. Put MP1 on program (source id 3010 = MP1 fill, Mini Pro).
+        #    mixeffect 0 → 1 post-upgrade.
+        - action: atem_saitama:program
+          options: { input: 3010, mixeffect: 0 }
+        # 5. Reset state vars.
         - action: internal:custom_variable_set_value
           options: { name: "service_mode", value: "Ready" }
         - action: internal:custom_variable_set_value
@@ -401,13 +436,20 @@ buttons:
         actions:
           down:
             - action: internal:abort_actions       # cancels timeout + any in-flight
-            - action: obs_saitama:stop_recording
-            - action: obs_saitama:stop_streaming
+            # streamStartStop / recordStartStop are toggles, not stop-only —
+            # only safe to fire when streaming/recording is currently ON.
+            # The streamStatus / recordStatus feedbacks gate that, but
+            # Companion can't condition an action on its own button's
+            # feedback. Operator should land here only after going live;
+            # if pre-stream press is a real risk, gate via service_mode.
+            - action: atem_saitama:streamStartStop
+              options: { stream: "false" }
+            - action: atem_saitama:recordStartStop
+              options: { record: "false" }
             - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
               options: { X: 0, Y: 1 }              # Initial Data — quiet
             - action: yamaha_saitama:MIXER_Current/St/Fader/On
               options: { X: 1, Val: 0 }            # mute master
-            - action: spotify_saitama:pause
             - action: internal:custom_variable_set_value
               options: { name: "service_mode", value: "Off" }
             - action: internal:custom_variable_set_value
@@ -416,6 +458,11 @@ buttons:
               options: { name: "active_service_preset", value: "none" }
             - action: internal:custom_variable_set_value
               options: { name: "service_armed", value: "0" }
+            # Reset the SVC START / SKIP pad back to its idle label.
+            - action: internal:custom_variable_set_value
+              options: { name: "next_event_step", value: "0" }
+            - action: internal:custom_variable_set_value
+              options: { name: "next_event_label", value: "SVC START" }
             - action: internal:step_delta
               options: { amount: -1 }
 
@@ -433,10 +480,10 @@ buttons:
       down:
         - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
           options: { X: 1, Y: 1 }              # scene 1 = Announcements
-        - action: obs_saitama:set_current_scene
-          options: { scene: "Pre-Service" }
         - action: internal:custom_variable_set_value
           options: { name: "active_service_clock_index", value: "0" }
+        - action: internal:custom_variable_set_value
+          options: { name: "active_timer_name", value: "Countdown to Service Start - Sunday Morning" }
         - action: internal:custom_variable_set_value
           options: { name: "active_service_preset", value: "Sunday" }
         - action: internal:custom_variable_set_value
@@ -455,35 +502,70 @@ buttons:
       down:
         - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
           options: { X: 1, Y: 1 }              # same speech-config scene
-        - action: obs_saitama:set_current_scene
-          options: { scene: "Pre-Service" }
         - action: internal:custom_variable_set_value
           options: { name: "active_service_clock_index", value: "1" }
+        - action: internal:custom_variable_set_value
+          options: { name: "active_timer_name", value: "Countdown to Service Start - Thursday Evening" }
         - action: internal:custom_variable_set_value
           options: { name: "active_service_preset", value: "Thursday" }
         - action: internal:custom_variable_set_value
           options: { name: "service_mode", value: "Thursday Prep" }
 
-  # ── SVC START ──
-  # Kicks off the active preset's countdown clock. Sets service_armed=1
-  # so ARM-gated triggers fire. Single press (no confirm) — operator
-  # already chose preset deliberately.
+  # ── SVC START / SKIP NEXT ──
+  # Doubles as service-flow start (first press) and skip-to-next-event
+  # (subsequent presses while armed). Two-step confirm with 5 s
+  # auto-revert — pressing twice within 5 s pulses `skip_now=1`, which
+  # one of the four "Skip: …" triggers in triggers.yaml watches based
+  # on `next_event_step`:
+  #
+  #   step 0 (idle)       → skip-arm trigger: arms service, starts PP
+  #                         clock, advances step → 1
+  #   step 1 (pre-stream) → skip-T60 trigger: fires the T-60s actions
+  #                         (graphic + FTB + stream + FTB), advances → 2
+  #   step 2 (pre-camera) → skip-T15 trigger: fires the T-15s actions
+  #                         (FTB + record + camera + FTB), advances → 3
+  #   step 3 (live)       → no skip trigger registered; pad shows "Live"
+  #
+  # Step-0 label reads from `next_event_label` so the pad shows what's
+  # next at a glance. The PP video-countdown timer trails as a subtitle
+  # so the operator sees how long they have if they don't skip.
   - row: 3
     col: 4
     style:
-      text: "SVC\nSTART"
+      text: "$(internal:custom_next_event_label)\n$(ProPresenter__Saitama_:video_countdown_timer)"
       bgcolor: "#118800"
       color: "#FFFFFF"
-      size: 14
-    actions:
-      down:
-        - action: internal:custom_variable_set_value
-          options: { name: "service_armed", value: "1" }
-        - action: propresenter_saitama:clockStart
-          options:
-            clockIndex: "$(internal:custom_active_service_clock_index)"
-        - action: internal:custom_variable_set_value
-          options: { name: "service_mode", value: "Armed" }
+      size: 12
+    # Visual override: when on step 2 (1-indexed in Companion = our
+    # second `steps:` entry), repaint the pad as the confirm prompt.
+    feedbacks:
+      - type: internal:bank_current_step_condition
+        options: { step: "2" }
+        style:
+          text: "CONFIRM\n確認?"
+          bgcolor: "#FF8800"
+          color: "#FFFFFF"
+          size: 12
+    steps:
+      - actions:
+          down:
+            - action: internal:step_delta
+              options: { amount: 1 }
+            - action: internal:wait
+              options: { time: "5000" }
+            - action: internal:step_delta
+              options: { amount: -1 }
+      - actions:
+          down:
+            - action: internal:abort_actions       # cancel the 5 s revert
+            - action: internal:custom_variable_set_value
+              options: { name: "skip_now", value: "1" }
+            - action: internal:wait
+              options: { time: "200" }
+            - action: internal:custom_variable_set_value
+              options: { name: "skip_now", value: "0" }
+            - action: internal:step_delta
+              options: { amount: -1 }
 
   - row: 3
     col: 5

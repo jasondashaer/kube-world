@@ -1,0 +1,305 @@
+# Saitama — Stream Deck XL Page 43: Stream / Recording Control (ATEM)
+# 8x4 = 32 buttons
+#
+# Rewritten 2026-05-10:
+#   - OBS removed entirely (no OBS host at Saitama; ATEM Mini Pro is
+#     the streamer + recorder).
+#   - Blackmagic HyperDeck recorder plans removed (ATEM Mini Pro records
+#     to attached USB drive via its own protocol).
+#
+# Action ID notes (bmd-atem v4.0.1, verified against the running
+# msn-saitama module 2026-05-10):
+#   - program            options: { mixeffect, input }
+#   - preview            options: { mixeffect, input }
+#   - auto               options: { mixeffect }
+#   - cut                options: { mixeffect }
+#   - fadeToBlackAuto    options: { mixeffect }
+#   - streamStartStop    options: {}
+#   - recordStartStop    options: {}
+# Feedback ids:
+#   - streamStatus, recordStatus           (no options)
+#   - fadeToBlackIsBlack                   options: { mixeffect }
+#   - program                              options: { mixeffect, input }
+
+page:
+  number: 43
+  name: "Stream"
+  device: xl
+
+buttons:
+  # ═══ Row 0: Status ═══
+  - row: 0
+    col: 0
+    style:
+      text: "ATEM"
+      bgcolor: "#991111"
+      size: 14
+    feedbacks:
+      - type: atem_saitama:connected
+        style:
+          bgcolor: "#116611"
+          text: "ATEM\n● OK"
+
+  - row: 0
+    col: 1
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 0
+    col: 2
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 0
+    col: 3
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 0
+    col: 4
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 0
+    col: 5
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 0
+    col: 6
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 0
+    col: 7
+    style:
+      text: "$(internal:time_hms)"
+      bgcolor: "#222222"
+      size: 16
+
+  # ═══ Row 1: ATEM program inputs (Mini Pro = 4 HDMI sources) ═══
+  # Operator confirms which physical source is on which input; labels
+  # below are placeholders matching the typical mapping at Saitama.
+  # Update text once verified on-site.
+  - row: 1
+    col: 0
+    style:
+      text: "IN 1\nCamera"
+      bgcolor: "#004499"
+      size: 12
+    actions:
+      down:
+        - action: atem_saitama:program
+          options: { input: 1, mixeffect: 0 }
+
+  - row: 1
+    col: 1
+    style:
+      text: "IN 2\nSlides"
+      bgcolor: "#004499"
+      size: 12
+    actions:
+      down:
+        - action: atem_saitama:program
+          options: { input: 2, mixeffect: 0 }
+
+  - row: 1
+    col: 2
+    style:
+      text: "IN 3\nGraphic"
+      bgcolor: "#004499"
+      size: 12
+    actions:
+      down:
+        - action: atem_saitama:program
+          options: { input: 3, mixeffect: 0 }
+
+  - row: 1
+    col: 3
+    style:
+      text: "IN 4\nAux"
+      bgcolor: "#004499"
+      size: 12
+    actions:
+      down:
+        - action: atem_saitama:program
+          options: { input: 4, mixeffect: 0 }
+
+  - row: 1
+    col: 4
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 1
+    col: 5
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 1
+    col: 6
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 1
+    col: 7
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  # ═══ Row 2: Transitions ═══
+  - row: 2
+    col: 0
+    style:
+      text: "AUTO"
+      bgcolor: "#AAAA00"
+      size: 18
+    actions:
+      down:
+        - action: atem_saitama:auto
+          options: { mixeffect: 0 }
+
+  - row: 2
+    col: 1
+    style:
+      text: "CUT"
+      bgcolor: "#AAAA00"
+      size: 18
+    actions:
+      down:
+        - action: atem_saitama:cut
+          options: { mixeffect: 0 }
+
+  - row: 2
+    col: 2
+    style:
+      text: "FTB"
+      bgcolor: "#333333"
+      size: 18
+    actions:
+      down:
+        - action: atem_saitama:fadeToBlackAuto
+          options: { mixeffect: 0 }
+    feedbacks:
+      # bmd-atem upgrade pipeline rewrites mixeffect from 0-indexed to
+      # 1-indexed by adding 1 — even when the entity is fresh-imported
+      # with upgradeIndex pinned. Send 0 so the post-upgrade value is 1.
+      - type: atem_saitama:fadeToBlackIsBlack
+        options: { mixeffect: 0, state: "on" }
+        style:
+          bgcolor: "#CC0000"
+          text: "● FTB"
+
+  - row: 2
+    col: 3
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 2
+    col: 4
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 2
+    col: 5
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 2
+    col: 6
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 2
+    col: 7
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  # ═══ Row 3: Stream/Record + nav ═══
+  - row: 3
+    col: 0
+    style:
+      text: "STREAM\n配信"
+      bgcolor: "#555555"
+      size: 12
+    actions:
+      down:
+        - action: atem_saitama:streamStartStop
+          options: { stream: "toggle" }
+    feedbacks:
+      - type: atem_saitama:streamStatus
+        options: { state: 4 }
+        style:
+          bgcolor: "#CC0000"
+          text: "● LIVE\n配信中"
+
+  - row: 3
+    col: 1
+    style:
+      text: "REC\n録画"
+      bgcolor: "#555555"
+      size: 12
+    actions:
+      down:
+        - action: atem_saitama:recordStartStop
+          options: { record: "toggle" }
+    feedbacks:
+      - type: atem_saitama:recordStatus
+        options: { state: 1 }
+        style:
+          bgcolor: "#CC0000"
+          text: "● REC\n録画中"
+
+  - row: 3
+    col: 2
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 3
+    col: 3
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 3
+    col: 4
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 3
+    col: 5
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 3
+    col: 6
+    style:
+      text: ""
+      bgcolor: "#1A1A1A"
+
+  - row: 3
+    col: 7
+    style:
+      text: "← Home"
+      bgcolor: "#003366"
+      size: 14
+    actions:
+      down:
+        - action: internal:set_page
+          options: { controller: "self", page: 40 }

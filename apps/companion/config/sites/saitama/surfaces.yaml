@@ -1,0 +1,11 @@
+# Saitama site — Stream Deck surface registry.
+#
+# Single XL on the UniFi AV VLAN (10.1.1.0/24), DHCP-reserved.
+
+surfaces:
+  - group_id: "streamdeck:A00NA53835A5F1"
+    site: saitama
+    name: "Stream Deck XL"
+    address: "10.1.1.110"
+    port: 5343
+    startup_page: 40

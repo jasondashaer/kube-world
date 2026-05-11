@@ -1,0 +1,115 @@
+# Saitama site — custom Companion variables.
+#
+# YIBC-only vars (PTZ presets, MK2 message numpad, YIBC stream poll)
+# are NOT duplicated here.
+
+variables:
+  # ── System state (shared shape across both sites; values local to this Companion) ──
+  - name: startup_phase
+    default: "Idle"
+    persist: false
+
+  - name: service_mode
+    default: "Off"
+    persist: true
+
+  - name: all_connected
+    default: "false"
+    persist: false
+
+  # ── Audio duck tracking ──
+  - name: pre_duck_level
+    default: "0"
+    persist: false
+
+  - name: duck_active
+    default: "0"
+    persist: false
+
+  # ── ARM-gated service flow ──
+  - name: service_armed
+    default: "0"
+    persist: false
+
+  # Mix bus index used for the live stream + recording feed.
+  # PLACEHOLDER on Saitama until ATEM-side bus mapping confirmed.
+  - name: record_bus_idx
+    default: "21"
+    persist: true
+
+  - name: closing_target_db_units
+    default: "-300"
+    persist: true
+
+  - name: pre_close_master_level
+    default: "0"
+    persist: false
+
+  - name: pre_close_mix_level
+    default: "0"
+    persist: false
+
+  - name: close_stage
+    default: "Idle"
+    persist: false
+
+  # ── Segment-transition snapshot (Saitama segments page) ──
+  - name: previous_segment_scene
+    default: "1"
+    persist: false
+
+  - name: snapshot_master_fader
+    default: "0"
+    persist: false
+
+  - name: abort_active
+    default: "0"
+    persist: false
+
+  # ── Service-day preset selection (SUN AM / THU PM) ──
+  - name: active_service_clock_index
+    default: "0"
+    persist: false
+
+  - name: active_service_preset
+    default: "none"
+    persist: false
+
+  # ProPresenter timer name selected by SUN AM / THU PM presets.
+  # Skip-arm trigger + Row 2 PP Clock buttons reference this so the
+  # operator's day choice routes the start/stop/reset to the right
+  # countdown-to-time timer in ProPresenter. Default empty = no preset
+  # picked yet.
+  - name: active_timer_name
+    default: ""
+    persist: false
+
+  # ═══════════════════════════════════════════
+  # Pre-service flow stage tracker
+  # ═══════════════════════════════════════════
+  # The SVC START button doubles as a skip-to-next-event control once
+  # armed. These vars drive its label + decide which set of actions a
+  # skip press fires.
+  #
+  # next_event_step:
+  #   0 = idle (not armed; SVC START will arm)
+  #   1 = armed, pre-stream (skip = fire T-60 actions immediately)
+  #   2 = streamed, pre-camera (skip = fire T-15 actions immediately)
+  #   3 = live (skip = no-op)
+  #
+  # next_event_label: human-friendly description shown on the button.
+  #
+  # skip_now: transient 0/1 — pulsed by the skip-confirm press to
+  # trigger one of the skip-* triggers based on current step.
+
+  - name: next_event_step
+    default: "0"
+    persist: false
+
+  - name: next_event_label
+    default: "SVC START"
+    persist: false
+
+  - name: skip_now
+    default: "0"
+    persist: false

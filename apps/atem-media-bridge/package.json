@@ -1,0 +1,19 @@
+{
+  "name": "atem-media-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pi-side service that refills the ATEM Mini Pro media pool from disk on boot",
+  "main": "bridge.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "atem-connection": "^3.5.0",
+    "sharp": "^0.33.0",
+    "yaml": "^2.4.0"
+  },
+  "scripts": {
+    "start": "node bridge.js"
+  },
+  "license": "MIT"
+}

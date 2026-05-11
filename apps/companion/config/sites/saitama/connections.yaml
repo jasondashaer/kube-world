@@ -1,0 +1,72 @@
+# Saitama site — Companion connection definitions.
+#
+# All gear lives on the UniFi AV VLAN: 10.1.1.0/24.
+# Pi (msn-saitama) reaches every device directly — no chained routers.
+#
+# Credentials use ${VAR} placeholders. Real values come from /etc/default/companion
+# on msn-saitama (loaded by the systemd EnvironmentFile) when running under the
+# vanilla CompanionPi pipeline. For local dev, `source .env.saitama` first.
+# A missing env var stays as the literal `${VAR}` string so operators see it
+# in the Companion UI rather than a silent empty substitution.
+
+meta:
+  companion_version: "4.2"
+
+connections:
+  # Yamaha TF1 — primary mixer at Saitama.
+  # keepAlive ON so module detects unreachable mixer within ~10 s
+  # instead of waiting for OS-level TCP timeout (default ~2 hours).
+  # The module sends `devstatus runmode` every kaInterval seconds and
+  # also pushes `scpmode keepalive 10000` (10 s) to the TF1 itself.
+  - id: yamaha_saitama
+    module: "yamaha-rcp"
+    label: "Yamaha TF1 (Saitama)"
+    enabled: true
+    config:
+      host: "10.1.1.176"
+      model: "TF"
+      keepAlive: true
+      kaInterval: 10
+
+  # ATEM Mini Pro — primary switcher + recorder/streamer at Saitama.
+  # Replaces both OBS and Blackmagic HyperDeck plans (both removed 2026-05-10).
+  - id: atem_saitama
+    module: "bmd-atem"
+    label: "ATEM Mini Pro (Saitama)"
+    enabled: true
+    config:
+      host: "10.1.1.179"
+
+  # ProPresenter 7 v21.3 — Saitama. Mac sits on the management vnet
+  # (10.0.1.0/24); UniFi inter-VLAN rules let the Pi (10.1.1.175 on AV)
+  # reach it on port 53678.
+  #
+  # Module: `renewedvision-propresenter-api` (v1.0.5+) — talks ProP 7's
+  # Network REST/WS API at /v1/* paths. ProP 7 v21+ dropped the legacy
+  # /remote WebSocket endpoint that the older `renewedvision-propresenter`
+  # (v3.0.2) module used, so the new module is mandatory here. No
+  # password field — ProP Network API is unauthenticated by default;
+  # set "Network Restrictions" inside ProP if you need to lock it down.
+  - id: propresenter_saitama
+    module: "renewedvision-propresenter-api"
+    label: "ProPresenter (Saitama)"
+    enabled: true
+    config:
+      host: "10.0.1.105"
+      port: "53678"
+      timeout: "1000"
+
+  # Spotify removed 2026-05-10 — module not installed on msn-saitama and
+  # not yet wired to any Saitama page (Shutdown previously called pause).
+  # Re-add via `bitfocus-spotify-premium` after installing the module.
+
+  # ATEM media bridge — local HTTP wrapper around atem-connection's
+  # uploadStill so Companion can refresh the ATEM media pool on demand.
+  # The bridge is the systemd unit `atem-media-bridge` running on this
+  # same Pi (apps/atem-media-bridge/). Bridge listens on 127.0.0.1:9991.
+  - id: atem_media_bridge
+    module: "generic-http"
+    label: "ATEM Media Bridge (local)"
+    enabled: true
+    config:
+      prefix: "http://127.0.0.1:9991"

@@ -1,0 +1,23 @@
+# atem-media-bridge slot mapping — sample
+#
+# Lives at /etc/atem-media-bridge/slots.yaml on msn-saitama.
+# Edit to match your actual graphics + slot layout, then:
+#   sudo systemctl restart atem-media-bridge
+#
+# All `file:` paths resolve against /opt/atem-media/.
+# Filename convention: NN-name.png where NN matches the slot index
+# (zero-padded). Helps the human eye match config to disk at a glance.
+
+atem_host: 10.1.1.179
+
+# ATEM Mini Pro: 20 still slots (index 0-19), 2 media players.
+# Companion picks a slot via mediaPlayerSource.source_still and brings
+# it on air via program with the matching media-player input id.
+slots:
+  # `index` is the atem-connection 0-indexed slot. ATEM Software
+  # Control labels them 1-indexed (this `index: 0` shows as slot 01 in
+  # the ATEM UI). Companion's `mediaPlayerSource.source: "still1"`
+  # also targets API index 0.
+  - index: 0
+    name: "Mustard Seed Logo"
+    file: 01-mustard-seed-logo.jpg

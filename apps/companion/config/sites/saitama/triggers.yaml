@@ -1,0 +1,283 @@
+# Saitama site — Companion triggers.
+#
+# Pre-service choreography is two-step around the ProPresenter video
+# countdown timer (clock 0):
+#
+#   T-60s : load Mustard Seed graphic onto ATEM MP1, FTB, start stream,
+#           FTB-back. Audience tuning in sees graphic via stream.
+#   T-15s : FTB, start record + unmute mixer record bus, switch program
+#           to HDMI 1 (camera), FTB-back. Service goes "Live".
+#
+# Two paths fire each event:
+#   1. Natural threshold cross — PP timer crosses the threshold value
+#      (`= "00:01:00"` etc.) AND ARM gate AND step-counter matches.
+#   2. Operator skip — pressing the SVC START / SKIP pad twice within
+#      5 s pulses `skip_now=1`. Skip-* triggers below fire the same
+#      actions immediately and advance the step counter.
+#
+# The step counter (`internal:custom_next_event_step`) gates each
+# trigger so the natural-cross trigger won't double-fire if the
+# operator already skipped past it. Counter values:
+#   0 = idle (not armed)
+#   1 = armed, pre-stream
+#   2 = streamed, pre-camera
+#   3 = live
+#
+# Variable label sanitization: "ProPresenter (Saitama)" →
+# "ProPresenter__Saitama_". Timer reference =
+# $(ProPresenter__Saitama_:video_countdown_timer).
+#
+# FTB pacing: bmd-atem fadeToBlackAuto runs at the ATEM-configured FTB
+# rate (default ~25 frames). 1500 ms internal:wait between FTB and the
+# next action gives the fade time to complete. Tune the wait if the
+# Saitama ATEM is set to a different rate.
+#
+# All ARM-gated triggers ship DISABLED. Enable per-trigger after a
+# walkthrough with mixer + ATEM connected and the Mustard Seed logo
+# uploaded to ATEM still slot 1 by atem-media-bridge.
+
+triggers:
+  # ═══════════════════════════════════════════
+  # SYSTEM TRIGGERS (always active)
+  # ═══════════════════════════════════════════
+
+  - name: "Startup: Set service mode"
+    enabled: true
+    sort_order: 0
+    events:
+      - type: startup
+        options: { delay: 5000 }
+    actions:
+      - action: internal:custom_variable_set_value
+        options: { name: "service_mode", value: "Ready" }
+      - action: internal:custom_variable_set_value
+        options: { name: "service_armed", value: "0" }
+      - action: internal:custom_variable_set_value
+        options: { name: "close_stage", value: "Idle" }
+      - action: internal:custom_variable_set_value
+        options: { name: "next_event_step", value: "0" }
+      - action: internal:custom_variable_set_value
+        options: { name: "next_event_label", value: "SVC START" }
+      - action: internal:custom_variable_set_value
+        options: { name: "skip_now", value: "0" }
+
+  # ═══════════════════════════════════════════
+  # PRE-SERVICE FLOW (ARM-gated, threshold-driven)
+  # ═══════════════════════════════════════════
+
+  # T-60s: graphic on air → FTB → start stream → FTB back (graphic shown)
+  - name: "Saitama Pre-Service: Stream goes live at 1min"
+    enabled: false
+    sort_order: 10
+    events:
+      - type: condition_true
+        options: {}
+    conditions:
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "internal:custom_service_armed"
+          value: "1"
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "internal:custom_next_event_step"
+          value: "1"
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "ProPresenter__Saitama_:video_countdown_timer"
+          value: "00:01:00"
+    actions:
+      - action: atem_saitama:mediaPlayerSource
+        options: { mediaplayer: 0, source: "still1" }
+      - action: atem_saitama:program
+        options: { input: 3010, mixeffect: 0 }
+      - action: atem_saitama:fadeToBlackAuto
+        options: { mixeffect: 0 }
+      - action: internal:wait
+        options: { time: "1500" }
+      - action: atem_saitama:streamStartStop
+        options: { stream: "true" }
+      - action: internal:wait
+        options: { time: "500" }
+      - action: atem_saitama:fadeToBlackAuto
+        options: { mixeffect: 0 }
+      - action: internal:custom_variable_set_value
+        options: { name: "service_mode", value: "Pre-Service" }
+      - action: internal:custom_variable_set_value
+        options: { name: "next_event_step", value: "2" }
+      - action: internal:custom_variable_set_value
+        options: { name: "next_event_label", value: "Camera" }
+
+  # T-15s: FTB → start record + unmute record bus → swap to HDMI 1 → FTB back
+  - name: "Saitama Pre-Service: Go to camera + record at 15s"
+    enabled: false
+    sort_order: 11
+    events:
+      - type: condition_true
+        options: {}
+    conditions:
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "internal:custom_service_armed"
+          value: "1"
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "internal:custom_next_event_step"
+          value: "2"
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "ProPresenter__Saitama_:video_countdown_timer"
+          value: "00:00:15"
+    actions:
+      - action: atem_saitama:fadeToBlackAuto
+        options: { mixeffect: 0 }
+      - action: internal:wait
+        options: { time: "1500" }
+      - action: yamaha_saitama:MIXER_Current/Mix/Fader/On
+        options: { X: "$(internal:custom_record_bus_idx)", Val: 1 }
+      - action: atem_saitama:recordStartStop
+        options: { record: "true" }
+      - action: atem_saitama:program
+        options: { input: 1, mixeffect: 0 }
+      - action: internal:wait
+        options: { time: "500" }
+      - action: atem_saitama:fadeToBlackAuto
+        options: { mixeffect: 0 }
+      - action: internal:custom_variable_set_value
+        options: { name: "service_mode", value: "Live" }
+      - action: internal:custom_variable_set_value
+        options: { name: "service_armed", value: "0" }
+      - action: internal:custom_variable_set_value
+        options: { name: "next_event_step", value: "3" }
+      - action: internal:custom_variable_set_value
+        options: { name: "next_event_label", value: "Live" }
+
+  # ═══════════════════════════════════════════
+  # SKIP TRIGGERS (operator-driven, fire immediately on skip_now=1)
+  # ═══════════════════════════════════════════
+  # Each watches `skip_now=1` AND a specific `next_event_step` value
+  # so the right block fires regardless of where in the chain we are.
+
+  # Skip from idle → arm + start PP clock + advance to step 1.
+  - name: "Saitama Skip: Arm service from idle"
+    enabled: true
+    sort_order: 20
+    events:
+      - type: condition_true
+        options: {}
+    conditions:
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "internal:custom_skip_now"
+          value: "1"
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "internal:custom_next_event_step"
+          value: "0"
+    actions:
+      - action: internal:custom_variable_set_value
+        options: { name: "service_armed", value: "1" }
+      # Start the timer the SUN AM / THU PM preset selected. The new
+      # propresenter-api module's timerOperation accepts the timer's
+      # name as a free-text id; the callback resolves it against PP's
+      # live timer list (matches by uuid, name, or numeric index).
+      - action: propresenter_saitama:timerOperation
+        options:
+          timer_id_dropdown: "manually_specify_timerid"
+          timer_id_text: "$(internal:custom_active_timer_name)"
+          timer_operation: "start"
+      - action: internal:custom_variable_set_value
+        options: { name: "service_mode", value: "Armed" }
+      - action: internal:custom_variable_set_value
+        options: { name: "next_event_step", value: "1" }
+      - action: internal:custom_variable_set_value
+        options: { name: "next_event_label", value: "Stream" }
+
+  # Skip pre-stream → fire T-60 actions immediately.
+  - name: "Saitama Skip: Fire stream-start now"
+    enabled: false
+    sort_order: 21
+    events:
+      - type: condition_true
+        options: {}
+    conditions:
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "internal:custom_skip_now"
+          value: "1"
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "internal:custom_next_event_step"
+          value: "1"
+    actions:
+      - action: atem_saitama:mediaPlayerSource
+        options: { mediaplayer: 0, source: "still1" }
+      - action: atem_saitama:program
+        options: { input: 3010, mixeffect: 0 }
+      - action: atem_saitama:fadeToBlackAuto
+        options: { mixeffect: 0 }
+      - action: internal:wait
+        options: { time: "1500" }
+      - action: atem_saitama:streamStartStop
+        options: { stream: "true" }
+      - action: internal:wait
+        options: { time: "500" }
+      - action: atem_saitama:fadeToBlackAuto
+        options: { mixeffect: 0 }
+      - action: internal:custom_variable_set_value
+        options: { name: "service_mode", value: "Pre-Service" }
+      - action: internal:custom_variable_set_value
+        options: { name: "next_event_step", value: "2" }
+      - action: internal:custom_variable_set_value
+        options: { name: "next_event_label", value: "Camera" }
+
+  # Skip pre-camera → fire T-15 actions immediately.
+  - name: "Saitama Skip: Fire camera + record now"
+    enabled: false
+    sort_order: 22
+    events:
+      - type: condition_true
+        options: {}
+    conditions:
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "internal:custom_skip_now"
+          value: "1"
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "internal:custom_next_event_step"
+          value: "2"
+    actions:
+      - action: atem_saitama:fadeToBlackAuto
+        options: { mixeffect: 0 }
+      - action: internal:wait
+        options: { time: "1500" }
+      - action: yamaha_saitama:MIXER_Current/Mix/Fader/On
+        options: { X: "$(internal:custom_record_bus_idx)", Val: 1 }
+      - action: atem_saitama:recordStartStop
+        options: { record: "true" }
+      - action: atem_saitama:program
+        options: { input: 1, mixeffect: 0 }
+      - action: internal:wait
+        options: { time: "500" }
+      - action: atem_saitama:fadeToBlackAuto
+        options: { mixeffect: 0 }
+      - action: internal:custom_variable_set_value
+        options: { name: "service_mode", value: "Live" }
+      - action: internal:custom_variable_set_value
+        options: { name: "service_armed", value: "0" }
+      - action: internal:custom_variable_set_value
+        options: { name: "next_event_step", value: "3" }
+      - action: internal:custom_variable_set_value
+        options: { name: "next_event_label", value: "Live" }

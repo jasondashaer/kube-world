@@ -1,0 +1,31 @@
+[Unit]
+Description=ATEM media-pool refill from local disk (msn-saitama)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=atem-media-bridge
+Group=atem-media-bridge
+WorkingDirectory=/opt/atem-media-bridge
+ExecStart=/opt/atem-media-bridge/run.sh
+EnvironmentFile=-/etc/default/atem-media-bridge
+StandardOutput=journal
+StandardError=journal
+
+# Retry on failure for ~5 min covering boot-order races
+# (ATEM not yet on the LAN when the Pi comes up).
+Restart=on-failure
+RestartSec=30
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/atem-media-bridge
+
+[Install]
+WantedBy=multi-user.target

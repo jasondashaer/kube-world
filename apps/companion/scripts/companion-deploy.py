@@ -78,15 +78,18 @@ def load_yaml_configs():
     site = os.environ.get("COMPANION_SITE", "").strip().lower()
 
     yaml_files = set()
-    if site:
-        site_root = os.path.join(CONFIG_DIR, "sites", site)
-        if not os.path.isdir(site_root):
-            print(f"COMPANION_SITE={site} but {site_root} not found", file=sys.stderr)
-            sys.exit(2)
+    site_root = os.path.join(CONFIG_DIR, "sites", site) if site else None
+    if site and os.path.isdir(site_root):
+        # Site has its own bundle — load only that subtree.
         yaml_files.update(glob.glob(os.path.join(site_root, "**/*.yaml"), recursive=True))
         yaml_files.update(glob.glob(os.path.join(site_root, "*.yaml")))
     else:
-        # Legacy: walk everything except per-site bundles
+        # Legacy: walk top-level config + nested page subdirs, but
+        # skip the per-site bundles under config/sites/* so a site
+        # filter applied to surfaces.yaml doesn't drag in another
+        # site's connections. This is the path Edge1 takes today
+        # (COMPANION_SITE=yibc but config/sites/yibc/ does not exist
+        # — YIBC bits still live at the top level).
         all_yaml = set(glob.glob(os.path.join(CONFIG_DIR, "**/*.yaml"), recursive=True))
         all_yaml.update(glob.glob(os.path.join(CONFIG_DIR, "*.yaml")))
         sites_prefix = os.path.normpath(os.path.join(CONFIG_DIR, "sites")) + os.sep

@@ -27,6 +27,8 @@ configMapGenerator:
   - name: companion-config
     namespace: companion
     files:
+      # YIBC bundle only. Saitama lives under config/sites/saitama/ and
+      # is deployed independently (no Flux); see scripts/deploy-saitama.sh.
       - config/connections.yaml
       - config/variables.yaml
       - config/surfaces.yaml
@@ -35,11 +37,6 @@ configMapGenerator:
       - config/pages/yibc/mk2-page03-messages.yaml
       - config/pages/yibc/plus-page01-ptz.yaml
       - config/pages/yibc/plus-page02-dpad.yaml
-      - config/pages/saitama/xl-page01-home.yaml
-      - config/pages/saitama/xl-page02-audio.yaml
-      - config/pages/saitama/xl-page03-slides.yaml
-      - config/pages/saitama/xl-page04-stream.yaml
-      - config/pages/saitama/xl-page05-segments.yaml
     options:
       labels:
         app.kubernetes.io/name: companion-config

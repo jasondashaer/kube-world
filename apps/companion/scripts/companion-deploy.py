@@ -58,7 +58,15 @@ OUTPUT_FILE = os.environ.get(
 
 
 def load_yaml_configs():
-    """Load all YAML config files from the config directory."""
+    """Load all YAML config files from the config directory.
+
+    Site-aware loading via COMPANION_SITE env (or --site flag set by main()):
+      - COMPANION_SITE=saitama → only walk config/sites/saitama/**/*.yaml
+      - COMPANION_SITE=yibc    → only walk config/sites/yibc/**/*.yaml
+      - unset (legacy / Edge1 Job) → walk config/**/*.yaml but skip
+        config/sites/* subtrees so per-site bundles don't merge into the
+        Edge1 GitOps import.
+    """
     config = {
         "connections": {},
         "pages": {},
@@ -67,11 +75,23 @@ def load_yaml_configs():
         "parameters": {},
     }
 
-    # Collect YAML files from both nested layout (local dev) and flat layout (in-cluster Job).
-    # ConfigMap volumes flatten the directory structure — files end up in CONFIG_DIR root.
+    site = os.environ.get("COMPANION_SITE", "").strip().lower()
+
     yaml_files = set()
-    yaml_files.update(glob.glob(os.path.join(CONFIG_DIR, "**/*.yaml"), recursive=True))
-    yaml_files.update(glob.glob(os.path.join(CONFIG_DIR, "*.yaml")))
+    if site:
+        site_root = os.path.join(CONFIG_DIR, "sites", site)
+        if not os.path.isdir(site_root):
+            print(f"COMPANION_SITE={site} but {site_root} not found", file=sys.stderr)
+            sys.exit(2)
+        yaml_files.update(glob.glob(os.path.join(site_root, "**/*.yaml"), recursive=True))
+        yaml_files.update(glob.glob(os.path.join(site_root, "*.yaml")))
+    else:
+        # Legacy: walk everything except per-site bundles
+        all_yaml = set(glob.glob(os.path.join(CONFIG_DIR, "**/*.yaml"), recursive=True))
+        all_yaml.update(glob.glob(os.path.join(CONFIG_DIR, "*.yaml")))
+        sites_prefix = os.path.normpath(os.path.join(CONFIG_DIR, "sites")) + os.sep
+        yaml_files = {p for p in all_yaml if not os.path.normpath(p).startswith(sites_prefix)}
+
     for yaml_file in sorted(yaml_files):
         with open(yaml_file) as f:
             data = yaml.safe_load(f)
@@ -177,14 +197,30 @@ def yaml_to_companionconfig(yaml_config):
         chars = string.ascii_letters + string.digits + "-_"
         return "".join(random.choices(chars, k=21))
 
-    # Convert connections to instances
+    # Convert connections to instances.
+    # Companion regenerates connection IDs on every import (the value we
+    # provide as the dict key is replaced with a fresh runtime nanoid).
+    # That breaks any entity option that references a connection by id
+    # (e.g. internal:instance_custom_state.options.instance_id) — the
+    # value would still point at our YAML id, not the new runtime id.
+    # Workaround: we generate our OWN nanoid per YAML connection here,
+    # use it as the dict key, and emit it everywhere the YAML refers to
+    # the connection (action prefixes, feedback prefixes, instance_id
+    # options). Companion still regenerates on import, but it walks
+    # entity `connectionId` fields and rewrites them in lockstep — so
+    # by the time the runtime stabilizes, our nanoid in the option
+    # values has been remapped to whatever Companion picked. This is
+    # the same trick the web UI relies on.
+    yaml_id_to_runtime = {}
     connections = yaml_config.get("connections", {})
     if isinstance(connections, dict) and "connections" in connections:
         for conn in connections["connections"]:
             if not conn.get("enabled", True):
                 continue
-            conn_id = conn["id"]
-            companion["instances"][conn_id] = {
+            yaml_id = conn["id"]
+            runtime_id = make_id()
+            yaml_id_to_runtime[yaml_id] = runtime_id
+            companion["instances"][runtime_id] = {
                 "moduleInstanceType": "connection",
                 "instance_type": conn["module"],
                 "moduleVersionId": conn.get("version"),
@@ -196,6 +232,35 @@ def yaml_to_companionconfig(yaml_config):
                 "lastUpgradeIndex": conn.get("upgrade_index", -1),
                 "enabled": True,
             }
+
+    def _resolve_conn(yaml_id):
+        """yaml conn id → runtime nanoid (passthrough if unknown)."""
+        return yaml_id_to_runtime.get(yaml_id, yaml_id)
+
+    # Option keys that are documented to hold a connection id reference.
+    # Walked + remapped before each entity's options are emitted so
+    # internal feedbacks like instance_custom_state actually match the
+    # runtime nanoid we generated for the connection above.
+    _CONN_REF_OPTION_KEYS = {"instance_id", "instanceId", "connection_id", "connectionId"}
+
+    def _remap_options(opts):
+        """Return a copy of `opts` with conn-ref keys translated."""
+        if not isinstance(opts, dict):
+            return opts
+        out = {}
+        for k, v in opts.items():
+            if k in _CONN_REF_OPTION_KEYS and isinstance(v, str):
+                out[k] = _resolve_conn(v)
+            else:
+                out[k] = v
+        return out
+
+    def _split_action_ref(ref):
+        """yaml 'conn:def_id' → (connectionId nanoid, definitionId)."""
+        if ":" in ref:
+            yaml_conn, def_id = ref.split(":", 1)
+            return _resolve_conn(yaml_conn), def_id
+        return "", ref
 
     # Convert pages
     for page_key, page_data in yaml_config.get("pages", {}).items():
@@ -251,16 +316,17 @@ def yaml_to_companionconfig(yaml_config):
                     }
                     for event, action_list in step_actions.items():
                         event_key = {"down": "down", "up": "up", "long_press": "2000", "double_press": "dbl"}.get(event, event)
-                        control["steps"][step_key]["action_sets"][event_key] = [
-                            {
+                        emitted = []
+                        for a in (action_list or []):
+                            conn_id, def_id = _split_action_ref(a.get("action", ""))
+                            emitted.append({
                                 "id": make_id(),
                                 "type": "action",
-                                "connectionId": a.get("action", "").split(":")[0] if ":" in a.get("action", "") else "",
-                                "definitionId": a.get("action", "").split(":")[-1] if ":" in a.get("action", "") else a.get("action", ""),
-                                "options": a.get("options", {}),
-                            }
-                            for j, a in enumerate(action_list or [])
-                        ]
+                                "connectionId": conn_id,
+                                "definitionId": def_id,
+                                "options": _remap_options(a.get("options", {})),
+                            })
+                        control["steps"][step_key]["action_sets"][event_key] = emitted
             else:
                 # Single-step button
                 control["steps"]["0"] = {
@@ -269,16 +335,17 @@ def yaml_to_companionconfig(yaml_config):
                 }
                 for event, action_list in actions.items():
                     event_key = {"down": "down", "up": "up", "long_press": "2000", "double_press": "dbl", "rotate_cw": "rotate_cw", "rotate_ccw": "rotate_ccw"}.get(event, event)
-                    control["steps"]["0"]["action_sets"][event_key] = [
-                        {
+                    emitted = []
+                    for a in (action_list or []):
+                        conn_id, def_id = _split_action_ref(a.get("action", ""))
+                        emitted.append({
                             "id": make_id(),
                             "type": "action",
-                            "connectionId": a.get("action", "").split(":")[0] if ":" in a.get("action", "") else "",
-                            "definitionId": a.get("action", "").split(":")[-1] if ":" in a.get("action", "") else a.get("action", ""),
-                            "options": a.get("options", {}),
-                        }
-                        for j, a in enumerate(action_list or [])
-                    ]
+                            "connectionId": conn_id,
+                            "definitionId": def_id,
+                            "options": _remap_options(a.get("options", {})),
+                        })
+                    control["steps"]["0"]["action_sets"][event_key] = emitted
 
             # Feedbacks
             for fb in button.get("feedbacks", []):
@@ -293,13 +360,20 @@ def yaml_to_companionconfig(yaml_config):
                     compiled_style["alignment"] = fb_style.get("alignment", "center:center")
                     compiled_style["show_topbar"] = fb_style.get("show_topbar", "default")
 
+                fb_conn, fb_def = _split_action_ref(fb.get("type", ""))
                 feedback = {
                     "id": make_id(),
                     "type": "feedback",
-                    "connectionId": fb.get("type", "").split(":")[0] if ":" in fb.get("type", "") else "",
-                    "definitionId": fb.get("type", "").split(":")[-1] if ":" in fb.get("type", "") else fb.get("type", ""),
-                    "options": fb.get("options", {}),
+                    "connectionId": fb_conn,
+                    "definitionId": fb_def,
+                    "options": _remap_options(fb.get("options", {})),
                     "style": compiled_style,
+                    # Pin entity at the latest module upgradeIndex so module
+                    # upgrade scripts (e.g. bmd-atem's 0->1-indexed mixeffect
+                    # rewrite that wraps "1" into "1 + 1") don't mangle our
+                    # already-current-form options on import. Per-module
+                    # override via fb.upgrade_index.
+                    "upgradeIndex": fb.get("upgrade_index", 9999),
                 }
                 control["feedbacks"].append(feedback)
 
@@ -356,16 +430,17 @@ def yaml_to_companionconfig(yaml_config):
             }
             for yaml_event, action_list in enc_actions.items():
                 event_key = action_map.get(yaml_event, yaml_event)
-                control["steps"]["0"]["action_sets"][event_key] = [
-                    {
+                emitted = []
+                for a in (action_list or []):
+                    conn_id, def_id = _split_action_ref(a.get("action", ""))
+                    emitted.append({
                         "id": make_id(),
                         "type": "action",
-                        "connectionId": a.get("action", "").split(":")[0] if ":" in a.get("action", "") else "",
-                        "definitionId": a.get("action", "").split(":")[-1] if ":" in a.get("action", "") else a.get("action", ""),
-                        "options": a.get("options", {}),
-                    }
-                    for a in (action_list or [])
-                ]
+                        "connectionId": conn_id,
+                        "definitionId": def_id,
+                        "options": _remap_options(a.get("options", {})),
+                    })
+                control["steps"]["0"]["action_sets"][event_key] = emitted
 
             # Encoder feedbacks
             for fb in enc.get("feedbacks", []):
@@ -378,11 +453,12 @@ def yaml_to_companionconfig(yaml_config):
                     compiled_style["bgcolor"] = int(fb_style["bgcolor"].lstrip("#"), 16) if isinstance(fb_style.get("bgcolor"), str) else fb_style.get("bgcolor", 0)
                     compiled_style["alignment"] = fb_style.get("alignment", "center:center")
                     compiled_style["show_topbar"] = fb_style.get("show_topbar", "default")
+                fb_conn, fb_def = _split_action_ref(fb.get("type", ""))
                 control["feedbacks"].append({
                     "id": make_id(),
-                    "connectionId": fb.get("type", "").split(":")[0] if ":" in fb.get("type", "") else "",
-                    "definitionId": fb.get("type", "").split(":")[-1] if ":" in fb.get("type", "") else fb.get("type", ""),
-                    "options": fb.get("options", {}),
+                    "connectionId": fb_conn,
+                    "definitionId": fb_def,
+                    "options": _remap_options(fb.get("options", {})),
                     "style": compiled_style,
                 })
 
@@ -427,23 +503,25 @@ def yaml_to_companionconfig(yaml_config):
 
         # Conditions (feedback entities that gate the trigger)
         for cond in trigger_data.get("conditions", []):
+            cond_conn, cond_def = _split_action_ref(cond.get("type", ""))
             trigger["condition"].append({
                 "id": make_id(),
                 "type": "feedback",
-                "connectionId": cond.get("type", "").split(":")[0] if ":" in cond.get("type", "") else "",
-                "definitionId": cond.get("type", "").split(":")[-1] if ":" in cond.get("type", "") else cond.get("type", ""),
-                "options": cond.get("options", {}),
+                "connectionId": cond_conn,
+                "definitionId": cond_def,
+                "options": _remap_options(cond.get("options", {})),
                 "style": {},
             })
 
         # Actions
         for action in trigger_data.get("actions", []):
+            act_conn, act_def = _split_action_ref(action.get("action", ""))
             trigger["actions"].append({
                 "id": make_id(),
                 "type": "action",
-                "connectionId": action.get("action", "").split(":")[0] if ":" in action.get("action", "") else "",
-                "definitionId": action.get("action", "").split(":")[-1] if ":" in action.get("action", "") else action.get("action", ""),
-                "options": action.get("options", {}),
+                "connectionId": act_conn,
+                "definitionId": act_def,
+                "options": _remap_options(action.get("options", {})),
             })
 
         companion["triggers"][trigger_id] = trigger
@@ -465,13 +543,28 @@ def _site_filter():
     return s or None
 
 
+def _surfaces_yaml_path():
+    """Resolve surfaces.yaml location.
+
+    With COMPANION_SITE set, prefer config/sites/<SITE>/surfaces.yaml so
+    the per-site bundle is self-contained. Falls back to top-level
+    config/surfaces.yaml for legacy/Edge1 layout.
+    """
+    site = _site_filter()
+    if site:
+        per_site = os.path.join(CONFIG_DIR, "sites", site, "surfaces.yaml")
+        if os.path.exists(per_site):
+            return per_site
+    return os.path.join(CONFIG_DIR, "surfaces.yaml")
+
+
 def _load_surface_page_map():
     """Load surface-to-page assignments from surfaces.yaml.
 
     Filters by COMPANION_SITE env if set — only returns entries whose
     `site` field matches.
     """
-    surfaces_file = os.path.join(CONFIG_DIR, "surfaces.yaml")
+    surfaces_file = _surfaces_yaml_path()
     if not os.path.exists(surfaces_file):
         return {}
     with open(surfaces_file) as f:
@@ -497,7 +590,7 @@ def _load_surface_outbound_list():
     name, group_id}. Used by import_config to auto-add missing outbound
     entries against a fresh-PVC Companion.
     """
-    surfaces_file = os.path.join(CONFIG_DIR, "surfaces.yaml")
+    surfaces_file = _surfaces_yaml_path()
     if not os.path.exists(surfaces_file):
         return []
     with open(surfaces_file) as f:
@@ -943,6 +1036,12 @@ def import_config(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Companion Config Deployer")
+    parser.add_argument(
+        "--site",
+        default=None,
+        help="Restrict load to config/sites/<site>/. Sets COMPANION_SITE env "
+             "for the rest of the run. Without this, legacy non-site files load.",
+    )
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("generate", help="Generate .companionconfig from YAML")
@@ -955,6 +1054,8 @@ if __name__ == "__main__":
     imp.add_argument("--file", default=None, help="Path to .companionconfig file (default: generated output)")
 
     args = parser.parse_args()
+    if args.site:
+        os.environ["COMPANION_SITE"] = args.site
     if args.command == "generate":
         generate(args)
     elif args.command == "export":

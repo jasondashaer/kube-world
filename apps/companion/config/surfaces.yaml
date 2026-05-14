@@ -1,31 +1,9 @@
-# Surface registry — Stream Deck network module addresses + startup pages.
-#
-# Each entry is per-deck. The `site` field segments which Companion
-# instance owns this surface. companion-deploy.py + seed-export.py
-# filter by COMPANION_SITE env (or --site flag). Without filtering,
-# all entries would propagate to every Companion → outbound add of
-# wrong-LAN IPs.
-#
-# Address format: LAN IP of the Stream Deck Network Module on the
-# physical site's LAN. When a Stream Deck is moved between LANs (e.g.
-# YIBC test → Saitama production), update the address to match the
-# new subnet's DHCP/reservation, then re-import.
-#
-# Subnets:
-#   YIBC LAN     : 192.168.1.0/24 (Stream Deck Modules at .41, .42, .43
-#                                 historically; .41 has moved to Saitama)
-#   Saitama LAN  : 10.1.1.0/24    (UniFi UCG-Fiber, AV VLAN — production gear,
-#                                  Stream Deck Network Dock + XL reside here.
-#                                  Default 10.0.0.0/24 is infra/management only.)
+# Surface registry — YIBC bundle.
+# Saitama XL surface lives in config/sites/saitama/surfaces.yaml.
+# Address = Stream Deck Network Module LAN IP. Update when DHCP shifts.
+# YIBC LAN: 192.168.1.0/24.
 
 surfaces:
-  - group_id: "streamdeck:A00NA53835A5F1"
-    site: saitama
-    name: "Stream Deck XL"
-    address: "10.1.1.110"           # Saitama AV VLAN — Stream Deck Network Dock (XL pass-through)
-    port: 5343
-    startup_page: 40
-
   - group_id: "streamdeck:A00WA5241MWHZB"
     site: yibc
     name: "Stream Deck+"

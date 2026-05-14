@@ -1,20 +1,15 @@
-# Companion Connection Definitions
+# Companion Connection Definitions — YIBC bundle.
 #
-# Both YIBC and Saitama instances defined simultaneously.
-# At each location, only the local connections will succeed —
-# the others will show as disconnected. This is expected.
+# This is the YIBC-only top-level bundle, consumed by the Edge1 Flux/Karmada
+# pipeline (companion-deploy Job in-cluster). Saitama lives independently
+# under config/sites/saitama/ and is deployed direct from a workstation
+# via SSH+tRPC to msn-saitama (no Flux). See scripts/deploy-saitama.sh.
 #
-# Credentials in this file MUST be `${VAR}` placeholders. Real values
-# come from environment at deploy time:
-#   - K3s mode: SealedSecret → K8s Secret → companion-deploy Pod env vars
-#   - Vanilla mode: /etc/default/companion (loaded by systemd EnvironmentFile)
-#   - Local dev: `source <site>/.env` before running companion-deploy.py
-# See docs/companion/guides/secrets-and-credentials.md for setup.
-#
-# A missing env var is left as the literal `${VAR}` string in the
-# generated Companion config — operators will see the placeholder in
-# the web UI and can fix it. We refuse to silently substitute empty
-# values, which would corrupt connections without warning.
+# Credentials use `${VAR}` placeholders. Values come from:
+#   - Edge1: SealedSecret → K8s Secret → companion-deploy Pod env vars
+#   - Local dev: `source .env.yibc` before running companion-deploy.py
+# A missing env var stays as the literal `${VAR}` string so operators
+# notice it in the Companion UI rather than getting silent empty subs.
 
 meta:
   companion_version: "4.2"
@@ -124,52 +119,6 @@ connections:
       certBool: false       # flips true after pairing
       retryDuration: 6
 
-  # ═══════════════════════════════════════════
-  # Saitama connections (used by XL)
-  # ═══════════════════════════════════════════
-
-  # Yamaha TF1 — Saitama
-  - id: yamaha_saitama
-    module: "yamaha-rcp"
-    label: "Yamaha TF1 (Saitama)"
-    enabled: true
-    config:
-      host: "192.168.10.30"
-      model: "TF"
-
-  # ProPresenter 7 v21.3 — Saitama
-  - id: propresenter_saitama
-    module: "renewedvision-propresenter"
-    label: "ProPresenter (Saitama)"
-    enabled: true
-    config:
-      host: "192.168.68.55"
-      port: "53678"
-      pass: "${PROPRESENTER_PASSWORD_SAITAMA}"   # env-injected
-      use_sd: "yes"
-      sdpass: ""
-      sendPresentationCurrentMsgs: "disabled"
-      timerPolling: "enabled"
-
-  # No OBS at Saitama — streaming there is ATEM-driven, no OBS host.
-  # (Removed 2026-05-09. obs_saitama connection deleted; if added back,
-  # use module: obs-studio with config.pass not config.password.)
-
-  # ATEM switcher — Saitama. No password on the protocol itself.
-  - id: atem_saitama
-    module: "bmd-atem"
-    label: "ATEM (Saitama)"
-    enabled: true
-    config:
-      host: "192.168.10.40"
-
-  # Spotify — Saitama (separate account from YIBC).
-  - id: spotify_saitama
-    module: "bitfocus-spotify-premium"
-    label: "Spotify (Saitama)"
-    enabled: true
-    config:
-      clientId: "${SPOTIFY_CLIENT_ID_SAITAMA}"    # env-injected
-      clientSecret: "${SPOTIFY_CLIENT_SECRET_SAITAMA}" # env-injected
-
-  # Future: ATEM YIBC, Blackmagic HyperDeck recorder
+  # Saitama connections moved to config/sites/saitama/connections.yaml
+  # (split 2026-05-10). Edit them there; do not re-add Saitama entries
+  # here or the Edge1 Companion will pick up disconnected duplicates.

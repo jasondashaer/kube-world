@@ -1,0 +1,22 @@
+# Surface registry — YIBC bundle.
+# Saitama XL surface lives in config/sites/saitama/surfaces.yaml.
+# Address = Stream Deck Network Module LAN IP. Update when DHCP shifts.
+# YIBC LAN: 192.168.1.0/24.
+
+surfaces:
+  - group_id: "streamdeck:A00WA5241MWHZB"
+    site: yibc
+    name: "Stream Deck+"
+    address: "192.168.1.42"
+    port: 5343
+    startup_page: 20
+
+  - group_id: "streamdeck:A00SA5432NCLFZ"
+    site: yibc
+    name: "Stream Deck MK2"
+    address: "192.168.1.13"           # YIBC DHCP gave .13 (was .43; address can shift without reservation)
+    port: 5343
+    # MK2 default page = 32 (PP Message numpad). Press → OPS on page
+    # 32 to reach the original ops page (30). Page 30 still exists
+    # for fallback / segment-pad testing.
+    startup_page: 32

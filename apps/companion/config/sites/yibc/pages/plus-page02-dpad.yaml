@@ -1,0 +1,270 @@
+# YIBC — Stream Deck+ Page 21: PTZ D-Pad Control
+# Arrow key layout with preset selector knobs
+#
+# Row 0: [ZOOM-] [ ▲ UP ] [ZOOM+] [Wide]
+# Row 1: [◄LEFT] [▼DOWN ] [RIGHT►] [HOME]
+# LCD:   [PST 0] [PST 1]  [SPD 12] [PAGE]
+# Knobs: [Preset A] [Preset B] [Speed] [Page]
+#
+# E0/E1: Rotate scrolls through presets 0-6, press recalls selected preset
+# This gives quick access to any preset without leaving the d-pad page
+
+page:
+  number: 21
+  name: "D-Pad"
+  device: plus
+
+buttons:
+  # ═══ Row 0 ═══
+  - row: 0
+    col: 0
+    style:
+      text: "ZOOM -\nズーム"
+      bgcolor: "#444444"
+      size: 12
+    actions:
+      down:
+        - action: ptz:zoomO
+      up:
+        - action: ptz:zoomS
+
+  - row: 0
+    col: 1
+    style:
+      text: "▲"
+      bgcolor: "#555555"
+      size: 24
+    actions:
+      down:
+        - action: ptz:up
+      up:
+        - action: ptz:stop
+
+  - row: 0
+    col: 2
+    style:
+      text: "ZOOM +\nズーム"
+      bgcolor: "#555555"
+      size: 12
+    actions:
+      down:
+        - action: ptz:zoomI
+      up:
+        - action: ptz:zoomS
+
+  - row: 0
+    col: 3
+    style:
+      text: "Wide\nワイド"
+      bgcolor: "#004499"
+      size: 14
+    actions:
+      down:
+        - action: ptz:recallPreset
+          options: { isText: false, presetAsNumber: 1 }
+
+  # ═══ Row 1 ═══
+  - row: 1
+    col: 0
+    style:
+      text: "◄"
+      bgcolor: "#555555"
+      size: 24
+    actions:
+      down:
+        - action: ptz:left
+      up:
+        - action: ptz:stop
+
+  - row: 1
+    col: 1
+    style:
+      text: "▼"
+      bgcolor: "#555555"
+      size: 24
+    actions:
+      down:
+        - action: ptz:down
+      up:
+        - action: ptz:stop
+
+  - row: 1
+    col: 2
+    style:
+      text: "►"
+      bgcolor: "#555555"
+      size: 24
+    actions:
+      down:
+        - action: ptz:right
+      up:
+        - action: ptz:stop
+
+  - row: 1
+    col: 3
+    style:
+      text: "HOME\nホーム"
+      bgcolor: "#004499"
+      size: 14
+    actions:
+      down:
+        - action: ptz:home
+
+  # ═══ Row 2: LCD strip — pressable! ═══
+  # Col 0-1: press recalls the selected preset for that knob
+  # Col 3: press advances to next page
+  - row: 2
+    col: 0
+    style:
+      text: "$(internal:custom_preset_name_0)"
+      bgcolor: "#222222"
+      size: 14
+    actions:
+      down:
+        - action: ptz:recallPreset
+          options: { isText: true, presetAsText: "$(internal:custom_preset_sel_0)" }
+
+  - row: 2
+    col: 1
+    style:
+      text: "$(internal:custom_preset_name_1)"
+      bgcolor: "#222222"
+      size: 14
+    actions:
+      down:
+        - action: ptz:recallPreset
+          options: { isText: true, presetAsText: "$(internal:custom_preset_sel_1)" }
+
+  - row: 2
+    col: 2
+    style:
+      text: "SPD $(internal:custom_ptz_speed)"
+      bgcolor: "#222222"
+      size: 14
+
+  - row: 2
+    col: 3
+    style:
+      text: "PAGE ►"
+      bgcolor: "#222222"
+      size: 14
+    actions:
+      down:
+        - action: internal:set_page
+          options: { controller: "self", page: 20 }
+
+encoders:
+  # E0: Preset selector A — rotate to browse names, press to recall
+  - encoder: 0
+    style:
+      text: "PST"
+      size: 14
+    actions:
+      rotate_cw:
+        - action: internal:custom_variable_set_expression
+          options: { name: "preset_sel_0", expression: "min($(internal:custom_preset_sel_0) + 1, 6)" }
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "preset_name_0"
+            expression: >-
+              $(internal:custom_preset_sel_0) == 0 ? 'Cross'
+              : $(internal:custom_preset_sel_0) == 1 ? 'Wide'
+              : $(internal:custom_preset_sel_0) == 2 ? 'Sermon'
+              : $(internal:custom_preset_sel_0) == 3 ? 'Pulpit'
+              : $(internal:custom_preset_sel_0) == 4 ? 'Worship'
+              : $(internal:custom_preset_sel_0) == 5 ? 'Guitar'
+              : 'Baptism'
+      rotate_ccw:
+        - action: internal:custom_variable_set_expression
+          options: { name: "preset_sel_0", expression: "max($(internal:custom_preset_sel_0) - 1, 0)" }
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "preset_name_0"
+            expression: >-
+              $(internal:custom_preset_sel_0) == 0 ? 'Cross'
+              : $(internal:custom_preset_sel_0) == 1 ? 'Wide'
+              : $(internal:custom_preset_sel_0) == 2 ? 'Sermon'
+              : $(internal:custom_preset_sel_0) == 3 ? 'Pulpit'
+              : $(internal:custom_preset_sel_0) == 4 ? 'Worship'
+              : $(internal:custom_preset_sel_0) == 5 ? 'Guitar'
+              : 'Baptism'
+      down:
+        - action: ptz:recallPreset
+          options: { isText: true, presetAsText: "$(internal:custom_preset_sel_0)" }
+
+  # E1: Preset selector B — independent second selector
+  - encoder: 1
+    style:
+      text: "PST"
+      size: 14
+    actions:
+      rotate_cw:
+        - action: internal:custom_variable_set_expression
+          options: { name: "preset_sel_1", expression: "min($(internal:custom_preset_sel_1) + 1, 6)" }
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "preset_name_1"
+            expression: >-
+              $(internal:custom_preset_sel_1) == 0 ? 'Cross'
+              : $(internal:custom_preset_sel_1) == 1 ? 'Wide'
+              : $(internal:custom_preset_sel_1) == 2 ? 'Sermon'
+              : $(internal:custom_preset_sel_1) == 3 ? 'Pulpit'
+              : $(internal:custom_preset_sel_1) == 4 ? 'Worship'
+              : $(internal:custom_preset_sel_1) == 5 ? 'Guitar'
+              : 'Baptism'
+      rotate_ccw:
+        - action: internal:custom_variable_set_expression
+          options: { name: "preset_sel_1", expression: "max($(internal:custom_preset_sel_1) - 1, 0)" }
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "preset_name_1"
+            expression: >-
+              $(internal:custom_preset_sel_1) == 0 ? 'Cross'
+              : $(internal:custom_preset_sel_1) == 1 ? 'Wide'
+              : $(internal:custom_preset_sel_1) == 2 ? 'Sermon'
+              : $(internal:custom_preset_sel_1) == 3 ? 'Pulpit'
+              : $(internal:custom_preset_sel_1) == 4 ? 'Worship'
+              : $(internal:custom_preset_sel_1) == 5 ? 'Guitar'
+              : 'Baptism'
+      down:
+        - action: ptz:recallPreset
+          options: { isText: true, presetAsText: "$(internal:custom_preset_sel_1)" }
+
+  # E2: SPEED
+  - encoder: 2
+    style:
+      text: "SPD"
+      size: 14
+    actions:
+      rotate_cw:
+        - action: ptz:ptSpeedU
+        - action: internal:custom_variable_set_expression
+          options: { name: "ptz_speed", expression: "min($(internal:custom_ptz_speed) + 1, 24)" }
+      rotate_ccw:
+        - action: ptz:ptSpeedD
+        - action: internal:custom_variable_set_expression
+          options: { name: "ptz_speed", expression: "max($(internal:custom_ptz_speed) - 1, 1)" }
+      down:
+        - action: ptz:ptSpeedSet
+          options: { speed: 12 }
+        - action: internal:custom_variable_set_value
+          options: { name: "ptz_speed", value: "12" }
+      long_press:
+        - action: ptz:stop
+        - action: ptz:zoomS
+
+  # E3: PAGE
+  - encoder: 3
+    style:
+      text: "PAGE"
+      size: 14
+    actions:
+      rotate_cw:
+        - action: internal:set_page
+          options: { controller: "self", page: 20 }
+      rotate_ccw:
+        - action: internal:set_page
+          options: { controller: "self", page: 20 }
+      down:
+        - action: internal:set_page
+          options: { controller: "self", page: 20 }

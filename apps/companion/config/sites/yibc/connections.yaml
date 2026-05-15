@@ -1,0 +1,124 @@
+# Companion Connection Definitions — YIBC bundle.
+#
+# This is the YIBC-only top-level bundle, consumed by the Edge1 Flux/Karmada
+# pipeline (companion-deploy Job in-cluster). Saitama lives independently
+# under config/sites/saitama/ and is deployed direct from a workstation
+# via SSH+tRPC to msn-saitama (no Flux). See scripts/deploy-saitama.sh.
+#
+# Credentials use `${VAR}` placeholders. Values come from:
+#   - Edge1: SealedSecret → K8s Secret → companion-deploy Pod env vars
+#   - Local dev: `source .env.yibc` before running companion-deploy.py
+# A missing env var stays as the literal `${VAR}` string so operators
+# notice it in the Companion UI rather than getting silent empty subs.
+
+meta:
+  companion_version: "4.2"
+
+connections:
+  # ═══════════════════════════════════════════
+  # YIBC connections (used by Plus + MK2)
+  # ═══════════════════════════════════════════
+
+  # Home Assistant — YIBC. DISABLED 2026-05-05 — config field
+  # mismatch (module reads `url` not `host`, `secrets.access_token`
+  # not `config.access_token`) was generating ~720 errors/hr in main
+  # log. Re-enable once corrected: rename host→url (without http://
+  # prefix), move access_token to a `secrets:` block.
+  - id: homeassistant
+    module: "homeassistant-server"
+    label: "Home Assistant"
+    enabled: false
+    config:
+      host: "http://home-assistant.home-assistant.svc.cluster.local:8123"
+      access_token: ""
+
+  # PTZ Camera — YIBC only
+  - id: ptz
+    module: "ptzoptics-visca"
+    label: "PTZ Camera"
+    enabled: true
+    config:
+      host: "192.168.1.113"
+      port: 5678
+      protocol: "tcp"
+
+  # Yamaha TF5 — YIBC. DISABLED 2026-05-05 — Yamaha buttons archived
+  # off the MK2 (operator runs the mixer directly on the surface for
+  # now). Connection was generating ~720 EHOSTUNREACH/hr because the
+  # mixer is also off when not in use. Flip enabled→true if Companion
+  # control returns.
+  - id: yamaha_yibc
+    module: "yamaha-rcp"
+    label: "Yamaha TF5 (YIBC)"
+    enabled: false
+    config:
+      host: "192.168.1.54"
+      model: "TF"
+
+  # ProPresenter 7 v18.4 — YIBC
+  - id: propresenter_yibc
+    module: "renewedvision-propresenter"
+    label: "ProPresenter (YIBC)"
+    enabled: true
+    config:
+      host: "192.168.1.2"
+      port: "1025"
+      pass: "${PROPRESENTER_PASSWORD_YIBC}"   # env-injected
+      use_sd: "yes"
+      sdpass: ""
+      sendPresentationCurrentMsgs: "disabled"
+      timerPolling: "enabled"
+
+  # OBS Studio — YIBC. Module requires obs-websocket plugin v5+ on
+  # the OBS host. Password from SealedSecret (k3s) or
+  # /etc/default/companion (vanilla).
+  # Module id: was `bitfocus-obs-websocket` pre-Companion-4.x; renamed
+  # to `obs-studio` in the unified module store (no legacyIds mapping
+  # so old id cannot resolve — must use new id verbatim).
+  - id: obs_yibc
+    module: "obs-studio"
+    label: "OBS (YIBC)"
+    enabled: true
+    config:
+      host: "192.168.1.10"                    # OBS Mac (YIBC LAN)
+      port: "4455"
+      pass: "${OBS_PASSWORD_YIBC}"            # env-injected; obs-studio uses `pass`, not `password`
+
+  # Spotify — YIBC. Premium account required for playback control.
+  # OAuth handshake happens once via Companion web UI on first connect;
+  # the resulting refresh token is stored in Companion's DB. The
+  # clientId/clientSecret are the developer-app credentials, not user
+  # credentials — they're "what app this is", not "who's logged in".
+  - id: spotify_yibc
+    module: "bitfocus-spotify-premium"
+    label: "Spotify (YIBC)"
+    enabled: true
+    config:
+      clientId: "${SPOTIFY_CLIENT_ID}"        # env-injected
+      clientSecret: "${SPOTIFY_CLIENT_SECRET}" # env-injected
+
+  # Philips 6700-series TV (Android TV 14, KTC OEM) — YIBC.
+  # Talks Google's Android TV Remote v2 protocol (ports 6466/6467),
+  # NOT ADB. Companion's web UI handles the pairing handshake — on
+  # first import the operator must:
+  #   1. Open Companion UI → Connections → "TV Philips (YIBC)" → Edit
+  #   2. Click the help/pair button; module sends pair request to TV
+  #   3. TV displays a 6-character code on screen
+  #   4. Operator enters code in Companion UI
+  #   5. TLS cert is exchanged + stored in Companion's DB
+  # The cert is the only piece that doesn't survive a from-scratch
+  # re-import. Plan: post-pair, capture the cert into a SealedSecret
+  # so wipes don't lose pairing.
+  - id: tv_yibc
+    module: "android-tv"
+    label: "TV Philips (YIBC)"
+    enabled: true
+    config:
+      host: "192.168.0.13"
+      macAddress: ""        # filled at pair time, also used for WoL
+      certBool: false       # flips true after pairing
+      retryDuration: 6
+
+  # Saitama connections moved to config/sites/saitama/connections.yaml
+  # (split 2026-05-10). Edit them there; do not re-add Saitama entries
+  # here or the Edge1 Companion will pick up disconnected duplicates.

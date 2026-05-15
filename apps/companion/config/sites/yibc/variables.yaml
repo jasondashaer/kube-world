@@ -1,0 +1,167 @@
+# Custom Companion Variables
+
+variables:
+  # System state
+  - name: startup_phase
+    default: "Idle"
+    persist: false
+
+  - name: service_mode
+    default: "Off"
+    persist: true
+
+  - name: all_connected
+    default: "false"
+    persist: false
+
+  # Stereo master level before duck (stored on duck press)
+  - name: pre_duck_level
+    default: "0"
+    persist: false
+
+  # Duck state tracker (0=normal, 1=ducked)
+  - name: duck_active
+    default: "0"
+    persist: false
+
+  # PTZ speed (1-24 VISCA scale)
+  - name: ptz_speed
+    default: "12"
+    persist: false
+
+  # Preset selectors for D-Pad page encoders
+  - name: preset_sel_0
+    default: "0"
+    persist: false
+
+  - name: preset_sel_1
+    default: "1"
+    persist: false
+
+  - name: preset_name_0
+    default: "Cross"
+    persist: false
+
+  - name: preset_name_1
+    default: "Wide"
+    persist: false
+
+  # ═══════════════════════════════════════════
+  # Service-flow ARM state
+  # ═══════════════════════════════════════════
+  # Triggers gate on service_armed == "1". ARM button sets this; DISARM
+  # or end-of-flow clears it. Without ARM, no automation fires regardless
+  # of timer state — operator must explicitly start the chain.
+
+  - name: service_armed
+    default: "0"
+    persist: false
+
+  # Mix bus index used for the live stream + recording feed.
+  # PLACEHOLDER — confirm with operator before live testing.
+  # Likely a stereo-flash-combo bus (e.g. Mix21/22 paired) on TF5/TF1.
+  # Abstracted so triggers don't hardcode it — change one variable to
+  # retarget the entire close flow.
+  - name: record_bus_idx
+    default: "21"
+    persist: true
+
+  # Stereo master target level for the close flow's final fixed position
+  # (the "speaking-volume" fade target after closing remarks). -300 = -3dB.
+  - name: closing_target_db_units
+    default: "-300"
+    persist: true
+
+  # Pre-close snapshot of master + record bus levels (stored at close-start
+  # so unducking can restore exactly).
+  - name: pre_close_master_level
+    default: "0"
+    persist: false
+  - name: pre_close_mix_level
+    default: "0"
+    persist: false
+
+  # Close-flow stage marker. "Idle" → "Closing-Remarks" → "Closing-Outro" → "Stopped".
+  - name: close_stage
+    default: "Idle"
+    persist: false
+
+  # ═══════════════════════════════════════════
+  # Segment-transition snapshot
+  # ═══════════════════════════════════════════
+  # Captured BEFORE each segment recall on the Saitama segments page.
+  # Stores the mixer's current scene number so PANIC can restore.
+  # Default 0 = "Initial Data" — recalling 0 mid-service is a hard
+  # reset, so the segment buttons should set this BEFORE the first
+  # transition (capturing whatever the mixer was on at boot).
+  - name: previous_segment_scene
+    default: "1"
+    persist: false
+
+  # Captured master fader level (units) before a transition starts.
+  # PANIC restore writes this back to St/Fader/Level X=1.
+  - name: snapshot_master_fader
+    default: "0"
+    persist: false
+
+  # Abort/freeze flag. Set 1 by PANIC. Future smooth-transition macros
+  # can poll this between fade steps and bail early if set.
+  - name: abort_active
+    default: "0"
+    persist: false
+
+  # ═══════════════════════════════════════════
+  # Service-day preset selection
+  # ═══════════════════════════════════════════
+  # Operator picks SUN AM or THU PM preset. Each just selects which
+  # ProPresenter clockIndex SVC START will fire. Times themselves
+  # live in PP — operator updates the clock target in PP UI directly,
+  # never touches Companion config.
+  #
+  # Convention:
+  #   clockIndex 0 = Sunday Service (target time set in PP)
+  #   clockIndex 1 = Thursday Bible Study (target time set in PP)
+  - name: active_service_clock_index
+    default: "0"
+    persist: false
+
+  # Human-readable preset label. Used by status pads.
+  # Values: "none" | "Sunday" | "Thursday"
+  - name: active_service_preset
+    default: "none"
+    persist: false
+
+  # ═══════════════════════════════════════════
+  # ProPresenter message numpad input (MK2 page 32)
+  # ═══════════════════════════════════════════
+  # Operator types digits 1-20 on MK2 numpad. Each digit button
+  # appends to this string. CLR resets to empty. SHOW sends to PP
+  # via messageSend with name=<this value>. HIDE clears the message
+  # in PP. Autohide-after-N-seconds is a v2 enhancement; v1 is
+  # manual show/hide only.
+  - name: pp_message_input
+    default: ""
+    persist: false
+
+  # Tracks whether Companion is currently SHOWING a PP message. "1"
+  # after SHOW pressed (drives green highlight on the display pad);
+  # "0" after HIDE/CLR. Note: Companion-side state only — if the PP
+  # operator clears the message manually in PP, this won't sync (PP
+  # module v3.0.2 doesn't expose message-active state). Future:
+  # generic-http polling against Pro7 REST could close that gap.
+  - name: pp_message_showing
+    default: "0"
+    persist: false
+
+  # ═══════════════════════════════════════════
+  # Live stream status (driven by external poll)
+  # ═══════════════════════════════════════════
+  # 1 if the YIBC live stream destination is currently broadcasting,
+  # 0 otherwise. Updated by a polling trigger in triggers.yaml that
+  # GETs the destination's "is live" probe URL every ~30 seconds.
+  # PP module doesn't expose stream-state, so we monitor the
+  # destination directly — independent of how the stream got started.
+  # Trigger wired only after destination platform is confirmed.
+  - name: stream_live
+    default: "0"
+    persist: false

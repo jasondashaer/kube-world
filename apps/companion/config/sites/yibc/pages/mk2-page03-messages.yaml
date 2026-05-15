@@ -1,0 +1,316 @@
+# YIBC — Stream Deck MK2 Page 32: PP Messages
+# 5x3 grid. Phone-keypad layout (1-9 in cols 0-2, 0 in row 2 col 3).
+# Default page on MK2 boot.
+#
+# State model (intended for remote use, away from PP machine):
+#   pp_message_input    — buffer of typed digits (visible on Display)
+#   pp_message_showing  — "1" while a message is currently displayed
+#                          in PP (set on SHOW, cleared on HIDE/CLR).
+#                          Drives the green highlight on Display so
+#                          the operator knows whether what they see
+#                          is live in PP or just typed-but-not-sent.
+#
+# Behaviors:
+#   Digit press: if showing=1, reset input to that digit (operator
+#     started typing again, implicitly retiring the previous active
+#     message in the UI sense) AND clear showing. Otherwise append.
+#   SHOW: send messageSend with current input, mark showing=1. Does
+#     NOT clear input — operator can still see what is live.
+#   HIDE: send messageHide, clear input + showing.
+#   CLR: clear input + showing (no PP message change).
+#
+# Limitation:
+#   PP module v3.0.2 does not expose message-active state, so if the
+#   PP operator clears the message manually inside PP, Companion's
+#   showing flag won't update. To truly bidirectionally sync, would
+#   need a generic-http poller against Pro7 REST.
+#
+# Layout:
+#   Row 0: [1] [2] [3] [Display] [SHOW]
+#   Row 1: [4] [5] [6] [CLR]     [HIDE]
+#   Row 2: [7] [8] [9] [0]       [→ OPS]
+
+page:
+  number: 32
+  name: "PP Messages"
+  device: mk2
+
+buttons:
+  # ═══ Row 0: Digits 1-3 + Display + SHOW ═══
+  # Each digit uses an expression: if pp_message_showing=="1", reset
+  # input to just this digit; else append. Then clear the showing
+  # flag so subsequent digits append normally.
+
+  - row: 0
+    col: 0
+    style:
+      text: "1"
+      bgcolor: "#222244"
+      color: "#FFFFFF"
+      size: 24
+    actions:
+      down:
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "pp_message_input"
+            expression: '$(custom:pp_message_showing) == "1" ? "1" : concat($(custom:pp_message_input), "1")'
+        - action: internal:wait
+          options: { time: "50" }
+        - action: internal:custom_variable_set_value
+          options: { name: "pp_message_showing", value: "0" }
+
+  - row: 0
+    col: 1
+    style:
+      text: "2"
+      bgcolor: "#222244"
+      color: "#FFFFFF"
+      size: 24
+    actions:
+      down:
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "pp_message_input"
+            expression: '$(custom:pp_message_showing) == "1" ? "2" : concat($(custom:pp_message_input), "2")'
+        - action: internal:wait
+          options: { time: "50" }
+        - action: internal:custom_variable_set_value
+          options: { name: "pp_message_showing", value: "0" }
+
+  - row: 0
+    col: 2
+    style:
+      text: "3"
+      bgcolor: "#222244"
+      color: "#FFFFFF"
+      size: 24
+    actions:
+      down:
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "pp_message_input"
+            expression: '$(custom:pp_message_showing) == "1" ? "3" : concat($(custom:pp_message_input), "3")'
+        - action: internal:wait
+          options: { time: "50" }
+        - action: internal:custom_variable_set_value
+          options: { name: "pp_message_showing", value: "0" }
+
+  # Display pad — shows the current input. Highlights green when
+  # pp_message_showing == "1" (i.e. a message is live in PP).
+  - row: 0
+    col: 3
+    style:
+      text: "Msg:\n$(custom:pp_message_input)"
+      bgcolor: "#222222"
+      color: "#FFFFFF"
+      size: 14
+    feedbacks:
+      - type: internal:variable_value
+        options:
+          variable: "custom:pp_message_showing"
+          op: "eq"
+          value: "1"
+        style:
+          bgcolor: "#118800"
+          color: "#FFFFFF"
+          text: "LIVE\n$(custom:pp_message_input)"
+          size: 14
+
+  # SHOW — fires PP message with current input, marks showing=1.
+  # 100ms wait between messageSend and the showing-flag set so PP
+  # module's parseVariablesInString runs against the live input
+  # before any state mutation (same race we hit on auto-clear).
+  - row: 0
+    col: 4
+    style:
+      text: "SHOW"
+      bgcolor: "#118800"
+      color: "#FFFFFF"
+      size: 18
+    actions:
+      down:
+        - action: propresenter_yibc:messageSend
+          options:
+            messageIndex: "0"
+            messageKeys: "Name"
+            messageValues: "$(custom:pp_message_input)"
+        - action: internal:wait
+          options: { time: "100" }
+        - action: internal:custom_variable_set_value
+          options: { name: "pp_message_showing", value: "1" }
+
+  # ═══ Row 1: Digits 4-6 + CLR + HIDE ═══
+  - row: 1
+    col: 0
+    style:
+      text: "4"
+      bgcolor: "#222244"
+      color: "#FFFFFF"
+      size: 24
+    actions:
+      down:
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "pp_message_input"
+            expression: '$(custom:pp_message_showing) == "1" ? "4" : concat($(custom:pp_message_input), "4")'
+        - action: internal:wait
+          options: { time: "50" }
+        - action: internal:custom_variable_set_value
+          options: { name: "pp_message_showing", value: "0" }
+
+  - row: 1
+    col: 1
+    style:
+      text: "5"
+      bgcolor: "#222244"
+      color: "#FFFFFF"
+      size: 24
+    actions:
+      down:
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "pp_message_input"
+            expression: '$(custom:pp_message_showing) == "1" ? "5" : concat($(custom:pp_message_input), "5")'
+        - action: internal:wait
+          options: { time: "50" }
+        - action: internal:custom_variable_set_value
+          options: { name: "pp_message_showing", value: "0" }
+
+  - row: 1
+    col: 2
+    style:
+      text: "6"
+      bgcolor: "#222244"
+      color: "#FFFFFF"
+      size: 24
+    actions:
+      down:
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "pp_message_input"
+            expression: '$(custom:pp_message_showing) == "1" ? "6" : concat($(custom:pp_message_input), "6")'
+        - action: internal:wait
+          options: { time: "50" }
+        - action: internal:custom_variable_set_value
+          options: { name: "pp_message_showing", value: "0" }
+
+  # CLR — wipes input + showing flag. Does NOT touch PP state.
+  - row: 1
+    col: 3
+    style:
+      text: "CLR"
+      bgcolor: "#664400"
+      color: "#FFFFFF"
+      size: 18
+    actions:
+      down:
+        - action: internal:custom_variable_set_value
+          options: { name: "pp_message_input", value: "" }
+        - action: internal:custom_variable_set_value
+          options: { name: "pp_message_showing", value: "0" }
+
+  # HIDE — fires messageHide, clears input + showing flag.
+  - row: 1
+    col: 4
+    style:
+      text: "HIDE"
+      bgcolor: "#990000"
+      color: "#FFFFFF"
+      size: 18
+    actions:
+      down:
+        - action: propresenter_yibc:messageHide
+          options:
+            messageIndex: "0"
+        - action: internal:wait
+          options: { time: "100" }
+        - action: internal:custom_variable_set_value
+          options: { name: "pp_message_input", value: "" }
+        - action: internal:custom_variable_set_value
+          options: { name: "pp_message_showing", value: "0" }
+
+  # ═══ Row 2: Digits 7-9, 0, → OPS ═══
+  - row: 2
+    col: 0
+    style:
+      text: "7"
+      bgcolor: "#222244"
+      color: "#FFFFFF"
+      size: 24
+    actions:
+      down:
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "pp_message_input"
+            expression: '$(custom:pp_message_showing) == "1" ? "7" : concat($(custom:pp_message_input), "7")'
+        - action: internal:wait
+          options: { time: "50" }
+        - action: internal:custom_variable_set_value
+          options: { name: "pp_message_showing", value: "0" }
+
+  - row: 2
+    col: 1
+    style:
+      text: "8"
+      bgcolor: "#222244"
+      color: "#FFFFFF"
+      size: 24
+    actions:
+      down:
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "pp_message_input"
+            expression: '$(custom:pp_message_showing) == "1" ? "8" : concat($(custom:pp_message_input), "8")'
+        - action: internal:wait
+          options: { time: "50" }
+        - action: internal:custom_variable_set_value
+          options: { name: "pp_message_showing", value: "0" }
+
+  - row: 2
+    col: 2
+    style:
+      text: "9"
+      bgcolor: "#222244"
+      color: "#FFFFFF"
+      size: 24
+    actions:
+      down:
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "pp_message_input"
+            expression: '$(custom:pp_message_showing) == "1" ? "9" : concat($(custom:pp_message_input), "9")'
+        - action: internal:wait
+          options: { time: "50" }
+        - action: internal:custom_variable_set_value
+          options: { name: "pp_message_showing", value: "0" }
+
+  - row: 2
+    col: 3
+    style:
+      text: "0"
+      bgcolor: "#222244"
+      color: "#FFFFFF"
+      size: 24
+    actions:
+      down:
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "pp_message_input"
+            expression: '$(custom:pp_message_showing) == "1" ? "0" : concat($(custom:pp_message_input), "0")'
+        - action: internal:wait
+          options: { time: "50" }
+        - action: internal:custom_variable_set_value
+          options: { name: "pp_message_showing", value: "0" }
+
+  # → OPS — back to ops page (page 30).
+  - row: 2
+    col: 4
+    style:
+      text: "→ OPS"
+      bgcolor: "#444444"
+      color: "#FFFFFF"
+      size: 14
+    actions:
+      down:
+        - action: internal:set_page
+          options: { controller: "self", page: 30 }

@@ -1,0 +1,240 @@
+# YIBC — Stream Deck+ Page 20: PTZ Encoder Control
+# 4x2 buttons + 4 encoders + LCD strip
+#
+# Row 0: Presets + Zoom In
+# Row 1: Presets + nav + Zoom Out
+# Row 2: LCD strip labels
+# Encoders: PAN / TILT / SPEED / PAGE
+
+page:
+  number: 20
+  name: "PTZ"
+  device: plus
+
+buttons:
+  # ═══ Row 0: Presets + Zoom In ═══
+  - row: 0
+    col: 0
+    style:
+      text: "Cross\n十字架"
+      bgcolor: "#004499"
+      size: 14
+    actions:
+      down:
+        - action: ptz:recallPreset
+          options: { isText: false, presetAsNumber: 0 }
+      long_press:
+        - action: ptz:setPreset
+          options: { isText: false, presetAsNumber: 0 }
+
+  - row: 0
+    col: 1
+    style:
+      text: "Wide\nワイド"
+      bgcolor: "#004499"
+      size: 14
+    actions:
+      down:
+        - action: ptz:recallPreset
+          options: { isText: false, presetAsNumber: 1 }
+      long_press:
+        - action: ptz:setPreset
+          options: { isText: false, presetAsNumber: 1 }
+
+  - row: 0
+    col: 2
+    style:
+      text: "Sermon\n説教"
+      bgcolor: "#004499"
+      size: 14
+    actions:
+      down:
+        - action: ptz:recallPreset
+          options: { isText: false, presetAsNumber: 2 }
+      long_press:
+        - action: ptz:setPreset
+          options: { isText: false, presetAsNumber: 2 }
+
+  - row: 0
+    col: 3
+    style:
+      text: "ZOOM +\nズーム"
+      bgcolor: "#555555"
+      size: 14
+    actions:
+      down:
+        - action: ptz:zoomI
+      up:
+        - action: ptz:zoomS
+
+  # ═══ Row 1: More presets + Zoom Out ═══
+  - row: 1
+    col: 0
+    style:
+      text: "Pulpit\n説教台"
+      bgcolor: "#004499"
+      size: 14
+    actions:
+      down:
+        - action: ptz:recallPreset
+          options: { isText: false, presetAsNumber: 3 }
+      long_press:
+        - action: ptz:setPreset
+          options: { isText: false, presetAsNumber: 3 }
+
+  - row: 1
+    col: 1
+    style:
+      text: "Worship\n賛美"
+      bgcolor: "#004499"
+      size: 14
+    actions:
+      down:
+        - action: ptz:recallPreset
+          options: { isText: false, presetAsNumber: 4 }
+      long_press:
+        - action: ptz:setPreset
+          options: { isText: false, presetAsNumber: 4 }
+
+  - row: 1
+    col: 2
+    style:
+      text: "Guitar\nギター"
+      bgcolor: "#004499"
+      size: 14
+    actions:
+      down:
+        - action: ptz:recallPreset
+          options: { isText: false, presetAsNumber: 5 }
+      long_press:
+        - action: ptz:setPreset
+          options: { isText: false, presetAsNumber: 5 }
+
+  - row: 1
+    col: 3
+    style:
+      text: "ZOOM -\nズーム"
+      bgcolor: "#444444"
+      size: 14
+    actions:
+      down:
+        - action: ptz:zoomO
+      up:
+        - action: ptz:zoomS
+
+  # ═══ Row 2: LCD strip labels ═══
+  - row: 2
+    col: 0
+    style:
+      text: "PAN ◄►"
+      bgcolor: "#222222"
+      size: 14
+
+  - row: 2
+    col: 1
+    style:
+      text: "TILT ▲▼"
+      bgcolor: "#222222"
+      size: 14
+
+  - row: 2
+    col: 2
+    style:
+      text: "SPD $(internal:custom_ptz_speed)"
+      bgcolor: "#222222"
+      size: 14
+
+  - row: 2
+    col: 3
+    style:
+      text: "PAGE ►"
+      bgcolor: "#222222"
+      size: 14
+    actions:
+      down:
+        - action: internal:set_page
+          options: { controller: "self", page: 21 }
+
+encoders:
+  # E0: PAN
+  - encoder: 0
+    style:
+      text: "PAN"
+      size: 14
+    actions:
+      rotate_cw:
+        - action: ptz:right
+        - action: internal:wait
+          options: { time: "10 + ($(internal:custom_ptz_speed) - 1) * 15" }
+        - action: ptz:stop
+      rotate_ccw:
+        - action: ptz:left
+        - action: internal:wait
+          options: { time: "10 + ($(internal:custom_ptz_speed) - 1) * 15" }
+        - action: ptz:stop
+      down:
+        - action: ptz:home
+      long_press:
+        - action: ptz:stop
+
+  # E1: TILT
+  - encoder: 1
+    style:
+      text: "TILT"
+      size: 14
+    actions:
+      rotate_cw:
+        - action: ptz:up
+        - action: internal:wait
+          options: { time: "10 + ($(internal:custom_ptz_speed) - 1) * 15" }
+        - action: ptz:stop
+      rotate_ccw:
+        - action: ptz:down
+        - action: internal:wait
+          options: { time: "10 + ($(internal:custom_ptz_speed) - 1) * 15" }
+        - action: ptz:stop
+      down:
+        - action: ptz:home
+      long_press:
+        - action: ptz:stop
+
+  # E2: SPEED — controls camera pan/tilt speed (1-24)
+  - encoder: 2
+    style:
+      text: "SPD"
+      size: 14
+    actions:
+      rotate_cw:
+        - action: ptz:ptSpeedU
+        - action: internal:custom_variable_set_expression
+          options: { name: "ptz_speed", expression: "min($(internal:custom_ptz_speed) + 1, 24)" }
+      rotate_ccw:
+        - action: ptz:ptSpeedD
+        - action: internal:custom_variable_set_expression
+          options: { name: "ptz_speed", expression: "max($(internal:custom_ptz_speed) - 1, 1)" }
+      down:
+        - action: ptz:ptSpeedSet
+          options: { speed: 12 }
+        - action: internal:custom_variable_set_value
+          options: { name: "ptz_speed", value: "12" }
+      long_press:
+        - action: ptz:stop
+        - action: ptz:zoomS
+
+  # E3: PAGE — rotate cycles between Plus-relevant pages
+  # CW = next page, CCW = previous page
+  # Press = go to PTZ page (home)
+  - encoder: 3
+    style:
+      text: "PAGE"
+      size: 14
+    actions:
+      rotate_cw:
+        - action: internal:set_page
+          options: { controller: "self", page: 21 }
+      rotate_ccw:
+        - action: internal:set_page
+          options: { controller: "self", page: 21 }
+      down:
+        - action: internal:set_page
+          options: { controller: "self", page: 20 }

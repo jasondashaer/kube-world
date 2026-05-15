@@ -1,0 +1,302 @@
+# YIBC — Stream Deck MK2 Page 30: Operations (post-Yamaha-removal)
+# 5x3 grid. Yamaha mixer buttons retired 2026-05-04 — operator
+# controls Yamaha directly on the TF5 surface, Companion no longer
+# routes audio. Yamaha YAML preserved under
+# config/pages/yibc/archive/ for future resurrection.
+#
+# Layout intent:
+#   Row 0: integration status indicators (no actions, just feedback
+#          colors based on connection health).
+#   Row 1: service automation flow (startup → start → stop → shutdown).
+#   Row 2: nav (bottom-right → page 32 PP Messages).
+#
+# Layout:
+#   Row 0: [PP]    [OBS]    [PTZ]    [—]       [—]
+#   Row 1: [START] [SVC ▶]  [SVC ■]  [SHUTDWN] [—]   (col 4 empty)
+#   Row 2: [—]     [—]      [—]      [—]       [→ MSG]
+
+page:
+  number: 30
+  name: "Ops"
+  device: mk2
+
+buttons:
+  # ═══ Row 0: Integration status indicators ═══
+  # Each cell shows label + connection-health color via
+  # internal:instance_status feedback. No action on press (just visual
+  # so operator can spot a dropped connection at a glance).
+
+  - row: 0
+    col: 0
+    style:
+      text: "ProP"
+      bgcolor: "#222222"
+      color: "#FFFFFF"
+      size: 14
+    feedbacks:
+      - type: internal:instance_status
+        options:
+          instance_id: "propresenter_yibc"
+          ok_fg: 16777215
+          ok_bg: 35840       # 0x008C00 dark green
+          warning_fg: 0
+          warning_bg: 16776960
+          error_fg: 16777215
+          error_bg: 13107200 # 0xC80000 red
+          disabled_fg: 10066329
+          disabled_bg: 2236962
+
+  - row: 0
+    col: 1
+    style:
+      text: "OBS"
+      bgcolor: "#222222"
+      color: "#FFFFFF"
+      size: 14
+    feedbacks:
+      - type: internal:instance_status
+        options:
+          instance_id: "obs_yibc"
+          ok_fg: 16777215
+          ok_bg: 35840
+          warning_fg: 0
+          warning_bg: 16776960
+          error_fg: 16777215
+          error_bg: 13107200
+          disabled_fg: 10066329
+          disabled_bg: 2236962
+
+  - row: 0
+    col: 2
+    style:
+      text: "PTZ"
+      bgcolor: "#222222"
+      color: "#FFFFFF"
+      size: 14
+    feedbacks:
+      - type: internal:instance_status
+        options:
+          instance_id: "ptz"
+          ok_fg: 16777215
+          ok_bg: 35840
+          warning_fg: 0
+          warning_bg: 16776960
+          error_fg: 16777215
+          error_bg: 13107200
+          disabled_fg: 10066329
+          disabled_bg: 2236962
+
+  # Cols 3-4 reserved. HA + Spotify status removed 2026-05-04 — those
+  # connections aren't actively used for live ops yet; can add back
+  # when integrated.
+
+  # ═══ Row 1: Service automation flow ═══
+
+  # ── STARTUP ──
+  # Stages OBS to Pre-Service scene + marks service_mode = Ready.
+  # Idempotent — safe to repeat.
+  - row: 1
+    col: 0
+    style:
+      text: "Startup\n起動"
+      bgcolor: "#006600"
+      color: "#FFFFFF"
+      size: 12
+    actions:
+      down:
+        - action: obs_yibc:set_scene
+          options: { scene: "Pre-Service" }
+        - action: internal:custom_variable_set_value
+          options: { name: "service_mode", value: "Ready" }
+
+  # ── SVC START ──
+  # Begin live service: PP timer + PP stream macro (PP/ATEM drive the
+  # actual live stream) + OBS *recording* as a local backup capture.
+  # OBS at YIBC is record-only — there's no OBS streaming, so
+  # StartStream/StopStream are intentionally absent.
+  #
+  # The pro7TriggerMacro action below has an EMPTY pro7MacroUUID. PP
+  # macros are addressed by UUID and the UUID list is pulled live
+  # from PP at runtime — we can't hardcode it in YAML safely. To wire
+  # it up:
+  #   1. In ProPresenter, create a macro named "Stream Start" whose
+  #      action is the PP "Live → Start Stream" command.
+  #   2. After importing this config, open Companion web UI → page 30
+  #      row 1 col 1 (SVC START) → edit the pro7TriggerMacro action
+  #      → pick "Stream Start" from the live dropdown → save.
+  #   3. Repeat for SVC STOP with a "Stream Stop" macro.
+  # Until UUID is filled in, the pro7TriggerMacro will fall back to
+  # firing the FIRST macro in PP's list (module behavior on empty
+  # UUID) — so leave the action wired but expect to bind it post-import.
+  - row: 1
+    col: 1
+    style:
+      text: "SVC\nSTART"
+      bgcolor: "#118800"
+      color: "#FFFFFF"
+      size: 14
+    actions:
+      down:
+        # TEMP-DISABLED 2026-05-09: PP actions parked while operator
+        # smoke-tests OBS recording in isolation. Restore exactly as
+        # commented when PP testing slot is available.
+        # - action: propresenter_yibc:clockReset
+        #   options: { clockIndex: "0" }
+        # - action: propresenter_yibc:clockStart
+        #   options: { clockIndex: "0" }
+        # - action: propresenter_yibc:pro7TriggerMacro
+        #   options: { pro7MacroUUID: "" }   # bind via Companion UI: Stream Start
+        - action: obs_yibc:start_recording
+        - action: internal:custom_variable_set_value
+          options: { name: "service_mode", value: "Live" }
+        - action: internal:custom_variable_set_value
+          options: { name: "service_armed", value: "1" }
+
+  # ── SVC STOP ──
+  # End service: stop OBS recording + PP stream stop macro +
+  # clear PP + stop clock. (No OBS streaming at YIBC; record-only.)
+  # See SVC START comment for pro7TriggerMacro UUID-binding workflow.
+  - row: 1
+    col: 2
+    style:
+      text: "SVC\nSTOP"
+      bgcolor: "#883300"
+      color: "#FFFFFF"
+      size: 14
+    actions:
+      down:
+        - action: obs_yibc:stop_recording
+        # TEMP-DISABLED 2026-05-09: see SVC START.
+        # - action: propresenter_yibc:pro7TriggerMacro
+        #   options: { pro7MacroUUID: "" }   # bind via Companion UI: Stream Stop
+        # - action: propresenter_yibc:clockStop
+        #   options: { clockIndex: "0" }
+        # - action: propresenter_yibc:clearall
+        - action: internal:custom_variable_set_value
+          options: { name: "service_mode", value: "Stopped" }
+        - action: internal:custom_variable_set_value
+          options: { name: "service_armed", value: "0" }
+
+  # ── SHUTDOWN ──
+  # Two-step confirm with 5s auto-timeout. Step 1 primes (changes
+  # color + label). Step 2 (within 5s) commits the close: stop
+  # OBS recording, clear PP, mark service Off. Long-press also
+  # commits in one step for emergency.
+  - row: 1
+    col: 3
+    style:
+      text: "Shutdown\n終了"
+      bgcolor: "#660000"
+      color: "#FFFFFF"
+      size: 12
+    steps:
+      - style:
+          text: "Shutdown\n終了"
+          bgcolor: "#660000"
+          color: "#FFFFFF"
+          size: 12
+        actions:
+          down:
+            - action: internal:step_delta
+              options: { amount: 1 }
+            - action: internal:wait
+              options: { time: "5000" }
+            - action: internal:step_delta
+              options: { amount: -1 }
+      - style:
+          text: "CONFIRM?\n確認？"
+          bgcolor: "#FF0000"
+          color: "#FFFFFF"
+          size: 12
+        actions:
+          down:
+            - action: obs_yibc:stop_recording
+            # TEMP-DISABLED 2026-05-09: see SVC START.
+            # - action: propresenter_yibc:pro7TriggerMacro
+            #   options: { pro7MacroUUID: "" }   # bind via Companion UI: Stream Stop
+            # - action: propresenter_yibc:clockStop
+            #   options: { clockIndex: "0" }
+            # - action: propresenter_yibc:clearall
+            - action: internal:custom_variable_set_value
+              options: { name: "service_mode", value: "Off" }
+            - action: internal:custom_variable_set_value
+              options: { name: "service_armed", value: "0" }
+            - action: internal:step_delta
+              options: { amount: -1 }
+
+  # Row 1 col 4 left empty — service_mode is implied by the colored
+  # button states (Startup green, Live yellow on press, Stop orange,
+  # Shutdown red). No standalone status pad needed.
+
+  # ═══ Row 2: Live status + Nav ═══
+  # Cols 0-1: real-time status of recording + live stream.
+  # Col 4:    nav → page 32 (PP Messages).
+
+  # ── REC ──
+  # OBS recording status. Pulls live state via obs-studio module's
+  # `recording` feedback — fires green when OBS is recording, gray
+  # otherwise. No press action; pure indicator.
+  - row: 2
+    col: 0
+    style:
+      text: "REC\n録画"
+      bgcolor: "#222222"
+      color: "#FFFFFF"
+      size: 14
+    feedbacks:
+      - type: obs_yibc:recording
+        options:
+          fg: 16777215            # white text when recording
+          bg: 13107200            # 0xC80000 red when recording
+          fg_paused: 16777215     # white text when paused
+        style:
+          text: "● REC\n録画中"
+          size: 14
+          color: 16777215
+          bgcolor: 13107200
+          alignment: "center:center"
+          show_topbar: false
+
+  # ── STREAM ──
+  # Live-stream status. Companion's renewedvision-propresenter v3.0.2
+  # does not expose a stream-active feedback, so we don't tie this to
+  # PP — instead we monitor the actual destination URL and surface
+  # that in a custom variable `stream_live` (0 or 1). The polling
+  # trigger that drives this variable is in triggers.yaml; until that
+  # trigger is wired (waiting on confirmed destination + channel id),
+  # this button reads as offline. See triggers.yaml stream_live_*.
+  - row: 2
+    col: 1
+    style:
+      text: "STREAM\n配信"
+      bgcolor: "#222222"
+      color: "#FFFFFF"
+      size: 14
+    feedbacks:
+      - type: internal:variable_value
+        options:
+          variable: "internal:custom_stream_live"
+          op: "eq"
+          value: "1"
+        style:
+          text: "● LIVE\n配信中"
+          size: 14
+          color: 16777215
+          bgcolor: 14483456       # 0xDD0000 (slightly different red so REC vs STREAM read distinct)
+          alignment: "center:center"
+          show_topbar: false
+
+  # ── → MSG ──
+  # Bottom-right → PP Messages (page 32). Mirrors page 32's → OPS
+  # button so MK2 has a 2-page swap.
+  - row: 2
+    col: 4
+    style:
+      text: "→ MSG"
+      bgcolor: "#003366"
+      color: "#FFFFFF"
+      size: 14
+    actions:
+      down:
+        - action: internal:set_page
+          options: { controller: "self", page: 32 }

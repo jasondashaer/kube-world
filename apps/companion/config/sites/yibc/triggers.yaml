@@ -1,0 +1,133 @@
+# Companion Triggers — ARM-Gated Service Flow
+#
+# Design: nothing fires automatically based on time alone. The operator
+# presses an ARM button on the MK2 (page 30, row 1 col 3). ARM:
+#   1. Sets service_armed = "1"
+#   2. Resets ProPresenter clock 0 to its configured length
+#   3. Starts ProPresenter clock 0 counting down
+# As the countdown crosses defined thresholds, ARM-gated triggers fire.
+# DISARM (or auto-disarm at clock 0 + service-end) sets service_armed = "0"
+# so a second press of the ARM button becomes the only path to re-trigger
+# the chain — no accidental cascade.
+#
+# All trigger conditions test BOTH the ARM flag AND the timer threshold,
+# so disarming halts the chain immediately.
+#
+# IMPORTANT — Variable label sanitization
+# Companion sanitizes connection labels for variable references:
+#   "ProPresenter (YIBC)" → "ProPresenter__YIBC_"
+# So the timer reference is $(ProPresenter__YIBC_:video_countdown_timer).
+# Confirm exact sanitization in Companion UI under Variables tab if a
+# trigger silently doesn't fire.
+#
+# Module action gotchas
+#   - clockReset / clockStart / clockUpdate: clockIndex is a STRING
+#     ("0", not 0). The PP video countdown is canonically clock index 0.
+#   - obs:toggle_streaming has no idempotency — calling twice toggles off.
+#     Use obs:start_streaming / obs:stop_streaming if module exposes them
+#     (verify module version), else gate via streaming feedback.
+#
+# All ARM-gated triggers are DISABLED at first deploy. Enable per-trigger
+# after walking through the live system once with mixer + OBS connected.
+
+triggers:
+  # ═══════════════════════════════════════════
+  # SYSTEM TRIGGERS (always active)
+  # ═══════════════════════════════════════════
+
+  - name: "Startup: Set service mode"
+    enabled: true
+    sort_order: 0
+    events:
+      - type: startup
+        options: { delay: 5000 }
+    actions:
+      - action: internal:custom_variable_set_value
+        options: { name: "service_mode", value: "Ready" }
+      - action: internal:custom_variable_set_value
+        options: { name: "service_armed", value: "0" }
+      - action: internal:custom_variable_set_value
+        options: { name: "close_stage", value: "Idle" }
+
+  # ═══════════════════════════════════════════
+  # PRE-SERVICE FLOW (ARM-gated — YIBC)
+  # ═══════════════════════════════════════════
+  # Operator workflow: load PP, set timer to desired length (e.g. 30:00),
+  # then press ARM. Timer counts down — these triggers cascade.
+
+  # T-60s: stream goes live
+  - name: "YIBC Pre-Service: Start stream at 1min"
+    enabled: false
+    sort_order: 10
+    events:
+      - type: condition_true
+        options: {}
+    conditions:
+      - type: internal:variable_value
+        options:
+          variable: "internal:custom_service_armed"
+          value: "1"
+      - type: internal:variable_value
+        options:
+          variable: "ProPresenter__YIBC_:video_countdown_timer"
+          value: "00:01:00"
+    actions:
+      - action: obs_yibc:start_streaming
+      - action: internal:custom_variable_set_value
+        options: { name: "service_mode", value: "Pre-Service" }
+
+  # T-10s: switch OBS to intro graphic
+  - name: "YIBC Pre-Service: Intro graphic at 10s"
+    enabled: false
+    sort_order: 11
+    events:
+      - type: condition_true
+        options: {}
+    conditions:
+      - type: internal:variable_value
+        options:
+          variable: "internal:custom_service_armed"
+          value: "1"
+      - type: internal:variable_value
+        options:
+          variable: "ProPresenter__YIBC_:video_countdown_timer"
+          value: "00:00:10"
+    actions:
+      - action: obs_yibc:set_current_scene
+        options: { scene: "Intro" }
+
+  # T=0: unmute record bus, fade up master, start recording, hold graphic.
+  # Camera switch happens on the followup trigger after a 7s graphic hold.
+  - name: "YIBC Pre-Service: Go live at countdown end"
+    enabled: false
+    sort_order: 12
+    events:
+      - type: condition_true
+        options: {}
+    conditions:
+      - type: internal:variable_value
+        options:
+          variable: "internal:custom_service_armed"
+          value: "1"
+      - type: internal:variable_value
+        options:
+          variable: "ProPresenter__YIBC_:video_countdown_timer"
+          value: "00:00:00"
+    actions:
+      # Unmute record bus (Mix17 by default; uses record_bus_idx variable)
+      - action: yamaha_yibc:MIXER_Current/Mix/Fader/On
+        options: { X: "$(internal:custom_record_bus_idx)", Val: 1 }
+      - action: obs_yibc:start_recording
+      - action: internal:custom_variable_set_value
+        options: { name: "service_mode", value: "Live" }
+      # Hold intro graphic 7s, then switch to camera
+      - action: internal:wait
+        options: { time: "7000" }
+      - action: obs_yibc:set_current_scene
+        options: { scene: "Camera" }
+      # Auto-disarm so a missed DISARM doesn't leave the system primed
+      - action: internal:custom_variable_set_value
+        options: { name: "service_armed", value: "0" }
+
+  # Saitama pre-service triggers moved to config/sites/saitama/triggers.yaml
+  # (split 2026-05-10). Edit them there.

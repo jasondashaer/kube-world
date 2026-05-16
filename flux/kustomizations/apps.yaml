@@ -64,26 +64,14 @@ spec:
     - name: apps-base
     - name: karmada-propagation-policies
 
----
-apiVersion: kustomize.toolkit.fluxcd.io/v1
-kind: Kustomization
-metadata:
-  name: apps-companion
-  namespace: flux-system
-spec:
-  interval: 5m
-  path: ./apps/companion
-  prune: true
-  sourceRef:
-    kind: GitRepository
-    name: kube-world
-  kubeConfig:
-    secretRef:
-      name: karmada-kubeconfig
-      key: value
-  dependsOn:
-    - name: apps-base
-    - name: karmada-propagation-policies
+# apps-companion removed 2026-05-16 (Phase 8). YIBC Companion now runs
+# standalone on the dedicated `yibc` CompanionPi (deploy-yibc.sh,
+# SSH+tRPC over Tailscale), mirroring Saitama. Edge1 no longer
+# deploys Companion — this Flux Kustomization being gone makes Flux
+# prune the companion namespace/Deployment/PVC/Service/ConfigMaps
+# from the Edge1 (Karmada) target. pi-edge-1 stays in service for
+# Home Assistant + IoT apps. apps/companion/ source is retained in
+# the repo for the deploy-{yibc,saitama}.sh pipelines.
 
 ---
 apiVersion: kustomize.toolkit.fluxcd.io/v1

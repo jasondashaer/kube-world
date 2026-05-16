@@ -14,7 +14,7 @@ surfaces:
   - group_id: "streamdeck:A00SA5432NCLFZ"
     site: yibc
     name: "Stream Deck MK2"
-    address: "192.168.1.13"           # YIBC DHCP gave .13 (was .43; address can shift without reservation)
+    address: "192.168.1.36"           # current YIBC DHCP (was .13/.43; no reservation — shifts)
     port: 5343
     # MK2 default page = 32 (PP Message numpad). Press → OPS on page
     # 32 to reach the original ops page (30). Page 30 still exists

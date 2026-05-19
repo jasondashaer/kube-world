@@ -119,6 +119,22 @@ connections:
       certBool: false       # flips true after pairing
       retryDuration: 6
 
+  # TV Bridge (YIBC) — local HTTP→ADB wrapper for the Philips/KTC
+  # Android TV. The android-tv module's power_off no-ops on this
+  # Mediatek firmware; ADB KEYCODE_SLEEP/WAKEUP is reliable and the
+  # ADB key persists Pi-side (immune to connections:reset, unlike the
+  # Remote-v2 cert). Bridge = apps/tv-bridge/ running on the yibc Pi
+  # at 127.0.0.1:9990. ENABLE only after the one-time on-TV ADB pair
+  # (Settings → Developer → Wireless debugging) + vanilla installer
+  # run on yibc pointing at the TV (192.168.1.129:5555). Disabled
+  # until then so Companion doesn't spam a dead endpoint.
+  - id: tv_bridge_yibc
+    module: "generic-http"
+    label: "TV Bridge (YIBC)"
+    enabled: false
+    config:
+      prefix: "http://127.0.0.1:9990"
+
   # Sonos Beam (S31, room "Entryway") — YIBC. Ethernet on main network.
   # `host` is a discovery seed: point at any Sonos device IP and the
   # module enumerates the whole household. 192.168.1.130 is the Beam.

@@ -114,10 +114,21 @@ connections:
     label: "TV Philips (YIBC)"
     enabled: true
     config:
-      host: "192.168.0.13"
+      host: "192.168.1.129"   # main network (was apartment-era 192.168.0.13)
       macAddress: ""        # filled at pair time, also used for WoL
       certBool: false       # flips true after pairing
       retryDuration: 6
+
+  # Sonos Beam (S31, room "Entryway") — YIBC. Ethernet on main network.
+  # `host` is a discovery seed: point at any Sonos device IP and the
+  # module enumerates the whole household. 192.168.1.130 is the Beam.
+  # Module: sonos-speakers v1.1.0 (Bitfocus store), installed on yibc.
+  - id: sonos_yibc
+    module: "sonos-speakers"
+    label: "Sonos (YIBC)"
+    enabled: true
+    config:
+      host: "192.168.1.130"
 
   # Saitama connections moved to config/sites/saitama/connections.yaml
   # (split 2026-05-10). Edit them there; do not re-add Saitama entries

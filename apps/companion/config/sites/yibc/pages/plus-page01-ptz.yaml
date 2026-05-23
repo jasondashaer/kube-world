@@ -221,9 +221,10 @@ encoders:
         - action: ptz:stop
         - action: ptz:zoomS
 
-  # E3: PAGE — rotate cycles between Plus-relevant pages
-  # CW = next page, CCW = previous page
-  # Press = go to PTZ page (home)
+  # E3: PAGE — circular nav across Plus pages 20/21/22.
+  # CW (forward):  20 → 21
+  # CCW (back):    20 → 22
+  # Press: stay on PTZ (page 20).
   - encoder: 3
     style:
       text: "PAGE"
@@ -234,7 +235,7 @@ encoders:
           options: { controller: "self", page: 21 }
       rotate_ccw:
         - action: internal:set_page
-          options: { controller: "self", page: 21 }
+          options: { controller: "self", page: 22 }
       down:
         - action: internal:set_page
           options: { controller: "self", page: 20 }

@@ -75,27 +75,24 @@ connections:
   # Module id: was `bitfocus-obs-websocket` pre-Companion-4.x; renamed
   # to `obs-studio` in the unified module store (no legacyIds mapping
   # so old id cannot resolve — must use new id verbatim).
+  # OBS — disabled 2026-05-24 to match live state. The live yibc
+  # Companion has this connection disabled (operator hasn't been
+  # using OBS at YIBC). Re-enable by flipping enabled→true and
+  # adding OBS_PASSWORD_YIBC to .env.yibc.
   - id: obs_yibc
     module: "obs-studio"
     label: "OBS (YIBC)"
-    enabled: true
+    enabled: false
     config:
       host: "192.168.1.10"                    # OBS Mac (YIBC LAN)
       port: "4455"
       pass: "${OBS_PASSWORD_YIBC}"            # env-injected; obs-studio uses `pass`, not `password`
 
-  # Spotify — YIBC. Premium account required for playback control.
-  # OAuth handshake happens once via Companion web UI on first connect;
-  # the resulting refresh token is stored in Companion's DB. The
-  # clientId/clientSecret are the developer-app credentials, not user
-  # credentials — they're "what app this is", not "who's logged in".
-  - id: spotify_yibc
-    module: "bitfocus-spotify-premium"
-    label: "Spotify (YIBC)"
-    enabled: true
-    config:
-      clientId: "${SPOTIFY_CLIENT_ID}"        # env-injected
-      clientSecret: "${SPOTIFY_CLIENT_SECRET}" # env-injected
+  # Spotify removed 2026-05-24 to match live state. Connection was
+  # never imported to live yibc Companion. If/when Spotify control
+  # comes back: restore this block with clientId/clientSecret from
+  # the Spotify developer app, then add SPOTIFY_CLIENT_ID +
+  # SPOTIFY_CLIENT_SECRET to .env.yibc.
 
   # Philips 6700-series TV (Android TV 14, KTC OEM) — YIBC.
   # Talks Google's Android TV Remote v2 protocol (ports 6466/6467),

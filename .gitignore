@@ -27,6 +27,8 @@ age.key
 
 # Bootstrap configuration (contains API tokens, passwords)
 .env.bootstrap
+.env.yibc
+.env.saitama
 rancher/.rancher-info
 
 # Age private keys
@@ -78,3 +80,9 @@ apps/companion/secrets/*.unsealed.yaml
 
 # Vanilla site env files — only commit .env.example, never .env
 deploy/vanilla/site/*/.env
+
+# Companion per-connection cert/pair-state backups (device-generated
+# TLS material). Refreshed by deploy-{yibc,saitama}.sh after every
+# successful import; loaded as fallback so re-imports survive a live
+# Companion that's down at deploy time. NEVER commit — host-specific.
+.companion-state/

@@ -302,15 +302,27 @@ buttons:
         - action: internal:custom_variable_set_value
           options: { name: "pp_message_showing", value: "0" }
 
-  # → OPS — back to ops page (page 30).
+  # PP status pad — replaces the → OPS nav button (Ops moved to Plus
+  # page 22 on 2026-05-22). Pure indicator: green when ProPresenter
+  # connection is OK (Messages buttons will actually do something),
+  # red on error, gray on disabled/disconnected. No action — operator
+  # uses Plus 22 to navigate.
   - row: 2
     col: 4
     style:
-      text: "→ OPS"
-      bgcolor: "#444444"
+      text: "ProP"
+      bgcolor: "#222222"
       color: "#FFFFFF"
       size: 14
-    actions:
-      down:
-        - action: internal:set_page
-          options: { controller: "self", page: 30 }
+    feedbacks:
+      - type: internal:instance_status
+        options:
+          instance_id: "propresenter_yibc"
+          ok_fg: 16777215
+          ok_bg: 35840       # 0x008C00 dark green
+          warning_fg: 0
+          warning_bg: 16776960
+          error_fg: 16777215
+          error_bg: 13107200 # 0xC80000 red
+          disabled_fg: 10066329
+          disabled_bg: 2236962

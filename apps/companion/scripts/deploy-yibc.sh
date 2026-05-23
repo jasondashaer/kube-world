@@ -45,6 +45,12 @@ fi
 export COMPANION_SITE=yibc
 export COMPANION_CONFIG_DIR="$REPO_ROOT/apps/companion/config"
 
+# Per-connection cert/pair-state backup file (gitignored). Loaded as
+# fallback before the live cert-preserve snapshot, refreshed after
+# every successful import. See companion-deploy.py
+# load_preserved_state_from_file / save_preserved_state_to_file.
+CERT_BACKUP="$REPO_ROOT/.companion-state/yibc-preserved.json"
+
 cd "$REPO_ROOT"
 
 echo "── generating .companionconfig (site=yibc) ──"
@@ -62,6 +68,8 @@ if ! curl -sS -o /dev/null -w "  http=%{http_code}\n" --max-time 5 "$URL/"; then
 fi
 
 echo "── importing via tRPC ──"
-python3 apps/companion/scripts/companion-deploy.py --site yibc import --url "$URL"
+python3 apps/companion/scripts/companion-deploy.py --site yibc import \
+    --url "$URL" \
+    --cert-backup-file "$CERT_BACKUP"
 
 echo "── done ──"

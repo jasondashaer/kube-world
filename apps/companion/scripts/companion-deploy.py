@@ -238,6 +238,83 @@ def fetch_preserved_conn_state(url):
         print(f"  cert-preserve: captured live pairing state for {count} connection(s)")
 
 
+def load_preserved_state_from_file(path):
+    """Seed PRESERVED_CONN_STATE from an on-disk backup (suspenders).
+
+    Provides a fallback when live snapshot fails (Companion unreachable,
+    connection mid-restart, etc.) or returns empty. Live state from
+    fetch_preserved_conn_state() takes precedence — it runs after this
+    and overwrites any overlapping label keys.
+    """
+    if not path or not os.path.exists(path):
+        return
+    try:
+        with open(path, "r") as f:
+            data = json.load(f)
+    except Exception as ex:
+        print(f"  cert-backup: could not read {path} — {ex}")
+        return
+    if not isinstance(data, dict):
+        return
+    count = 0
+    for label, fields in data.items():
+        if isinstance(fields, dict) and fields:
+            PRESERVED_CONN_STATE[label] = dict(fields)
+            count += 1
+    if count:
+        print(f"  cert-backup: seeded {count} connection(s) from {path}")
+
+
+def save_preserved_state_to_file(url, path):
+    """Refresh on-disk cert backup from the live Companion.
+
+    Called AFTER a successful import so the file always reflects the
+    latest known-good pairing state. If Companion is unreachable or
+    has nothing worth preserving, the file is left untouched.
+    """
+    if not path:
+        return
+    import urllib.request
+    try:
+        ctx = __import__("ssl").create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = __import__("ssl").CERT_NONE
+        req = urllib.request.Request(url.rstrip("/") + "/int/export/full")
+        with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
+            data = json.loads(gzip.decompress(resp.read()))
+    except Exception as ex:
+        print(f"  cert-backup: refresh skipped — {ex}")
+        return
+
+    snapshot = {}
+    for inst in (data.get("instances") or {}).values():
+        if not isinstance(inst, dict):
+            continue
+        module = inst.get("moduleId") or inst.get("instance_type")
+        fields = PRESERVE_FIELDS_BY_MODULE.get(module)
+        if not fields:
+            continue
+        label = inst.get("label")
+        cfg = inst.get("config") or {}
+        snap = {}
+        for f in fields:
+            v = cfg.get(f)
+            if v not in (None, "", {}, [], False):
+                snap[f] = v
+        if snap and label:
+            snapshot[label] = snap
+    if not snapshot:
+        print(f"  cert-backup: nothing to back up (no preserved fields found)")
+        return
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(snapshot, f, indent=2, sort_keys=True)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, path)
+    print(f"  cert-backup: wrote {len(snapshot)} connection(s) → {path} (mode 600)")
+
+
 def yaml_to_companionconfig(yaml_config):
     """Convert YAML config structure to Companion's native format."""
     companion = {
@@ -295,13 +372,25 @@ def yaml_to_companionconfig(yaml_config):
             # module is allowed to preserve, only when live had a
             # real value. isFirstInit stays False when we restored a
             # cert so the module re-uses it instead of re-pairing.
-            preserved = PRESERVED_CONN_STATE.get(conn["label"])
+            # Companion sanitizes connection labels in its DB
+            # ("ProPresenter (YIBC)" → "ProPresenter__YIBC_") — strip
+            # everything not [A-Za-z0-9_] to underscore. Our snapshot
+            # keys come from the live export and are sanitized, but
+            # YAML labels are raw. Try both forms so the lookup hits
+            # regardless of which side wrote the key.
+            import re as _re
+            raw_label = conn["label"]
+            sanitized_label = _re.sub(r"[^A-Za-z0-9_]", "_", raw_label)
+            preserved = (
+                PRESERVED_CONN_STATE.get(raw_label)
+                or PRESERVED_CONN_STATE.get(sanitized_label)
+            )
             first_init = True
             if preserved and conn["module"] in PRESERVE_FIELDS_BY_MODULE:
                 conn_config.update(preserved)
                 first_init = False
                 print(f"  cert-preserve: restored {sorted(preserved)} "
-                      f"onto '{conn['label']}'")
+                      f"onto '{raw_label}'")
 
             companion["instances"][runtime_id] = {
                 "moduleInstanceType": "connection",
@@ -823,6 +912,12 @@ def import_config(args):
     if not args.file:
         # Snapshot live pairing/cert state BEFORE regenerate so
         # connections:reset doesn't un-pair devices (android-tv etc.).
+        # Two-tier strategy: on-disk backup file is loaded first as
+        # fallback, then live fetch overlays anything still present
+        # on the running Companion (live wins). If live is missing
+        # (Companion down / connection broken), file alone keeps the
+        # cert alive across the import.
+        load_preserved_state_from_file(getattr(args, "cert_backup_file", None))
         fetch_preserved_conn_state(args.url)
         print("Regenerating .companionconfig from current YAML sources...")
         generate(args)
@@ -1119,6 +1214,16 @@ def import_config(args):
     finally:
         ws.close()
 
+    # Refresh on-disk cert backup from the now-imported live state so
+    # the file tracks the latest known-good pairing. Runs only on
+    # successful import (we'd have sys.exit'd above on failure).
+    save_preserved_state_to_file(args.url, getattr(args, "cert_backup_file", None))
+
+
+def cert_backup(args):
+    """Standalone: snapshot live preserved fields → disk, no import."""
+    save_preserved_state_to_file(args.url, args.cert_backup_file)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Companion Config Deployer")
@@ -1138,6 +1243,24 @@ if __name__ == "__main__":
     imp = sub.add_parser("import", help="Import config to Companion via tRPC WebSocket")
     imp.add_argument("--url", default="https://companion.edge1.kubew.dev")
     imp.add_argument("--file", default=None, help="Path to .companionconfig file (default: generated output)")
+    imp.add_argument(
+        "--cert-backup-file",
+        default=None,
+        help="JSON file holding per-connection cert/pair state. Loaded as "
+             "fallback before live snapshot, refreshed after successful import. "
+             "Keep gitignored — contains device-specific TLS material.",
+    )
+
+    cb = sub.add_parser(
+        "cert-backup",
+        help="Snapshot live preserved fields (android-tv cert etc.) to a JSON file. Standalone — no import.",
+    )
+    cb.add_argument("--url", default="https://companion.edge1.kubew.dev")
+    cb.add_argument(
+        "--cert-backup-file",
+        required=True,
+        help="Output JSON path. Will be chmod 600.",
+    )
 
     args = parser.parse_args()
     if args.site:
@@ -1148,5 +1271,7 @@ if __name__ == "__main__":
         export_config(args)
     elif args.command == "import":
         import_config(args)
+    elif args.command == "cert-backup":
+        cert_backup(args)
     else:
         parser.print_help()

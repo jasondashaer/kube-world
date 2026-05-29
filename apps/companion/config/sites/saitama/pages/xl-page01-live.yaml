@@ -1,0 +1,383 @@
+# Saitama — Stream Deck XL Page 1: Live (new streamlined main page)
+#
+# Drafted 2026-05-29. Lives alongside the existing pages 40-44 (Home,
+# Audio, ProP, Stream, Segments) which stay untouched — page 1 is
+# parallel for testing. The XL's startup_page stays at 40 in
+# surfaces.yaml until this page is signed off; operator can navigate
+# manually to page 1 to test.
+#
+# Design intent: cut complexity from the original 5-page layout.
+# - All Yamaha scene recalls except the boot Startup chain dropped
+#   (TF1 has no scene-safe, so per-segment recalls clobber the live
+#   board)
+# - Audio, ProP, Stream, Segments page navs removed from this page —
+#   if needed, operator navigates directly on the deck
+# - GO LIVE chain only starts RECORD (not stream); STREAM stays a
+#   dedicated manual toggle until the chain is trusted in production
+# - END SVC chain uses ATEM FTB instead of PP clear_all + master mute,
+#   so the in-room display + house audio continue uninterrupted
+#
+# Grid: 8 cols × 4 rows. 17 cells active, 15 empty (breathing room).
+#
+# Layout:
+#   Row 0: [ProP] [ATEM] [Yam] [Bridge] [_] [_] [Service:_____] [time_hms]
+#   Row 1: [GO LIVE] [REC●] [STREAM●] [FTB] [CLEAR PP] [PREV] [GO/NEXT] [DUCK]
+#   Row 2: [END SVC] [_]    [_]       [_]   [_]        [_]    [_]       [MUTE M]
+#   Row 3: [_]       [_]    [_]       [_]   [_]        [_]    [_]       [PANIC]
+#
+# Right column = audio safety stack, escalating top → bottom:
+#   r1c7 DUCK   — master fader -20 dB toggle for talk-over
+#   r2c7 MUTE M — master fader On toggle
+#   r3c7 PANIC  — master fader → -∞ instant (emergency hard cut)
+
+page:
+  number: 1
+  name: "Live"
+  device: xl
+
+buttons:
+  # ═══════════════════════════════════════════════════════════════════
+  # Row 0: Status indicators + service mode + clock
+  # ═══════════════════════════════════════════════════════════════════
+
+  - row: 0
+    col: 0
+    style:
+      text: "ProP"
+      bgcolor: "#222222"
+      color: "#FFFFFF"
+      size: 14
+    feedbacks:
+      - type: internal:instance_status
+        options:
+          instance_id: "propresenter_saitama"
+          ok_fg: 16777215
+          ok_bg: 35840          # 0x008C00 dark green
+          warning_fg: 0
+          warning_bg: 16776960
+          error_fg: 16777215
+          error_bg: 13107200    # 0xC80000 red
+          disabled_fg: 10066329
+          disabled_bg: 2236962
+
+  - row: 0
+    col: 1
+    style:
+      text: "ATEM"
+      bgcolor: "#222222"
+      color: "#FFFFFF"
+      size: 14
+    feedbacks:
+      - type: internal:instance_status
+        options:
+          instance_id: "atem_saitama"
+          ok_fg: 16777215
+          ok_bg: 35840
+          warning_fg: 0
+          warning_bg: 16776960
+          error_fg: 16777215
+          error_bg: 13107200
+          disabled_fg: 10066329
+          disabled_bg: 2236962
+
+  - row: 0
+    col: 2
+    style:
+      text: "Yamaha"
+      bgcolor: "#222222"
+      color: "#FFFFFF"
+      size: 14
+    feedbacks:
+      - type: internal:instance_status
+        options:
+          instance_id: "yamaha_saitama"
+          ok_fg: 16777215
+          ok_bg: 35840
+          warning_fg: 0
+          warning_bg: 16776960
+          error_fg: 16777215
+          error_bg: 13107200
+          disabled_fg: 10066329
+          disabled_bg: 2236962
+
+  - row: 0
+    col: 3
+    style:
+      text: "Bridge"
+      bgcolor: "#222222"
+      color: "#FFFFFF"
+      size: 14
+    feedbacks:
+      - type: internal:instance_status
+        options:
+          instance_id: "atem_media_bridge"
+          ok_fg: 16777215
+          ok_bg: 35840
+          warning_fg: 0
+          warning_bg: 16776960
+          error_fg: 16777215
+          error_bg: 13107200
+          disabled_fg: 10066329
+          disabled_bg: 2236962
+
+  # Service mode pad — text reads the custom variable; green-bg
+  # feedback fires when value == "Live" so the operator sees go/no-go
+  # at a glance.
+  - row: 0
+    col: 6
+    style:
+      text: "Service:\n$(internal:custom_service_mode)"
+      bgcolor: "#222222"
+      color: "#FFFFFF"
+      size: 14
+    feedbacks:
+      - type: internal:variable_value
+        options:
+          variable: "custom:service_mode"
+          op: "eq"
+          value: "Live"
+        style:
+          bgcolor: "#118800"
+          color: "#FFFFFF"
+          text: "Service:\nLIVE"
+          size: 14
+
+  - row: 0
+    col: 7
+    style:
+      text: "$(internal:time_hms)"
+      bgcolor: "#222222"
+      color: "#FFFFFF"
+      size: 18
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Row 1: Service start + video controls + PP slide nav + DUCK
+  # ═══════════════════════════════════════════════════════════════════
+
+  # GO LIVE — pre-service single-press chain. Wakes Media Bridge,
+  # recalls audio scene 1/A (the clean boot reset), sets ATEM program
+  # to startup source, starts recording, marks service_mode = "Live".
+  # STREAM intentionally NOT started here — operator hits STREAM
+  # manually once they confirm everything is good.
+  - row: 1
+    col: 0
+    style:
+      text: "GO\nLIVE"
+      bgcolor: "#117711"
+      color: "#FFFFFF"
+      size: 18
+    actions:
+      down:
+        - action: atem_media_bridge:post
+          options: { url: "/refresh", body: "", contenttype: "application/json" }
+        - action: internal:wait
+          options: { time: "500" }
+        - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
+          options: { X: 0, Y: 1 }
+        - action: atem_saitama:mediaPlayerSource
+          options: { mediaplayer: 0, source: "still1" }
+        - action: atem_saitama:program
+          options: { input: 3010, mixeffect: 0 }
+        - action: atem_saitama:recordStartStop
+          options: { record: "toggle" }
+        - action: internal:custom_variable_set_value
+          options: { name: "service_mode", value: "Live" }
+
+  # REC — dedicated record toggle. Red feedback when active.
+  - row: 1
+    col: 1
+    style:
+      text: "REC"
+      bgcolor: "#222222"
+      color: "#FFFFFF"
+      size: 18
+    actions:
+      down:
+        - action: atem_saitama:recordStartStop
+          options: { record: "toggle" }
+    feedbacks:
+      - type: bmd-atem:recording
+        options: {}
+        style:
+          bgcolor: "#C80000"
+          color: "#FFFFFF"
+          text: "REC ●"
+          size: 18
+
+  # STREAM — dedicated stream toggle. Red feedback when active.
+  - row: 1
+    col: 2
+    style:
+      text: "STREAM"
+      bgcolor: "#222222"
+      color: "#FFFFFF"
+      size: 14
+    actions:
+      down:
+        - action: atem_saitama:streamStartStop
+          options: { stream: "toggle" }
+    feedbacks:
+      - type: bmd-atem:streaming
+        options: {}
+        style:
+          bgcolor: "#C80000"
+          color: "#FFFFFF"
+          text: "STREAM ●"
+          size: 14
+
+  # FTB — ATEM Fade To Black. Single press toggles black on/off.
+  - row: 1
+    col: 3
+    style:
+      text: "FTB"
+      bgcolor: "#222222"
+      color: "#FFFFFF"
+      size: 18
+    actions:
+      down:
+        - action: atem_saitama:fadeToBlackAuto
+          options: { mixeffect: 0 }
+
+  # CLEAR PP — wipes slide + media + props (most "blank" outcome).
+  - row: 1
+    col: 4
+    style:
+      text: "CLEAR\nPP"
+      bgcolor: "#664400"
+      color: "#FFFFFF"
+      size: 16
+    actions:
+      down:
+        - action: propresenter_saitama:clear_all
+
+  # PREV slide
+  - row: 1
+    col: 5
+    style:
+      text: "PREV"
+      bgcolor: "#222244"
+      color: "#FFFFFF"
+      size: 18
+    actions:
+      down:
+        - action: propresenter_saitama:prev_slide
+
+  # GO / NEXT — same `trigger_next` action as the regular GO button.
+  # Multi-line label so operator sees both common names without
+  # ambiguity.
+  - row: 1
+    col: 6
+    style:
+      text: "GO\nNEXT"
+      bgcolor: "#222244"
+      color: "#FFFFFF"
+      size: 18
+    actions:
+      down:
+        - action: propresenter_saitama:trigger_next
+
+  # DUCK — master fader -20 dB (down 2000 RCP units) toggle.
+  # State tracked in custom variable `duck_active`. Press 1: drop;
+  # press 2: restore. Uses relative fader changes (Rel: true) so the
+  # restore is symmetric to the dip, even if the operator manually
+  # adjusts the master in between (the absolute target floats).
+  - row: 1
+    col: 7
+    style:
+      text: "DUCK"
+      bgcolor: "#222222"
+      color: "#FFFFFF"
+      size: 18
+    actions:
+      down:
+        - action: internal:custom_variable_set_expression
+          options:
+            name: "duck_active"
+            expression: '$(custom:duck_active) == "1" ? "0" : "1"'
+        - action: yamaha_saitama:MIXER_Current/St/Fader/Level
+          options: { X: 1, Val: -2000, Rel: true }
+    feedbacks:
+      - type: internal:variable_value
+        options:
+          variable: "custom:duck_active"
+          op: "eq"
+          value: "1"
+        style:
+          bgcolor: "#CC7700"
+          color: "#FFFFFF"
+          text: "DUCK\nACTIVE"
+          size: 14
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Row 2: END SVC + (breathing room) + MUTE M
+  # ═══════════════════════════════════════════════════════════════════
+
+  # END SVC — post-service single-press chain. Stops recording +
+  # streaming (safety, if op forgot one), fires ATEM FTB (handles
+  # visual cut + audio mute on stream/recording output without
+  # touching PP screen or house speakers), marks service_mode →
+  # "Idle". Also clears duck state so the next service starts clean.
+  - row: 2
+    col: 0
+    style:
+      text: "END\nSVC"
+      bgcolor: "#771111"
+      color: "#FFFFFF"
+      size: 18
+    actions:
+      down:
+        - action: atem_saitama:recordStartStop
+          options: { record: "toggle" }
+        - action: atem_saitama:streamStartStop
+          options: { stream: "toggle" }
+        - action: atem_saitama:fadeToBlackAuto
+          options: { mixeffect: 0 }
+        - action: internal:custom_variable_set_value
+          options: { name: "service_mode", value: "Idle" }
+        - action: internal:custom_variable_set_value
+          options: { name: "duck_active", value: "0" }
+
+  # MUTE M — master fader On toggle. TF1 inverted Val logic: 1 =
+  # unmuted, 0 = muted, "Toggle" flips.
+  - row: 2
+    col: 7
+    style:
+      text: "MUTE\nMaster"
+      bgcolor: "#222222"
+      color: "#FFFFFF"
+      size: 14
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Current/St/Fader/On
+          options: { X: 1, Val: "Toggle" }
+    feedbacks:
+      - type: internal:variable_value
+        options:
+          variable: "Yamaha_TF1__Saitama_:MIXER_Current/St/Fader/On_1"
+          op: "eq"
+          value: "0"
+        style:
+          bgcolor: "#C80000"
+          color: "#FFFFFF"
+          text: "MUTED"
+          size: 14
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Row 3: (mostly empty) + PANIC
+  # ═══════════════════════════════════════════════════════════════════
+
+  # PANIC — master fader → -∞ dB instant. Emergency hard cut.
+  # Symmetric "unpanic" not provided here — operator has to bring
+  # master back up deliberately via the TF1 surface itself, which is
+  # the right safety posture for an emergency cut.
+  - row: 3
+    col: 7
+    style:
+      text: "PANIC"
+      bgcolor: "#660000"
+      color: "#FFFFFF"
+      size: 18
+    actions:
+      down:
+        - action: yamaha_saitama:MIXER_Current/St/Fader/Level
+          options: { X: 1, Val: -32768 }

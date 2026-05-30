@@ -20,10 +20,10 @@
 # Grid: 8 cols × 4 rows. 17 cells active, 15 empty (breathing room).
 #
 # Layout:
-#   Row 0: [ProP] [ATEM] [Yam] [Bridge] [_] [_] [Service:_____] [time_hms]
-#   Row 1: [GO LIVE] [REC●] [STREAM●] [FTB] [CLEAR PP] [PREV] [GO/NEXT] [DUCK]
-#   Row 2: [END SVC] [_]    [_]       [_]   [_]        [_]    [_]       [MUTE M]
-#   Row 3: [_]       [_]    [_]       [_]   [_]        [_]    [_]       [PANIC]
+#   Row 0: [ProP]    [ATEM] [Yam]     [Bridge]   [_]    [_]      [Service:____] [time_hms]
+#   Row 1: [_]       [_]    [_]       [_]        [_]    [_]      [_]            [DUCK]
+#   Row 2: [GO LIVE] [_]    [_]       [CLEAR PP] [PREV] [GO/NEXT][_]            [MUTE M]
+#   Row 3: [END SVC] [REC●] [STREAM●] [FTB]      [_]    [_]      [_]            [PANIC]
 #
 # Right column = audio safety stack, escalating top → bottom:
 #   r1c7 DUCK   — master fader -20 dB toggle for talk-over
@@ -40,85 +40,151 @@ buttons:
   # Row 0: Status indicators + service mode + clock
   # ═══════════════════════════════════════════════════════════════════
 
+  # Status pads use the proven internal:variable_value pattern (same as
+  # page 40). Companion 4.3.1's internal:instance_status feedback
+  # didn't render on Saitama in testing — the variable_value form is
+  # what the existing page-40 indicators use, so we mirror that. Two
+  # feedbacks per pad: one green when connection is "good", one red
+  # when "error". Base style (gray) shows during init / disabled.
   - row: 0
     col: 0
     style:
-      text: "ProP"
+      text: "ProP\n● ?"
       bgcolor: "#222222"
-      color: "#FFFFFF"
+      color: "#888888"
       size: 14
+      alignment: "center:center"
+      show_topbar: "default"
     feedbacks:
-      - type: internal:instance_status
+      - type: internal:variable_value
         options:
-          instance_id: "propresenter_saitama"
-          ok_fg: 16777215
-          ok_bg: 35840          # 0x008C00 dark green
-          warning_fg: 0
-          warning_bg: 16776960
-          error_fg: 16777215
-          error_bg: 13107200    # 0xC80000 red
-          disabled_fg: 10066329
-          disabled_bg: 2236962
+          variable: "internal:connection_ProPresenter__Saitama__status"
+          op: "eq"
+          value: "good"
+        style:
+          text: "ProP\n● OK"
+          size: 14
+          color: 16777215
+          bgcolor: 1140241        # 0x116811 dark green
+          alignment: "center:center"
+          show_topbar: "default"
+      - type: internal:variable_value
+        options:
+          variable: "internal:connection_ProPresenter__Saitama__status"
+          op: "eq"
+          value: "error"
+        style:
+          text: "ProP\n● OFFLINE"
+          size: 14
+          color: 16777215
+          bgcolor: 13107200       # 0xC80000 red
+          alignment: "center:center"
+          show_topbar: "default"
 
   - row: 0
     col: 1
     style:
-      text: "ATEM"
+      text: "ATEM\n● ?"
       bgcolor: "#222222"
-      color: "#FFFFFF"
+      color: "#888888"
       size: 14
+      alignment: "center:center"
+      show_topbar: "default"
     feedbacks:
-      - type: internal:instance_status
+      - type: internal:variable_value
         options:
-          instance_id: "atem_saitama"
-          ok_fg: 16777215
-          ok_bg: 35840
-          warning_fg: 0
-          warning_bg: 16776960
-          error_fg: 16777215
-          error_bg: 13107200
-          disabled_fg: 10066329
-          disabled_bg: 2236962
+          variable: "internal:connection_ATEM_Mini_Pro__Saitama__status"
+          op: "eq"
+          value: "good"
+        style:
+          text: "ATEM\n● OK"
+          size: 14
+          color: 16777215
+          bgcolor: 1140241
+          alignment: "center:center"
+          show_topbar: "default"
+      - type: internal:variable_value
+        options:
+          variable: "internal:connection_ATEM_Mini_Pro__Saitama__status"
+          op: "eq"
+          value: "error"
+        style:
+          text: "ATEM\n● OFFLINE"
+          size: 14
+          color: 16777215
+          bgcolor: 13107200
+          alignment: "center:center"
+          show_topbar: "default"
 
   - row: 0
     col: 2
     style:
-      text: "Yamaha"
+      text: "Yamaha\n● ?"
       bgcolor: "#222222"
-      color: "#FFFFFF"
+      color: "#888888"
       size: 14
+      alignment: "center:center"
+      show_topbar: "default"
     feedbacks:
-      - type: internal:instance_status
+      - type: internal:variable_value
         options:
-          instance_id: "yamaha_saitama"
-          ok_fg: 16777215
-          ok_bg: 35840
-          warning_fg: 0
-          warning_bg: 16776960
-          error_fg: 16777215
-          error_bg: 13107200
-          disabled_fg: 10066329
-          disabled_bg: 2236962
+          variable: "internal:connection_Yamaha_TF1__Saitama__status"
+          op: "eq"
+          value: "good"
+        style:
+          text: "Yamaha\n● OK"
+          size: 14
+          color: 16777215
+          bgcolor: 1140241
+          alignment: "center:center"
+          show_topbar: "default"
+      - type: internal:variable_value
+        options:
+          variable: "internal:connection_Yamaha_TF1__Saitama__status"
+          op: "eq"
+          value: "error"
+        style:
+          text: "Yamaha\n● OFFLINE"
+          size: 14
+          color: 16777215
+          bgcolor: 13107200
+          alignment: "center:center"
+          show_topbar: "default"
 
   - row: 0
     col: 3
     style:
-      text: "Bridge"
+      text: "Bridge\n● ?"
       bgcolor: "#222222"
-      color: "#FFFFFF"
+      color: "#888888"
       size: 14
+      alignment: "center:center"
+      show_topbar: "default"
     feedbacks:
-      - type: internal:instance_status
+      - type: internal:variable_value
         options:
-          instance_id: "atem_media_bridge"
-          ok_fg: 16777215
-          ok_bg: 35840
-          warning_fg: 0
-          warning_bg: 16776960
-          error_fg: 16777215
-          error_bg: 13107200
-          disabled_fg: 10066329
-          disabled_bg: 2236962
+          variable: "internal:connection_ATEM_Media_Bridge__local__status"
+          op: "eq"
+          value: "good"
+        style:
+          text: "Bridge\n● OK"
+          size: 14
+          color: 16777215
+          bgcolor: 1140241
+          alignment: "center:center"
+          show_topbar: "default"
+      - type: internal:variable_value
+        options:
+          variable: "internal:connection_ATEM_Media_Bridge__local__status"
+          op: "eq"
+          value: "error"
+        style:
+          text: "Bridge\n● OFFLINE"
+          size: 14
+          color: 16777215
+          bgcolor: 13107200
+          alignment: "center:center"
+          show_topbar: "default"
 
   # Service mode pad — text reads the custom variable; green-bg
   # feedback fires when value == "Live" so the operator sees go/no-go
@@ -159,7 +225,7 @@ buttons:
   # to startup source, starts recording, marks service_mode = "Live".
   # STREAM intentionally NOT started here — operator hits STREAM
   # manually once they confirm everything is good.
-  - row: 1
+  - row: 2
     col: 0
     style:
       text: "GO\nLIVE"
@@ -184,7 +250,7 @@ buttons:
           options: { name: "service_mode", value: "Live" }
 
   # REC — dedicated record toggle. Red feedback when active.
-  - row: 1
+  - row: 3
     col: 1
     style:
       text: "REC"
@@ -205,7 +271,7 @@ buttons:
           size: 18
 
   # STREAM — dedicated stream toggle. Red feedback when active.
-  - row: 1
+  - row: 3
     col: 2
     style:
       text: "STREAM"
@@ -226,7 +292,7 @@ buttons:
           size: 14
 
   # FTB — ATEM Fade To Black. Single press toggles black on/off.
-  - row: 1
+  - row: 3
     col: 3
     style:
       text: "FTB"
@@ -239,8 +305,8 @@ buttons:
           options: { mixeffect: 0 }
 
   # CLEAR PP — wipes slide + media + props (most "blank" outcome).
-  - row: 1
-    col: 4
+  - row: 2
+    col: 3
     style:
       text: "CLEAR\nPP"
       bgcolor: "#664400"
@@ -251,8 +317,8 @@ buttons:
         - action: propresenter_saitama:clear_all
 
   # PREV slide
-  - row: 1
-    col: 5
+  - row: 2
+    col: 4
     style:
       text: "PREV"
       bgcolor: "#222244"
@@ -265,8 +331,8 @@ buttons:
   # GO / NEXT — same `trigger_next` action as the regular GO button.
   # Multi-line label so operator sees both common names without
   # ambiguity.
-  - row: 1
-    col: 6
+  - row: 2
+    col: 5
     style:
       text: "GO\nNEXT"
       bgcolor: "#222244"
@@ -317,7 +383,7 @@ buttons:
   # visual cut + audio mute on stream/recording output without
   # touching PP screen or house speakers), marks service_mode →
   # "Idle". Also clears duck state so the next service starts clean.
-  - row: 2
+  - row: 3
     col: 0
     style:
       text: "END\nSVC"

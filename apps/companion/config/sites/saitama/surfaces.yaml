@@ -8,4 +8,4 @@ surfaces:
     name: "Stream Deck XL"
     address: "10.1.1.110"
     port: 5343
-    startup_page: 40
+    startup_page: 1

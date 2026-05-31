@@ -20,10 +20,19 @@
 # Grid: 8 cols × 4 rows. 17 cells active, 15 empty (breathing room).
 #
 # Layout:
-#   Row 0: [ProP]    [ATEM] [Yam]     [Bridge]   [_]    [_]      [Service:____] [time_hms]
-#   Row 1: [_]       [_]    [_]       [_]        [_]    [_]      [_]            [DUCK]
-#   Row 2: [GO LIVE] [_]    [_]       [CLEAR PP] [PREV] [GO/NEXT][_]            [MUTE M]
-#   Row 3: [END SVC] [REC●] [STREAM●] [FTB]      [_]    [_]      [_]            [PANIC]
+#   Row 0: [ProP]    [ATEM]   [Yam]    [Bridge] [_] [_] [Service:_] [time_hms]
+#   Row 1: [_]       [REC●]   [STREAM●][FTB]    [_] [_] [_]         [DUCK]
+#   Row 2: [GO LIVE] [REC arm][STR arm][FTB arm][_] [_] [_]         [MUTE M]
+#   Row 3: [END SVC] [_]      [_]      [_]      [CLEAR PP] [PREV] [GO/NEXT] [_]
+#
+# ARM toggles (r2c1-c3) gate inclusion of REC / STREAM / FTB in the
+# GO LIVE + END SVC chains. The chains themselves are implemented as
+# triggers in triggers.yaml — GO LIVE / END SVC buttons just set a
+# pulse variable that the triggers watch. Each trigger gates one
+# slice on the corresponding arm_<action> variable. The earlier
+# `internal:if_expression` approach was abandoned because Companion
+# 4.3.1 doesn't remap child entity connectionIds during import.
+# Trigger top-level actions DO get remapped, so this works.
 #
 # Right column = audio safety stack, escalating top → bottom:
 #   r1c7 DUCK   — master fader -20 dB toggle for talk-over
@@ -220,11 +229,13 @@ buttons:
   # Row 1: Service start + video controls + PP slide nav + DUCK
   # ═══════════════════════════════════════════════════════════════════
 
-  # GO LIVE — pre-service single-press chain. Wakes Media Bridge,
-  # recalls audio scene 1/A (the clean boot reset), sets ATEM program
-  # to startup source, starts recording, marks service_mode = "Live".
-  # STREAM intentionally NOT started here — operator hits STREAM
-  # manually once they confirm everything is good.
+  # GO LIVE — pulse-only button. Sets `go_live_pulse = "1"` which
+  # fires the GO LIVE triggers in triggers.yaml; each trigger
+  # implements one slice of the chain with its own arm condition
+  # (arm_rec / arm_stream / arm_ftb). After 100 ms the pulse is
+  # reset to "0" so the next press fires the rising edge again.
+  # service_mode = "Live" is set by the final trigger after the
+  # camera-fade reveal completes.
   - row: 2
     col: 0
     style:
@@ -234,23 +245,124 @@ buttons:
       size: 18
     actions:
       down:
-        - action: atem_media_bridge:post
-          options: { url: "/refresh", body: "", contenttype: "application/json" }
-        - action: internal:wait
-          options: { time: "500" }
-        - action: yamaha_saitama:MIXER_Lib/Bank/Scene/Recall
-          options: { X: 0, Y: 1 }
-        - action: atem_saitama:mediaPlayerSource
-          options: { mediaplayer: 0, source: "still1" }
-        - action: atem_saitama:program
-          options: { input: 3010, mixeffect: 0 }
-        - action: atem_saitama:recordStartStop
-          options: { record: "toggle" }
         - action: internal:custom_variable_set_value
-          options: { name: "service_mode", value: "Live" }
+          options: { name: "go_live_pulse", value: "1" }
+        - action: internal:wait
+          options: { time: "100" }
+        - action: internal:custom_variable_set_value
+          options: { name: "go_live_pulse", value: "0" }
+
+  # ARM REC — 2-step toggle. Step 0 = disarmed (gray "REC OFF"),
+  # step 1 = armed (green "REC ARMED" via feedback). Sets `arm_rec`
+  # custom variable that gates the GO LIVE + END SVC REC triggers.
+  - row: 2
+    col: 1
+    style:
+      text: "REC\nOFF"
+      bgcolor: "#222222"
+      color: "#FFFFFF"
+      size: 18
+    steps:
+      - actions:
+          down:
+            - action: internal:custom_variable_set_value
+              options: { name: "arm_rec", value: "1" }
+            - action: internal:step_delta
+              options: { amount: 1 }
+      - actions:
+          down:
+            - action: internal:custom_variable_set_value
+              options: { name: "arm_rec", value: "0" }
+            - action: internal:step_delta
+              options: { amount: 1 }
+    feedbacks:
+      - type: internal:variable_value
+        options:
+          variable: "custom:arm_rec"
+          op: "eq"
+          value: "1"
+        style:
+          text: "REC\nARMED"
+          bgcolor: "#117711"
+          color: "#FFFFFF"
+          size: 18
+          alignment: "center:center"
+          show_topbar: "default"
+
+  # ARM STREAM — same pattern as ARM REC. Gates the stream slice.
+  - row: 2
+    col: 2
+    style:
+      text: "STREAM\nOFF"
+      bgcolor: "#222222"
+      color: "#FFFFFF"
+      size: 14
+    steps:
+      - actions:
+          down:
+            - action: internal:custom_variable_set_value
+              options: { name: "arm_stream", value: "1" }
+            - action: internal:step_delta
+              options: { amount: 1 }
+      - actions:
+          down:
+            - action: internal:custom_variable_set_value
+              options: { name: "arm_stream", value: "0" }
+            - action: internal:step_delta
+              options: { amount: 1 }
+    feedbacks:
+      - type: internal:variable_value
+        options:
+          variable: "custom:arm_stream"
+          op: "eq"
+          value: "1"
+        style:
+          text: "STREAM\nARMED"
+          bgcolor: "#117711"
+          color: "#FFFFFF"
+          size: 14
+          alignment: "center:center"
+          show_topbar: "default"
+
+  # ARM FTB — same pattern as ARM REC. Gates the two FTB slices
+  # (ON pre-roll + OFF after rec/stream start) in GO LIVE, and the
+  # FTB-ON slice in END SVC.
+  - row: 2
+    col: 3
+    style:
+      text: "FTB\nOFF"
+      bgcolor: "#222222"
+      color: "#FFFFFF"
+      size: 18
+    steps:
+      - actions:
+          down:
+            - action: internal:custom_variable_set_value
+              options: { name: "arm_ftb", value: "1" }
+            - action: internal:step_delta
+              options: { amount: 1 }
+      - actions:
+          down:
+            - action: internal:custom_variable_set_value
+              options: { name: "arm_ftb", value: "0" }
+            - action: internal:step_delta
+              options: { amount: 1 }
+    feedbacks:
+      - type: internal:variable_value
+        options:
+          variable: "custom:arm_ftb"
+          op: "eq"
+          value: "1"
+        style:
+          text: "FTB\nARMED"
+          bgcolor: "#117711"
+          color: "#FFFFFF"
+          size: 18
+          alignment: "center:center"
+          show_topbar: "default"
 
   # REC — dedicated record toggle. Red feedback when active.
-  - row: 3
+  - row: 1
     col: 1
     style:
       text: "REC"
@@ -271,7 +383,7 @@ buttons:
           size: 18
 
   # STREAM — dedicated stream toggle. Red feedback when active.
-  - row: 3
+  - row: 1
     col: 2
     style:
       text: "STREAM"
@@ -292,7 +404,7 @@ buttons:
           size: 14
 
   # FTB — ATEM Fade To Black. Single press toggles black on/off.
-  - row: 3
+  - row: 1
     col: 3
     style:
       text: "FTB"
@@ -304,9 +416,12 @@ buttons:
         - action: atem_saitama:fadeToBlackAuto
           options: { mixeffect: 0 }
 
-  # CLEAR PP — wipes slide + media + props (most "blank" outcome).
-  - row: 2
-    col: 3
+  # CLEAR PP — clears the slide layer. PP-API module has no
+  # single "clear all" action; clearLayerOrGroup hits one layer at
+  # a time. "slide" is the most common need. Add more entries to
+  # the action chain for additional layers (e.g. messages, props).
+  - row: 3
+    col: 4
     style:
       text: "CLEAR\nPP"
       bgcolor: "#664400"
@@ -314,11 +429,15 @@ buttons:
       size: 16
     actions:
       down:
-        - action: propresenter_saitama:clear_all
+        - action: propresenter_saitama:clearLayerOrGroup
+          options:
+            clear_layer_or_group_dropdown: "layer"
+            clear_layer_dropdown: "slide"
 
-  # PREV slide
-  - row: 2
-    col: 4
+  # PREV slide — PP-API uses unified `triggerOperation` action with
+  # target + direction options (not separate prev_slide / next_slide).
+  - row: 3
+    col: 5
     style:
       text: "PREV"
       bgcolor: "#222244"
@@ -326,13 +445,16 @@ buttons:
       size: 18
     actions:
       down:
-        - action: propresenter_saitama:prev_slide
+        - action: propresenter_saitama:triggerOperation
+          options:
+            trigger_target: "presentation"
+            trigger_next_previous: "previous"
 
-  # GO / NEXT — same `trigger_next` action as the regular GO button.
+  # GO / NEXT — same triggerOperation action with direction=next.
   # Multi-line label so operator sees both common names without
   # ambiguity.
-  - row: 2
-    col: 5
+  - row: 3
+    col: 6
     style:
       text: "GO\nNEXT"
       bgcolor: "#222244"
@@ -340,13 +462,23 @@ buttons:
       size: 18
     actions:
       down:
-        - action: propresenter_saitama:trigger_next
+        - action: propresenter_saitama:triggerOperation
+          options:
+            trigger_target: "presentation"
+            trigger_next_previous: "next"
 
-  # DUCK — master fader -20 dB (down 2000 RCP units) toggle.
-  # State tracked in custom variable `duck_active`. Press 1: drop;
-  # press 2: restore. Uses relative fader changes (Rel: true) so the
-  # restore is symmetric to the dip, even if the operator manually
-  # adjusts the master in between (the absolute target floats).
+  # DUCK — master fader -20 dB toggle implemented as a 2-step button.
+  # Style lives at the button level (per-step style isn't supported
+  # by the generator schema); visual ducked-state shown via feedback
+  # on the duck_active variable. Each press fires the opposite
+  # relative delta + advances to the other step, so restore matches
+  # the dip even if the operator moved the master in between.
+  #
+  # Val units: yamaha-rcp upgrade script (runs on every import — the
+  # generator doesn't pin lastUpgradeIndex) divides Val by 100. To
+  # land at -20 dB / +20 dB in the live db, write raw pre-upgrade
+  # units (-2000 / +2000) in YAML. Mirrors the convention used on
+  # page 40 DUCK button which produces the working live values.
   - row: 1
     col: 7
     style:
@@ -354,14 +486,23 @@ buttons:
       bgcolor: "#222222"
       color: "#FFFFFF"
       size: 18
-    actions:
-      down:
-        - action: internal:custom_variable_set_expression
-          options:
-            name: "duck_active"
-            expression: '$(custom:duck_active) == "1" ? "0" : "1"'
-        - action: yamaha_saitama:MIXER_Current/St/Fader/Level
-          options: { X: 1, Val: -2000, Rel: true }
+    steps:
+      - actions:
+          down:
+            - action: yamaha_saitama:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: -2000, Rel: true }
+            - action: internal:custom_variable_set_value
+              options: { name: "duck_active", value: "1" }
+            - action: internal:step_delta
+              options: { amount: 1 }
+      - actions:
+          down:
+            - action: yamaha_saitama:MIXER_Current/St/Fader/Level
+              options: { X: 1, Val: 2000, Rel: true }
+            - action: internal:custom_variable_set_value
+              options: { name: "duck_active", value: "0" }
+            - action: internal:step_delta
+              options: { amount: 1 }
     feedbacks:
       - type: internal:variable_value
         options:
@@ -369,20 +510,22 @@ buttons:
           op: "eq"
           value: "1"
         style:
+          text: "UNDUCK"
           bgcolor: "#CC7700"
           color: "#FFFFFF"
-          text: "DUCK\nACTIVE"
-          size: 14
+          size: 18
+          alignment: "center:center"
+          show_topbar: "default"
 
   # ═══════════════════════════════════════════════════════════════════
   # Row 2: END SVC + (breathing room) + MUTE M
   # ═══════════════════════════════════════════════════════════════════
 
-  # END SVC — post-service single-press chain. Stops recording +
-  # streaming (safety, if op forgot one), fires ATEM FTB (handles
-  # visual cut + audio mute on stream/recording output without
-  # touching PP screen or house speakers), marks service_mode →
-  # "Idle". Also clears duck state so the next service starts clean.
+  # END SVC — pulse-only button. Same pattern as GO LIVE: sets
+  # `end_svc_pulse = "1"` for 100 ms which fires the END SVC
+  # triggers in triggers.yaml. Each trigger gates its slice on the
+  # same arm_<action> variables as GO LIVE — operator picks once
+  # per service which actions are part of the flow.
   - row: 3
     col: 0
     style:
@@ -392,24 +535,22 @@ buttons:
       size: 18
     actions:
       down:
-        - action: atem_saitama:recordStartStop
-          options: { record: "toggle" }
-        - action: atem_saitama:streamStartStop
-          options: { stream: "toggle" }
-        - action: atem_saitama:fadeToBlackAuto
-          options: { mixeffect: 0 }
         - action: internal:custom_variable_set_value
-          options: { name: "service_mode", value: "Idle" }
+          options: { name: "end_svc_pulse", value: "1" }
+        - action: internal:wait
+          options: { time: "100" }
         - action: internal:custom_variable_set_value
-          options: { name: "duck_active", value: "0" }
+          options: { name: "end_svc_pulse", value: "0" }
 
   # MUTE M — master fader On toggle. TF1 inverted Val logic: 1 =
-  # unmuted, 0 = muted, "Toggle" flips.
+  # unmuted, 0 = muted, "Toggle" flips. Base bgcolor matches the
+  # old PANIC dark red so the audio-safety stack reads as a single
+  # red column at a glance.
   - row: 2
     col: 7
     style:
       text: "MUTE\nMaster"
-      bgcolor: "#222222"
+      bgcolor: "#660000"
       color: "#FFFFFF"
       size: 14
     actions:
@@ -428,22 +569,8 @@ buttons:
           text: "MUTED"
           size: 14
 
-  # ═══════════════════════════════════════════════════════════════════
-  # Row 3: (mostly empty) + PANIC
-  # ═══════════════════════════════════════════════════════════════════
-
-  # PANIC — master fader → -∞ dB instant. Emergency hard cut.
-  # Symmetric "unpanic" not provided here — operator has to bring
-  # master back up deliberately via the TF1 surface itself, which is
-  # the right safety posture for an emergency cut.
-  - row: 3
-    col: 7
-    style:
-      text: "PANIC"
-      bgcolor: "#660000"
-      color: "#FFFFFF"
-      size: 18
-    actions:
-      down:
-        - action: yamaha_saitama:MIXER_Current/St/Fader/Level
-          options: { X: 1, Val: -32768 }
+  # PANIC removed 2026-05-31 — operator prefers a single audio kill
+  # switch (MUTE Master) rather than two adjacent destructive
+  # actions. To re-add an instant-to-minus-infinity action, restore
+  # the row 3 col 7 button with
+  # `yamaha_saitama:MIXER_Current/St/Fader/Level X:1 Val:-32768`.

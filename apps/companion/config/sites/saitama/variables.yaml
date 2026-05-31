@@ -31,6 +31,39 @@ variables:
     default: "0"
     persist: false
 
+  # Per-action arm gates for GO LIVE / END SVC chains. When "1", the
+  # chain includes that action's slice; when "0", skipped. Gating is
+  # implemented via triggers in triggers.yaml (one trigger per slice,
+  # conditioned on go_live_pulse / end_svc_pulse AND arm_<action>) —
+  # the `internal:if_expression`-in-button approach silently no-op'd
+  # because Companion's import doesn't remap child entity
+  # connectionIds. Triggers' top-level actions DO get remapped, so
+  # the gating works reliably this way.
+  - name: arm_rec
+    default: "1"
+    persist: true
+
+  - name: arm_stream
+    default: "0"
+    persist: true
+
+  - name: arm_ftb
+    default: "1"
+    persist: true
+
+  # Pulse signals: GO LIVE / END SVC buttons set their pulse to "1"
+  # briefly, then back to "0". Triggers watch pulse=="1" with
+  # condition_true events; rising edge of pulse fires each gated
+  # trigger once. Returning pulse to "0" re-arms for the next press.
+  - name: go_live_pulse
+    default: "0"
+    persist: false
+
+  - name: end_svc_pulse
+    default: "0"
+    persist: false
+
+
   # Mix bus index used for the live stream + recording feed.
   # PLACEHOLDER on Saitama until ATEM-side bus mapping confirmed.
   - name: record_bus_idx

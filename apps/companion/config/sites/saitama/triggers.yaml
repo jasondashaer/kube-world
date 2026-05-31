@@ -281,3 +281,300 @@ triggers:
         options: { name: "next_event_step", value: "3" }
       - action: internal:custom_variable_set_value
         options: { name: "next_event_label", value: "Live" }
+
+  # ═══════════════════════════════════════════════════════════════════
+  # GO LIVE chain — pulse-driven, arm-gated
+  # ═══════════════════════════════════════════════════════════════════
+  # The GO LIVE button on page 1 r2c0 sets `go_live_pulse = "1"`
+  # for 100 ms. Each trigger below watches that variable AND its
+  # arm_<action> gate (where applicable). Triggers fire in parallel
+  # at the rising edge; each carries its own initial wait so the
+  # composite sequence plays out:
+  #
+  #   0 ms      bridge wake + program → still 3010 (preroll)
+  #   700 ms    FTB ON           (if arm_ftb=1)
+  #   2700 ms   REC start        (if arm_rec=1)
+  #   2700 ms   STREAM start     (if arm_stream=1)
+  #   3700 ms   FTB OFF          (if arm_ftb=1)
+  #   8700 ms   preview → cam 1 + AUTO (always) + service_mode=Live
+
+  - name: "GO LIVE: 0ms preroll (bridge + still3010)"
+    enabled: true
+    sort_order: 100
+    events:
+      - type: condition_true
+        options: {}
+    conditions:
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "internal:custom_go_live_pulse"
+          value: "1"
+    actions:
+      - action: atem_media_bridge:post
+        options: { url: "/refresh", body: "", contenttype: "application/json" }
+      - action: internal:wait
+        options: { time: "500" }
+      - action: atem_saitama:mediaPlayerSource
+        options: { mediaplayer: 0, source: "still1" }
+      - action: atem_saitama:program
+        options: { input: 3010, mixeffect: 0 }
+
+  - name: "GO LIVE: 700ms FTB ON (if armed)"
+    enabled: true
+    sort_order: 101
+    events:
+      - type: condition_true
+        options: {}
+    conditions:
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "internal:custom_go_live_pulse"
+          value: "1"
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "internal:custom_arm_ftb"
+          value: "1"
+    actions:
+      - action: internal:wait
+        options: { time: "700" }
+      - action: atem_saitama:fadeToBlackAuto
+        options: { mixeffect: 0 }
+
+  - name: "GO LIVE: 2700ms REC start (if armed)"
+    enabled: true
+    sort_order: 102
+    events:
+      - type: condition_true
+        options: {}
+    conditions:
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "internal:custom_go_live_pulse"
+          value: "1"
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "internal:custom_arm_rec"
+          value: "1"
+    actions:
+      - action: internal:wait
+        options: { time: "2700" }
+      - action: atem_saitama:recordStartStop
+        options: { record: "toggle" }
+
+  - name: "GO LIVE: 2700ms STREAM start (if armed)"
+    enabled: true
+    sort_order: 103
+    events:
+      - type: condition_true
+        options: {}
+    conditions:
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "internal:custom_go_live_pulse"
+          value: "1"
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "internal:custom_arm_stream"
+          value: "1"
+    actions:
+      - action: internal:wait
+        options: { time: "2700" }
+      - action: atem_saitama:streamStartStop
+        options: { stream: "toggle" }
+
+  - name: "GO LIVE: 3700ms FTB OFF (if armed)"
+    enabled: true
+    sort_order: 104
+    events:
+      - type: condition_true
+        options: {}
+    conditions:
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "internal:custom_go_live_pulse"
+          value: "1"
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "internal:custom_arm_ftb"
+          value: "1"
+    actions:
+      - action: internal:wait
+        options: { time: "3700" }
+      - action: atem_saitama:fadeToBlackAuto
+        options: { mixeffect: 0 }
+
+  - name: "GO LIVE: 8700ms camera fade + service_mode=Live"
+    enabled: true
+    sort_order: 105
+    events:
+      - type: condition_true
+        options: {}
+    conditions:
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "internal:custom_go_live_pulse"
+          value: "1"
+    actions:
+      - action: internal:wait
+        options: { time: "8700" }
+      - action: atem_saitama:preview
+        options: { input: 1, mixeffect: 0 }
+      - action: atem_saitama:auto
+        options: { mixeffect: 0 }
+      - action: internal:custom_variable_set_value
+        options: { name: "service_mode", value: "Live" }
+
+  # ═══════════════════════════════════════════════════════════════════
+  # END SVC chain — pulse-driven, arm-gated
+  # ═══════════════════════════════════════════════════════════════════
+  #   0 ms      preview → still 3010 + AUTO (logo fade-in)
+  #   5000 ms   FTB ON           (if arm_ftb=1)
+  #   7000 ms   REC stop         (if arm_rec=1)
+  #   7000 ms   STREAM stop      (if arm_stream=1)
+  #   7500 ms   service_mode=Idle + duck_active=0
+
+  - name: "END SVC: 0ms logo fade"
+    enabled: true
+    sort_order: 110
+    events:
+      - type: condition_true
+        options: {}
+    conditions:
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "internal:custom_end_svc_pulse"
+          value: "1"
+    actions:
+      - action: atem_saitama:preview
+        options: { input: 3010, mixeffect: 0 }
+      - action: atem_saitama:auto
+        options: { mixeffect: 0 }
+
+  - name: "END SVC: 5000ms FTB ON (if armed)"
+    enabled: true
+    sort_order: 111
+    events:
+      - type: condition_true
+        options: {}
+    conditions:
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "internal:custom_end_svc_pulse"
+          value: "1"
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "internal:custom_arm_ftb"
+          value: "1"
+    actions:
+      - action: internal:wait
+        options: { time: "5000" }
+      - action: atem_saitama:fadeToBlackAuto
+        options: { mixeffect: 0 }
+
+  - name: "END SVC: 7000ms REC stop (if armed)"
+    enabled: true
+    sort_order: 112
+    events:
+      - type: condition_true
+        options: {}
+    conditions:
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "internal:custom_end_svc_pulse"
+          value: "1"
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "internal:custom_arm_rec"
+          value: "1"
+    actions:
+      - action: internal:wait
+        options: { time: "7000" }
+      - action: atem_saitama:recordStartStop
+        options: { record: "toggle" }
+
+  - name: "END SVC: 7000ms STREAM stop (if armed)"
+    enabled: true
+    sort_order: 113
+    events:
+      - type: condition_true
+        options: {}
+    conditions:
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "internal:custom_end_svc_pulse"
+          value: "1"
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "internal:custom_arm_stream"
+          value: "1"
+    actions:
+      - action: internal:wait
+        options: { time: "7000" }
+      - action: atem_saitama:streamStartStop
+        options: { stream: "toggle" }
+
+  - name: "END SVC: 7500ms finalize (service_mode=Idle + duck=0)"
+    enabled: true
+    sort_order: 114
+    events:
+      - type: condition_true
+        options: {}
+    conditions:
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "internal:custom_end_svc_pulse"
+          value: "1"
+    actions:
+      - action: internal:wait
+        options: { time: "7500" }
+      - action: internal:custom_variable_set_value
+        options: { name: "service_mode", value: "Idle" }
+      - action: internal:custom_variable_set_value
+        options: { name: "duck_active", value: "0" }
+
+  # FTB pair-up: END SVC's FTB ON slice (at 5000ms) leaves the
+  # broadcast in FTB-ON state. Without a closing toggle, the next
+  # GO LIVE press would invert FTB direction (toggle off instead
+  # of on). This trigger fires the closing toggle so FTB lands OFF
+  # at end of END SVC, leaving the next GO LIVE clean. Only fires
+  # if arm_ftb was 1 (mirrors the conditional FTB ON slice).
+  - name: "END SVC: 9500ms FTB OFF reset (if armed)"
+    enabled: true
+    sort_order: 115
+    events:
+      - type: condition_true
+        options: {}
+    conditions:
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "internal:custom_end_svc_pulse"
+          value: "1"
+      - type: internal:variable_value
+        options:
+          op: "eq"
+          variable: "internal:custom_arm_ftb"
+          value: "1"
+    actions:
+      - action: internal:wait
+        options: { time: "9500" }
+      - action: atem_saitama:fadeToBlackAuto
+        options: { mixeffect: 0 }

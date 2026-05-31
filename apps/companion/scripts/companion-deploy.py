@@ -315,6 +315,9 @@ def save_preserved_state_to_file(url, path):
     print(f"  cert-backup: wrote {len(snapshot)} connection(s) → {path} (mode 600)")
 
 
+FORCED_CONN_IDS = {}  # yaml_id → forced nanoid; populated by phase-2 import for connections:unchanged path
+
+
 def yaml_to_companionconfig(yaml_config):
     """Convert YAML config structure to Companion's native format."""
     companion = {
@@ -362,7 +365,18 @@ def yaml_to_companionconfig(yaml_config):
             if not conn.get("enabled", True):
                 continue
             yaml_id = conn["id"]
-            runtime_id = make_id()
+            # Phase-2 import uses pre-fetched live runtime connection
+            # nanoids (via FORCED_CONN_IDS) so the generated config's
+            # connection IDs match Companion's already-live IDs. When
+            # combined with `connections:"unchanged"` on the import,
+            # Companion does NOT regenerate connection IDs, so every
+            # entity — including children of `internal:if_expression`
+            # — points at a valid live connection. This fixes the
+            # nested-children connectionId bug where Companion's
+            # import-time nanoid remapper doesn't recurse into
+            # `if_expression.actions[]` and leaves child connectionIds
+            # at the generator's dead nanoids.
+            runtime_id = FORCED_CONN_IDS.get(yaml_id) or make_id()
             yaml_id_to_runtime[yaml_id] = runtime_id
 
             conn_config = dict(conn.get("config", {}))
@@ -434,6 +448,73 @@ def yaml_to_companionconfig(yaml_config):
             return _resolve_conn(yaml_conn), def_id
         return "", ref
 
+    def _emit_action_entity(a):
+        """Build a Companion action entity from a YAML action dict.
+
+        Supports nested action groups via the `children` field so
+        meta-actions like `internal:if_expression` can wrap sub-actions.
+        YAML form:
+            - action: internal:if_expression
+              options: { expression: '...' }
+              children:
+                default:
+                  - action: ...
+                  - action: ...
+        Companion stores each child group as a list under the same key
+        (`children.<group>`). Recurses so children can themselves have
+        children (rare but supported).
+
+        EVERY emitted entity gets `upgradeIndex: -1` and an empty
+        `children: {}` placeholder. Without these, Companion's
+        entity-list import validator silently discards entries — that
+        was the bug where `internal:if_expression` blocks looked
+        populated in storage but had empty children at runtime, so the
+        gated sub-actions never fired.
+        """
+        conn_id, def_id = _split_action_ref(a.get("action", ""))
+        entity = {
+            "id": make_id(),
+            "type": "action",
+            "connectionId": conn_id,
+            "definitionId": def_id,
+            "options": _remap_options(a.get("options", {})),
+            "upgradeIndex": a.get("upgrade_index", -1),
+            "children": {},
+        }
+        raw_children = a.get("children")
+        if isinstance(raw_children, dict) and raw_children:
+            # Companion 4.3.1 storage format for meta-actions like
+            # `internal:if_expression`: child action lists live BOTH
+            # inside `children.<groupId>` AND as a flat `actions`
+            # field on the entity. The supportsChildGroups schema in
+            # the internal module declares the groupId — `actions`
+            # for action-type child groups (not `default`).
+            #
+            # CRITICAL: Companion's import-time nanoid remapper only
+            # recurses into children that use the EXPECTED groupId.
+            # If we use a non-canonical group key (e.g. `default`),
+            # the walker leaves child connectionIds at our generator's
+            # nanoids, which are stale after Companion regenerates
+            # connection IDs on import → child actions silently fail
+            # to fire because their connection doesn't exist anymore.
+            #
+            # YAML can use `default` as a friendly alias; we remap it
+            # to `actions` here.
+            children_obj = {}
+            for group, group_actions in raw_children.items():
+                emitted_children = [_emit_action_entity(child) for child in (group_actions or [])]
+                # Friendly YAML alias: `default` → `actions` (the
+                # canonical Action-type group id used by if_expression
+                # + button_pressrelease_condition).
+                canonical_group = "actions" if group == "default" else group
+                children_obj[canonical_group] = emitted_children
+                # Also write flat field with the canonical key for
+                # belt-and-suspenders: some Companion code paths read
+                # from the flat field, others from children dict.
+                entity[canonical_group] = emitted_children
+            entity["children"] = children_obj  # overwrites the placeholder when populated
+        return entity
+
     # Convert pages
     for page_key, page_data in yaml_config.get("pages", {}).items():
         page = page_data.get("page", page_data)
@@ -488,16 +569,7 @@ def yaml_to_companionconfig(yaml_config):
                     }
                     for event, action_list in step_actions.items():
                         event_key = {"down": "down", "up": "up", "long_press": "2000", "double_press": "dbl"}.get(event, event)
-                        emitted = []
-                        for a in (action_list or []):
-                            conn_id, def_id = _split_action_ref(a.get("action", ""))
-                            emitted.append({
-                                "id": make_id(),
-                                "type": "action",
-                                "connectionId": conn_id,
-                                "definitionId": def_id,
-                                "options": _remap_options(a.get("options", {})),
-                            })
+                        emitted = [_emit_action_entity(a) for a in (action_list or [])]
                         control["steps"][step_key]["action_sets"][event_key] = emitted
             else:
                 # Single-step button
@@ -507,16 +579,7 @@ def yaml_to_companionconfig(yaml_config):
                 }
                 for event, action_list in actions.items():
                     event_key = {"down": "down", "up": "up", "long_press": "2000", "double_press": "dbl", "rotate_cw": "rotate_cw", "rotate_ccw": "rotate_ccw"}.get(event, event)
-                    emitted = []
-                    for a in (action_list or []):
-                        conn_id, def_id = _split_action_ref(a.get("action", ""))
-                        emitted.append({
-                            "id": make_id(),
-                            "type": "action",
-                            "connectionId": conn_id,
-                            "definitionId": def_id,
-                            "options": _remap_options(a.get("options", {})),
-                        })
+                    emitted = [_emit_action_entity(a) for a in (action_list or [])]
                     control["steps"]["0"]["action_sets"][event_key] = emitted
 
             # Feedbacks
@@ -730,6 +793,19 @@ def _surfaces_yaml_path():
     return os.path.join(CONFIG_DIR, "surfaces.yaml")
 
 
+def _load_yaml_connections():
+    """Return the YAML connection list (id + label + module + config).
+
+    Honors COMPANION_SITE so site-scoped deploys see only the matching
+    site's connections.
+    """
+    cfg = load_yaml_configs()
+    conns = cfg.get("connections") or {}
+    if isinstance(conns, dict) and "connections" in conns:
+        return conns["connections"]
+    return []
+
+
 def _load_surface_page_map():
     """Load surface-to-page assignments from surfaces.yaml.
 
@@ -909,6 +985,41 @@ def import_config(args):
     regen leads to stale config bugs that are hard to spot — the file
     looks valid but reflects an older revision of the YAML sources.
     """
+    use_runtime_conn_ids = getattr(args, "use_runtime_conn_ids", False)
+    if use_runtime_conn_ids:
+        # Phase-2 path: pre-populate FORCED_CONN_IDS from the live
+        # Companion so the generator emits child entities (e.g. inside
+        # `internal:if_expression.actions[]`) with connection nanoids
+        # that ALREADY match Companion's live runtime IDs. Combined
+        # with `connections:"unchanged"` below, the import doesn't
+        # regenerate connection IDs, so all entity references stay
+        # valid — including the nested ones the import-time remapper
+        # otherwise misses.
+        import re as _re
+        import urllib.request as _urllib_request
+        FORCED_CONN_IDS.clear()
+        try:
+            req = _urllib_request.Request(args.url.rstrip("/") + "/api/connections")
+            with _urllib_request.urlopen(req, timeout=10) as resp:
+                live = json.loads(resp.read())
+        except Exception as ex:
+            print(f"  use-runtime-conn-ids: live fetch failed ({ex}); falling back to fresh nanoids")
+            live = []
+        live_by_sanitized_label = {c["label"]: c["id"] for c in live if isinstance(c, dict)}
+        # Walk the YAML connections to learn id → label, sanitize the
+        # YAML label to Companion's form, look up the runtime id.
+        yaml_conn_list = _load_yaml_connections()
+        for conn in yaml_conn_list:
+            if not conn.get("enabled", True):
+                continue
+            raw_label = conn.get("label", "")
+            sanitized = _re.sub(r"[^A-Za-z0-9_]", "_", raw_label)
+            rid = live_by_sanitized_label.get(sanitized)
+            if rid:
+                FORCED_CONN_IDS[conn["id"]] = rid
+        if FORCED_CONN_IDS:
+            print(f"  use-runtime-conn-ids: pinned {len(FORCED_CONN_IDS)} connection(s) to live runtime IDs")
+
     if not args.file:
         # Snapshot live pairing/cert state BEFORE regenerate so
         # connections:reset doesn't un-pair devices (android-tv etc.).
@@ -1073,6 +1184,12 @@ def import_config(args):
         # userconfig accept only "unchanged"|"reset" (zodResetType).
         # Other fields accept "unchanged"|"reset-and-import"|"reset".
         print("  Step 4/4: Executing full import...")
+        # connections=reset on phase 1 (regenerate connection nanoids
+        # to match the YAML); =unchanged on phase 2 so the
+        # pre-fetched runtime IDs we embedded in the generator stay
+        # stable, which is what fixes the if_expression children's
+        # connectionId staleness.
+        connections_mode = "unchanged" if use_runtime_conn_ids else "reset"
         import_result = send_trpc(ws, "mutation", "importExport.importFull", {
             "config": {
                 "buttons": "reset-and-import",
@@ -1084,7 +1201,7 @@ def import_config(args):
                 "triggers": "reset-and-import",
                 "customVariables": "reset-and-import",
                 "expressionVariables": "reset-and-import",
-                "connections": "reset",
+                "connections": connections_mode,
                 "userconfig": "unchanged",
             }
         })
@@ -1249,6 +1366,14 @@ if __name__ == "__main__":
         help="JSON file holding per-connection cert/pair state. Loaded as "
              "fallback before live snapshot, refreshed after successful import. "
              "Keep gitignored — contains device-specific TLS material.",
+    )
+    imp.add_argument(
+        "--use-runtime-conn-ids",
+        action="store_true",
+        help="Phase 2 of the two-phase deploy. Pre-fetches live runtime "
+             "connection IDs and pins the generator to them, then imports "
+             "with connections:unchanged so nested entities (e.g. children "
+             "of internal:if_expression) keep valid connectionIds.",
     )
 
     cb = sub.add_parser(

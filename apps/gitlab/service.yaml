@@ -48,6 +48,10 @@ metadata:
 spec:
   # No selector — manually managed Endpoints above
   type: ClusterIP
+  # Pinned so the address is stable across wipe-and-rebuild. The Renovate
+  # CronJob hostAliases gitlab.kubew.dev to this IP (GitLab's external_url
+  # clone host doesn't resolve in-cluster), so it must not float.
+  clusterIP: 10.43.61.251
   ports:
     - name: http
       port: 80

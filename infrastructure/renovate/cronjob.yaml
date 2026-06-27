@@ -34,6 +34,15 @@ spec:
       template:
         spec:
           restartPolicy: Never
+          # GitLab hands Renovate a clone URL built from its external_url
+          # (gitlab.kubew.dev), which only resolves on the public/Tailscale
+          # path — not from inside the cluster. Point it at the in-cluster
+          # GitLab Service (ClusterIP, port 80 -> 8180) so git clone works
+          # without leaving the cluster network.
+          hostAliases:
+            - ip: "10.43.61.251"
+              hostnames:
+                - gitlab.kubew.dev
           containers:
             - name: renovate
               image: ghcr.io/renovatebot/renovate:43
@@ -56,10 +65,14 @@ spec:
                   value: info
                 - name: RENOVATE_GIT_AUTHOR
                   value: "Renovate Bot <renovate@kubew.dev>"
+                # Renovate's Node process OOMs on the default heap; raise it
+                # to match the bumped container limit.
+                - name: NODE_OPTIONS
+                  value: "--max-old-space-size=2560"
               resources:
                 requests:
                   cpu: 100m
-                  memory: 256Mi
+                  memory: 512Mi
                 limits:
                   cpu: 1000m
-                  memory: 1Gi
+                  memory: 3Gi

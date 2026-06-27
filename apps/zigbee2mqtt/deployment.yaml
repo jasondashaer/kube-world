@@ -78,11 +78,16 @@ spec:
                 echo "WARNING: No Zigbee dongle detected at /dev/ttyUSB0 or /dev/zigbee"
                 echo "Zigbee2MQTT will start but won't connect to devices."
               fi
-              # Copy config from ConfigMap to PVC (Z2M needs to write to it
-              # for network_key generation and runtime settings)
-              if [ ! -f /app/data/configuration.yaml ] || [ -f /config-template/configuration.yaml ]; then
+              # Seed config from ConfigMap to PVC ONLY on first boot. Z2M owns
+              # configuration.yaml after that (it persists the generated/adopted
+              # network_key + runtime settings there). Re-copying on every pod
+              # recreate would clobber the network_key and desync from the
+              # coordinator backup, which crashloops zigbee-herdsman.
+              if [ ! -f /app/data/configuration.yaml ]; then
                 cp /config-template/configuration.yaml /app/data/configuration.yaml
-                echo "Configuration copied to PVC"
+                echo "Configuration seeded to PVC (first boot)"
+              else
+                echo "Existing configuration.yaml on PVC — leaving runtime config intact"
               fi
           securityContext:
             privileged: true

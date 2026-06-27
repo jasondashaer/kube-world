@@ -2866,8 +2866,20 @@ install_gitlab_native() {
     fi
 
     # Create the gitlab namespace and apply the Service/Endpoints, substituting
-    # the central Pi's internal IP for the __PI_IP__ placeholder.
-    log "Applying GitLab Service + Endpoints (targeting ${target_ip}:8180)..."
+    # the central Pi's Tailscale IP for the __PI_IP__ placeholder. We use
+    # Tailscale (not the LAN IP from inventory) because the LAN IP changes
+    # whenever the Pi moves networks (relocation, ISP swap, DHCP shuffle)
+    # which silently breaks Flux's GitRepository reach. Tailscale 100.x is
+    # location-independent — the only address guaranteed to survive moves.
+    # Falls back to LAN IP if Tailscale isn't up yet.
+    local endpoints_ip
+    endpoints_ip=$(ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new \
+        "${SSH_USER:-admin}@${target_ip}" 'tailscale ip --4 2>/dev/null | head -1' 2>/dev/null || echo "")
+    if [[ -z "$endpoints_ip" ]]; then
+        warn "Could not fetch Tailscale IP for ${target_ip} — falling back to LAN IP (will need re-patch on relocation)"
+        endpoints_ip="$target_ip"
+    fi
+    log "Applying GitLab Service + Endpoints (targeting ${endpoints_ip}:8180)..."
     if ! kubectl create namespace gitlab --dry-run=client -o yaml | kubectl apply -f -; then
         warn "Failed to create gitlab namespace"
         return 1
@@ -2878,7 +2890,7 @@ install_gitlab_native() {
         warn "GitLab service manifest not found: ${svc_file}"
         return 1
     fi
-    if ! sed "s/__PI_IP__/${target_ip}/g" "$svc_file" | kubectl apply -f -; then
+    if ! sed "s/__PI_IP__/${endpoints_ip}/g" "$svc_file" | kubectl apply -f -; then
         warn "Failed to apply GitLab Service/Endpoints"
         return 1
     fi

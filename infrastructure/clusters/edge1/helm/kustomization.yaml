@@ -5,3 +5,10 @@ resources:
   - traefik.yaml
   - cert-manager.yaml
   - external-dns.yaml
+configMapGenerator:
+  - name: traefik-values
+    namespace: flux-system
+    files:
+      - values.yaml=../../../traefik/values.yaml
+generatorOptions:
+  disableNameSuffixHash: true

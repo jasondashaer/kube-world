@@ -749,6 +749,86 @@ create_deploy_token() {
 }
 
 #===============================================================================
+# Phase 9b: Create a dedicated Renovate bot user with an api-scoped PAT
+#===============================================================================
+# Renovate's GitLab platform needs a PERSONAL access token with `api` scope to
+# autodiscover projects and open MRs. A project deploy token (read_repository)
+# cannot call /api/v4/user and will 401 — so Renovate needs its own user, not
+# the Flux deploy token. We create a non-admin `renovate-bot` and add it as a
+# Maintainer of root/kube-world (membership is what makes autodiscover surface
+# the repo; admin is not required).
+create_renovate_user() {
+    log "Creating renovate-bot user + api PAT..."
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "[DRY RUN] Would create renovate-bot user, PAT, and project membership"
+        RENOVATE_TOKEN="dry-run-renovate-token"
+        return 0
+    fi
+
+    local gitlab_url="http://${PI_IP}:8180"
+    local expires_at
+    expires_at=$(date -v+1y +%Y-%m-%d 2>/dev/null || date -d '+1 year' +%Y-%m-%d)
+
+    # Idempotency: reuse the user if it already exists.
+    local user_id
+    user_id=$(run_on_pi "curl -s -H 'PRIVATE-TOKEN: ${ROOT_PAT}' \
+        '${gitlab_url}/api/v4/users?username=renovate-bot'" | jq -r '.[0].id // empty' 2>/dev/null || echo "")
+
+    if [[ -z "$user_id" ]]; then
+        local rand_pw
+        rand_pw=$(openssl rand -hex 20)
+        local create_resp
+        create_resp=$(run_on_pi "curl -s -X POST \
+            -H 'PRIVATE-TOKEN: ${ROOT_PAT}' \
+            -H 'Content-Type: application/json' \
+            -d '{\"username\":\"renovate-bot\",\"name\":\"Renovate Bot\",\"email\":\"renovate@${DOMAIN:-kubew.dev}\",\"password\":\"${rand_pw}\",\"skip_confirmation\":true}' \
+            ${gitlab_url}/api/v4/users")
+        user_id=$(echo "$create_resp" | jq -r '.id // empty' 2>/dev/null || echo "")
+
+        # GitLab >= 16.11/18.x may require an organization on new users.
+        if [[ -z "$user_id" ]] && echo "$create_resp" | grep -qi organization; then
+            create_resp=$(run_on_pi "curl -s -X POST \
+                -H 'PRIVATE-TOKEN: ${ROOT_PAT}' \
+                -H 'Content-Type: application/json' \
+                -d '{\"username\":\"renovate-bot\",\"name\":\"Renovate Bot\",\"email\":\"renovate@${DOMAIN:-kubew.dev}\",\"password\":\"${rand_pw}\",\"organization_id\":1,\"skip_confirmation\":true}' \
+                ${gitlab_url}/api/v4/users")
+            user_id=$(echo "$create_resp" | jq -r '.id // empty' 2>/dev/null || echo "")
+        fi
+
+        if [[ -z "$user_id" ]]; then
+            warn "Failed to create renovate-bot user — Renovate will not authenticate:"
+            echo "$create_resp"
+            return 1
+        fi
+    fi
+
+    # Add as Maintainer of root/kube-world (no-op if already a member).
+    run_on_pi "curl -s -X POST \
+        -H 'PRIVATE-TOKEN: ${ROOT_PAT}' \
+        -H 'Content-Type: application/json' \
+        -d '{\"user_id\":${user_id},\"access_level\":40}' \
+        ${gitlab_url}/api/v4/projects/root%2Fkube-world/members" >/dev/null 2>&1 || true
+
+    # Mint a fresh api-scoped PAT (plaintext is only available at creation).
+    local pat_resp
+    pat_resp=$(run_on_pi "curl -s -X POST \
+        -H 'PRIVATE-TOKEN: ${ROOT_PAT}' \
+        -H 'Content-Type: application/json' \
+        -d '{\"name\":\"renovate\",\"scopes\":[\"api\"],\"expires_at\":\"${expires_at}\"}' \
+        ${gitlab_url}/api/v4/users/${user_id}/personal_access_tokens")
+    RENOVATE_TOKEN=$(echo "$pat_resp" | jq -r '.token // empty' 2>/dev/null || echo "")
+
+    if [[ -z "$RENOVATE_TOKEN" ]]; then
+        warn "Failed to mint renovate-bot PAT:"
+        echo "$pat_resp"
+        return 1
+    fi
+
+    log "renovate-bot user + api PAT created ✓"
+}
+
+#===============================================================================
 # Phase 10: Write credentials to state file
 #===============================================================================
 write_state_file() {
@@ -767,6 +847,8 @@ write_state_file() {
   "root_pat": "${ROOT_PAT:-}",
   "deploy_token_user": "${DEPLOY_TOKEN_USER:-}",
   "deploy_token": "${DEPLOY_TOKEN:-}",
+  "renovate_token_user": "renovate-bot",
+  "renovate_token": "${RENOVATE_TOKEN:-}",
   "bootstrapped_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 EOF
@@ -790,6 +872,7 @@ print_summary() {
     echo ""
     echo "  Project:          ${external_url}/root/kube-world"
     echo "  Deploy token:     ${DEPLOY_TOKEN_USER:-<none>}"
+    echo "  Renovate user:    renovate-bot (api PAT)"
     echo ""
     echo "  State file:       ${STATE_FILE}"
     echo "  (parent bootstrap.sh reads deploy token from here to create"
@@ -826,6 +909,7 @@ main() {
     create_project
     push_repo
     create_deploy_token
+    create_renovate_user
     write_state_file
     print_summary
 

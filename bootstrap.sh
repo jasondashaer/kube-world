@@ -2856,9 +2856,10 @@ install_gitlab_native() {
     fi
 
     # Read credentials from state file (produced by install-gitlab.sh)
-    local deploy_token deploy_user
+    local deploy_token deploy_user renovate_token
     deploy_token=$(jq -r '.deploy_token // empty' "$state_file" 2>/dev/null || echo "")
     deploy_user=$(jq -r '.deploy_token_user // "flux-bootstrap"' "$state_file" 2>/dev/null || echo "flux-bootstrap")
+    renovate_token=$(jq -r '.renovate_token // empty' "$state_file" 2>/dev/null || echo "")
 
     if [[ -z "$deploy_token" ]]; then
         warn "No deploy token in state file — Flux will not be able to authenticate"
@@ -2912,11 +2913,15 @@ install_gitlab_native() {
     fi
 
     # Create the renovate-token secret so the CronJob can authenticate.
-    # The deploy token has api+write_repository scope which is sufficient.
-    if kubectl create namespace renovate --dry-run=client -o yaml | kubectl apply -f - > /dev/null 2>&1; then
+    # Renovate's GitLab platform needs an api-scoped PAT — the Flux deploy
+    # token is repo-read-only (no api scope) and returns 401. install-gitlab.sh
+    # provisions a dedicated renovate-bot user + api PAT into the state file.
+    if [[ -z "$renovate_token" ]]; then
+        warn "No renovate_token in state file — Renovate CronJob will 401 until a renovate-bot api PAT is provisioned"
+    elif kubectl create namespace renovate --dry-run=client -o yaml | kubectl apply -f - > /dev/null 2>&1; then
         if kubectl create secret generic renovate-token \
             --namespace=renovate \
-            --from-literal=token="$deploy_token" \
+            --from-literal=token="$renovate_token" \
             --dry-run=client -o yaml | kubectl apply -f - > /dev/null 2>&1; then
             log "Renovate token secret created ✓"
         else

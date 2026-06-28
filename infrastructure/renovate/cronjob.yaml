@@ -57,6 +57,18 @@ spec:
                     secretKeyRef:
                       name: renovate-token
                       key: token
+                # Read-only github.com PAT — without it api.github.com is
+                # rate-limited unauthenticated, so github-digest deps
+                # (trivy-action, action-shellcheck) and the sealed-secrets
+                # helm release lookup return no-result. User-supplied
+                # (bootstrap can't mint a GitHub token); created manually as:
+                #   kubectl -n renovate create secret generic github-token \
+                #     --from-literal=token=<github_pat>
+                - name: GITHUB_COM_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: github-token
+                      key: token
                 - name: RENOVATE_AUTODISCOVER
                   value: "true"
                 - name: RENOVATE_AUTODISCOVER_FILTER

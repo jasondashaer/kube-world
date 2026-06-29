@@ -14,7 +14,7 @@ spec:
   sourceRef:
     kind: GitRepository
     name: kube-world
-  dependsOn:
-    - name: identity-zitadel
+  # zitadel namespace is created at bootstrap (identity HelmReleases are applied
+  # imperatively, not as a Flux Kustomization — so no dependsOn to wait on).
   # No kubeConfig → applies to host (central) cluster
   timeout: 10m

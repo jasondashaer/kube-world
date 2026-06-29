@@ -63,7 +63,7 @@ data:
         admin: "admin"
         user: "user"
       network:
-        tls_verify: false
+        tls_verify: true
 
     # Include files for automations, scripts, scenes
     automation: !include automations.yaml

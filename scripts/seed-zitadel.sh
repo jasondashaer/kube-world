@@ -37,6 +37,14 @@ DOMAIN="${DOMAIN:-kubew.dev}"
 USE_PORT_FORWARD="${USE_PORT_FORWARD:-false}"
 STATE_FILE="${STATE_FILE:-/tmp/zitadel-seed.state}"
 
+# Microsoft Entra ID federation (Thread B2 — Entra as upstream IdP, Zitadel brokers).
+# All three must be set to enable; otherwise federation is skipped (warn, no fail).
+# Provide via .env.bootstrap — NEVER commit the client secret.
+ENTRA_TENANT_ID="${ENTRA_TENANT_ID:-}"
+ENTRA_CLIENT_ID="${ENTRA_CLIENT_ID:-}"
+ENTRA_CLIENT_SECRET="${ENTRA_CLIENT_SECRET:-}"
+ENTRA_IDP_NAME="${ENTRA_IDP_NAME:-Microsoft Entra ID}"
+
 # Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -380,11 +388,17 @@ function flattenRoles(ctx, api) {
         debug "  Action created: ${existing_id}"
     fi
 
-    # Bind the action to the "pre userinfo creation" and "pre access token creation" flows
-    # Flow type 2 = Complement Token, Trigger type 1 = Pre Access Token Creation
-    _api POST "/management/v1/flows/2/trigger/1" "{
-        \"actionIds\": [\"${existing_id}\"]
-    }" > /dev/null 2>&1 || debug "  Token flow binding may already exist"
+    # Bind the action to flow type 2 (Complement Token).
+    # Trigger 4 = Pre Userinfo creation (populates id_token + userinfo — what
+    # OIDC clients like hass-oidc-auth read). Trigger 5 = Pre Access Token creation.
+    # NOTE: trigger 1 (Post Authentication) is INVALID for this flow and silently
+    # no-ops — the prior binding to /trigger/1 never ran, so the flat "groups"
+    # claim was never emitted (broke HA group gating).
+    for trig in 4 5; do
+        _api POST "/management/v1/flows/2/trigger/${trig}" "{
+            \"actionIds\": [\"${existing_id}\"]
+        }" > /dev/null 2>&1 || debug "  Trigger ${trig} binding may already exist"
+    done
 
     log "  Claim-flattening action configured ✓"
 }
@@ -392,6 +406,60 @@ function flattenRoles(ctx, api) {
 #===============================================================================
 # Step 7: Store OIDC secrets in K8s
 #===============================================================================
+# Federate Microsoft Entra ID as an upstream IdP at instance scope, brokered by
+# Zitadel. Apps keep talking OIDC to Zitadel; users authenticate via Entra.
+# Idempotent: skips if an instance IdP with the same name already exists.
+# Entra app must register redirect URI: https://auth.${DOMAIN}/idps/callback
+configure_entra_federation() {
+    if [[ -z "$ENTRA_TENANT_ID" || -z "$ENTRA_CLIENT_ID" || -z "$ENTRA_CLIENT_SECRET" ]]; then
+        warn "Entra federation skipped (ENTRA_TENANT_ID/CLIENT_ID/CLIENT_SECRET not all set)"
+        return 0
+    fi
+
+    log "Configuring Microsoft Entra ID federation (instance scope)..."
+
+    # Idempotency: look for an existing instance IdP by name.
+    local existing
+    existing=$(_api POST "/admin/v1/idps/_search" '{}' \
+        | jq -r --arg n "$ENTRA_IDP_NAME" '.result[]? | select(.name==$n) | .id' 2>/dev/null | head -1)
+
+    local idp_id
+    if [[ -n "$existing" ]]; then
+        idp_id="$existing"
+        log "  Entra IdP already exists: ${idp_id}"
+    else
+        local resp
+        resp=$(_api POST "/admin/v1/idps/azure" "{
+            \"name\": \"${ENTRA_IDP_NAME}\",
+            \"clientId\": \"${ENTRA_CLIENT_ID}\",
+            \"clientSecret\": \"${ENTRA_CLIENT_SECRET}\",
+            \"scopes\": [\"openid\",\"profile\",\"email\",\"User.Read\"],
+            \"tenant\": {\"tenantId\": \"${ENTRA_TENANT_ID}\"},
+            \"emailVerified\": true,
+            \"providerOptions\": {
+                \"isLinkingAllowed\": true,
+                \"isCreationAllowed\": true,
+                \"isAutoCreation\": true,
+                \"isAutoUpdate\": true,
+                \"autoLinking\": \"AUTO_LINKING_OPTION_EMAIL\"
+            }
+        }")
+        idp_id=$(echo "$resp" | jq -r '.id // empty' 2>/dev/null)
+        if [[ -z "$idp_id" ]]; then
+            error "Failed to add Entra IdP: $resp"
+            return 1
+        fi
+        log "  Entra IdP created: ${idp_id}"
+    fi
+
+    # Activate on the instance default login policy (idempotent — ignore 'already exists').
+    _api POST "/admin/v1/policies/login/idps" \
+        "{\"idpId\": \"${idp_id}\", \"ownerType\": \"IDP_OWNER_TYPE_SYSTEM\"}" > /dev/null 2>&1 \
+        || debug "  Login-policy binding may already exist"
+    log "  Entra IdP active on instance login policy"
+    log "  Entra redirect URI must be: https://auth.${DOMAIN}/idps/callback"
+}
+
 store_oidc_secrets() {
     log "Storing OIDC client secrets in K8s..."
 
@@ -448,6 +516,7 @@ write_state() {
   "grafana_client_id": "${GRAFANA_CLIENT_ID:-}",
   "homeassistant_client_id": "${HOMEASSISTANT_CLIENT_ID:-}",
   "homeassistant_client_secret": "${HOMEASSISTANT_CLIENT_SECRET:-}",
+  "entra_federated": $([[ -n "$ENTRA_CLIENT_SECRET" ]] && echo true || echo false),
   "issuer_url": "https://auth.${DOMAIN}",
   "seeded_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
@@ -488,6 +557,7 @@ main() {
     grant_admin_role
     create_oidc_apps
     create_claim_action
+    configure_entra_federation
     store_oidc_secrets
     write_state
 

@@ -53,10 +53,12 @@ data:
       groups_scope: "urn:zitadel:iam:org:project:id:zitadel:aud"
       features:
         include_groups_scope: true
-      # Zitadel sends roles as nested objects in urn:zitadel:iam:org:project:roles
-      # The component reads groups from this claim. We set the claim name here.
+      # Zitadel's native role claim (urn:zitadel:iam:org:project:roles) is a nested
+      # object, which hass-oidc-auth rejects ("Groups claim is not a list").
+      # The seed's flattenRoles action emits a flat array into the "groups" claim
+      # (id_token + userinfo) — read that instead.
       claims:
-        groups: "urn:zitadel:iam:org:project:roles"
+        groups: "groups"
       roles:
         admin: "admin"
         user: "user"

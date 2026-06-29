@@ -1,0 +1,20 @@
+# Flux Kustomization for the Entra group -> HA role sync webhook.
+# Deploys to the HOST cluster (central) in the zitadel namespace — the same
+# cluster the Zitadel Actions v2 Target calls from.
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: zitadel-groupsync
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./infrastructure/zitadel-groupsync
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: kube-world
+  dependsOn:
+    - name: identity-zitadel
+  # No kubeConfig → applies to host (central) cluster
+  timeout: 10m

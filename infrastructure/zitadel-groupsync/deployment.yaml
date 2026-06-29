@@ -1,0 +1,96 @@
+# zitadel-groupsync — Entra group -> HA role bridge.
+#
+# Zitadel Actions v2 Target calls this webhook on the response of
+# RetrieveIdentityProviderIntent (the Login V2 IdP-intent flow). It reads the
+# Entra group GUIDs from the federated id_token, maps them to HA roles, and
+# writes the `ha_roles` user metadata. The flow-2 `flattenRoles` action then
+# merges that metadata into the flat `groups` claim hass-oidc-auth reads.
+#
+# Runs on pi-central (host cluster) in the zitadel namespace — same cluster the
+# Actions v2 Target calls from. Stock python image, script mounted via ConfigMap.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zitadel-groupsync
+  namespace: zitadel
+  labels:
+    app.kubernetes.io/name: zitadel-groupsync
+    app.kubernetes.io/part-of: kube-world
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: zitadel-groupsync
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: zitadel-groupsync
+        app.kubernetes.io/part-of: kube-world
+    spec:
+      containers:
+        - name: groupsync
+          image: docker.io/library/python:3.11-slim
+          imagePullPolicy: IfNotPresent
+          command: ["python3", "/app/groupsync.py"]
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: ZITADEL_API
+              value: "http://zitadel.zitadel.svc.cluster.local:8080"
+            - name: ZITADEL_HOST
+              value: "auth.kubew.dev"
+            - name: METADATA_KEY
+              value: "ha_roles"
+            - name: REQUIRE_SIGNATURE
+              value: "true"
+            # Entra group GUID -> HA role. kube-world-admins -> admin,
+            # kube-world-users -> user.
+            - name: GROUP_ROLE_MAP
+              value: '{"7eafbda9-c2d8-41f0-854b-0e43cfaeadb3":"admin","a7a96cec-3e21-4702-8a07-ced98245a01e":"user"}'
+          envFrom:
+            - secretRef:
+                name: zitadel-groupsync-credentials
+          volumeMounts:
+            - name: script
+              mountPath: /app
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 64Mi
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 5
+      volumes:
+        - name: script
+          configMap:
+            name: zitadel-groupsync-script
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zitadel-groupsync
+  namespace: zitadel
+  labels:
+    app.kubernetes.io/name: zitadel-groupsync
+    app.kubernetes.io/part-of: kube-world
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http
+  selector:
+    app.kubernetes.io/name: zitadel-groupsync

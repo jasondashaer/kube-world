@@ -1629,8 +1629,8 @@ setup_flux() {
         warn "Failed to apply apps kustomization"
         flux_failed=1
     fi
-    # Central infrastructure kustomizations (ntfy, renovate)
-    for kust in ntfy renovate; do
+    # Central infrastructure kustomizations (ntfy, renovate, zitadel-groupsync)
+    for kust in ntfy renovate zitadel-groupsync; do
         local kust_file="${SCRIPT_DIR}/flux/kustomizations/${kust}.yaml"
         if [[ -f "$kust_file" ]]; then
             kubectl apply -f "$kust_file" 2>/dev/null || warn "Failed to apply ${kust} kustomization"

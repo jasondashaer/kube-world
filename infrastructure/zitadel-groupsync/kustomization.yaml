@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: zitadel
+resources:
+  - deployment.yaml
+# NOTE: the zitadel-groupsync-credentials Secret (ZITADEL_API_TOKEN +
+# TARGET_SIGNING_KEY) is created imperatively by scripts/seed-zitadel.sh after
+# it creates the Actions v2 Target (the signing key is generated at that point),
+# mirroring store_oidc_secrets(). It is NOT committed to git. Once the
+# sealed-secrets controller is actually deployed, migrate to a sealed manifest
+# using secrets/groupsync-credentials.unsealed.example.yaml as the template.
+configMapGenerator:
+  - name: zitadel-groupsync-script
+    namespace: zitadel
+    files:
+      - groupsync.py
+generatorOptions:
+  disableNameSuffixHash: false

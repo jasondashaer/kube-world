@@ -345,22 +345,24 @@ create_oidc_apps() {
 create_claim_action() {
     log "Creating claim-flattening action..."
 
-    # Zitadel's default role claim is nested JSON:
+    # Zitadel's native role claim (urn:zitadel:iam:org:project:roles) is nested:
     #   {"admin": {"orgId": "orgDomain"}, "user": {...}}
-    # Most apps (Rancher, Grafana, GitLab) expect a flat array:
-    #   ["admin", "user"]
-    # This action transforms the claims at token issuance time.
+    # Most apps (HA/Rancher/Grafana/GitLab) want a flat array: ["admin","user"].
+    # Read authoritative user grants (NOT ctx.v1.claims — the native role claim is
+    # not reliably present in the action context) and emit via api.v1.claims.setClaim
+    # (direct property assignment api.v1.claims["groups"]=... is a SILENT NO-OP).
     local action_script='
 function flattenRoles(ctx, api) {
-  if (ctx.v1.claims["urn:zitadel:iam:org:project:roles"] === undefined) {
+  if (ctx.v1.user.grants === undefined || ctx.v1.user.grants.count == 0) {
     return;
   }
-  var roles = [];
-  var projectRoles = ctx.v1.claims["urn:zitadel:iam:org:project:roles"];
-  for (var role in projectRoles) {
-    roles.push(role);
-  }
-  api.v1.claims["groups"] = roles;
+  let roles = [];
+  ctx.v1.user.grants.grants.forEach(grant => {
+    grant.roles.forEach(role => {
+      roles.push(role);
+    });
+  });
+  api.v1.claims.setClaim("groups", roles);
 }
 '
 
@@ -378,7 +380,7 @@ function flattenRoles(ctx, api) {
             \"name\": \"flattenRoles\",
             \"script\": $(echo "$action_script" | jq -Rs .),
             \"timeout\": \"10s\",
-            \"allowedToFail\": false
+            \"allowedToFail\": true
         }")
         existing_id=$(echo "$resp" | jq -r '.id // empty' 2>/dev/null || echo "")
         if [[ -z "$existing_id" ]]; then

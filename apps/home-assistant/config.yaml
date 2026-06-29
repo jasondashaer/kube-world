@@ -49,6 +49,7 @@ data:
       client_id: "HA_OIDC_CLIENT_ID"
       client_secret: "HA_OIDC_CLIENT_SECRET"
       discovery_url: "https://auth.DOMAIN/.well-known/openid-configuration"
+      display_name: "Zitadel SSO"
       groups_scope: "urn:zitadel:iam:org:project:id:zitadel:aud"
       features:
         include_groups_scope: true
@@ -74,64 +75,3 @@ data:
   automations.yaml: "[]"
   scripts.yaml: ""
   scenes.yaml: "[]"
-
-  # Patched injection.js for hass-oidc-auth component.
-  # The upstream JS depends on HA-internal DOM elements that change between
-  # versions. This simplified version injects a plain SSO button that works
-  # on any HA version.
-  injection.js: |
-    (function() {
-      const ssoName = window.sso_name || "Single Sign-On";
-      let buttonAdded = false;
-
-      function addSSOButton() {
-        if (buttonAdded) return;
-
-        const content = document.querySelector(".content");
-        if (!content) return;
-
-        const container = document.createElement("div");
-        container.style.cssText = "text-align:center;margin:16px 0;";
-
-        const btn = document.createElement("button");
-        btn.textContent = "Log in with " + ssoName;
-        btn.style.cssText = "background:#03a9f4;color:#fff;border:none;border-radius:4px;padding:12px 24px;font-size:16px;cursor:pointer;width:100%;max-width:300px;font-family:inherit;";
-        btn.addEventListener("mouseover", function() { btn.style.background = "#0288d1"; });
-        btn.addEventListener("mouseout", function() { btn.style.background = "#03a9f4"; });
-        btn.addEventListener("click", function() {
-          btn.textContent = "Redirecting...";
-          btn.disabled = true;
-          var params = new URLSearchParams(window.location.search);
-          var appRedirect = params.get("redirect_uri") || "";
-          var clientId = params.get("client_id") || "";
-          var url = "/auth/oidc/redirect";
-          if (appRedirect) {
-            url += "?app_redirect=" + encodeURIComponent(appRedirect)
-              + "&app_client_id=" + encodeURIComponent(clientId);
-          }
-          window.location.href = url;
-        });
-
-        container.appendChild(btn);
-
-        const sep = document.createElement("div");
-        sep.style.cssText = "text-align:center;margin:12px 0;color:#888;font-size:14px;";
-        sep.textContent = "\u2014 or \u2014";
-
-        const header = content.querySelector(".header");
-        if (header && header.nextSibling) {
-          content.insertBefore(container, header.nextSibling);
-          content.insertBefore(sep, container.nextSibling);
-        } else {
-          content.prepend(sep);
-          content.prepend(container);
-        }
-
-        buttonAdded = true;
-      }
-
-      addSSOButton();
-      const observer = new MutationObserver(addSSOButton);
-      observer.observe(document.body, { childList: true, subtree: true });
-      setTimeout(addSSOButton, 500);
-    })();

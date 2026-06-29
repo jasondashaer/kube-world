@@ -118,27 +118,31 @@ spec:
             - |
               apk add --no-cache git python3 py3-bcrypt py3-jwt >/dev/null 2>&1
 
-              # 1. Install OIDC custom component
+              # 1. Install OIDC custom component, pinned to a known-good tag.
+              # v1.x natively supports both the web UI and the companion app
+              # OIDC flow, so no injection.js / endpoint patching is needed
+              # (the old alpha-era patches broke against v1.x internals).
               COMP_DIR="/config/custom_components/auth_oidc"
-              if [ ! -f "$COMP_DIR/manifest.json" ]; then
-                echo "Installing hass-oidc-auth..."
+              COMP_VERSION="1.0.2"
+              need_install=1
+              if [ -f "$COMP_DIR/manifest.json" ]; then
+                if grep -q "\"version\".*\"${COMP_VERSION}\"" "$COMP_DIR/manifest.json"; then
+                  need_install=0
+                  echo "hass-oidc-auth v${COMP_VERSION} already installed"
+                else
+                  echo "Upgrading hass-oidc-auth to v${COMP_VERSION}..."
+                fi
+              fi
+              if [ "$need_install" = "1" ]; then
+                echo "Installing hass-oidc-auth v${COMP_VERSION}..."
                 cd /tmp
-                git clone --depth 1 https://github.com/christiaangoossens/hass-oidc-auth.git
+                rm -rf hass-oidc-auth
+                git clone --depth 1 --branch "v${COMP_VERSION}" \
+                  https://github.com/christiaangoossens/hass-oidc-auth.git
+                rm -rf "$COMP_DIR"
                 mkdir -p /config/custom_components
                 cp -r hass-oidc-auth/custom_components/auth_oidc "$COMP_DIR"
                 rm -rf hass-oidc-auth
-              else
-                echo "hass-oidc-auth already installed"
-              fi
-              echo "Patching injection.js + mobile app OIDC flow..."
-              cp /config-templates/injection.js "$COMP_DIR/static/injection.js"
-              # Patch OIDC redirect + callback handlers to support mobile app
-              # auth flow (homeassistant:// callback scheme)
-              if [ -f /config-templates/redirect.py ]; then
-                cp /config-templates/redirect.py "$COMP_DIR/endpoints/redirect.py"
-              fi
-              if [ -f /config-templates/callback.py ]; then
-                cp /config-templates/callback.py "$COMP_DIR/endpoints/callback.py"
               fi
 
               # 2. Pre-seed onboarding + auth to skip the first-time wizard.
@@ -264,7 +268,7 @@ spec:
                   'last_used_ip': None,
                   'expire_at': None,
                   'credential_id': None,
-                  'version': '2025.4.2',
+                  'version': '2026.6.4',
               })
 
               # Compute the JWT
@@ -325,7 +329,7 @@ spec:
 
       containers:
         - name: home-assistant
-          image: ghcr.io/home-assistant/home-assistant:2025.4.2
+          image: ghcr.io/home-assistant/home-assistant:2026.6.4
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

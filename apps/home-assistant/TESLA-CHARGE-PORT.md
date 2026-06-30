@@ -1,9 +1,13 @@
-# Tesla charge-port release (Tessie)
+# Tesla charge-cable release (Tessie)
 
 Lets the Tesla's charge cable be unplugged on demand from the HA dashboard,
-**but only when it's safe**. Scope is charge-port ONLY — no drive, doors, cabin,
-or anything else. Tessie handles the Tesla Fleet API signing, so there is no
+**but only when it's safe**. Scope is the **charge-cable lock ONLY** — actuator
+is `lock.unlock` on the Tessie charge-cable-lock entity; no drive, doors, trunk,
+cabin, or door cover. Tessie handles the Tesla Fleet API signing, so there is no
 custom signing proxy in this cluster.
+
+Vehicle: **Driveway Model Y** (Tessie display name → entity slug
+`driveway_model_y`).
 
 GitOps-managed pieces live in [config.yaml](config.yaml):
 - `input_boolean.tesla_unlatch_enabled` — hard kill switch (ON = release allowed).
@@ -12,48 +16,38 @@ GitOps-managed pieces live in [config.yaml](config.yaml):
 
 ## Safety model (all gates fail-closed)
 
-The script releases the latch only if **every** check passes; otherwise it shows
-a plain-language notification and does nothing. Unknown/unavailable state always
-aborts (never opens).
+The script unlocks the cable only if **every** check passes; otherwise it shows a
+plain-language notification and does nothing. Unknown/unavailable state always
+aborts (never unlocks).
 
 | Gate | Pass condition | Message on fail |
 |------|----------------|-----------------|
-| Kill switch | `input_boolean.tesla_unlatch_enabled` = on | "Charge-port release is turned off." |
-| Home | `device_tracker.tesla_location` = home | "Tesla isn't home." |
-| Parked | `sensor.tesla_shift_state` = P | "Tesla isn't parked." |
-| Battery | `sensor.tesla_battery_level` ≥ 50 | "Tesla battery too low — leave it plugged in." |
-| Idempotent | port not already open | "Charge port already unlocked." |
-| (all pass) | → `cover.open_cover` | "Charge port unlocked — you can unplug now." |
+| Kill switch | `input_boolean.tesla_unlatch_enabled` = on | "Charge-cable release is turned off." |
+| Home | `device_tracker.driveway_model_y_location` = home | "Tesla isn't home." |
+| Plugged in | `binary_sensor.driveway_model_y_charge_cable` = on | "No cable plugged in." |
+| Not in gear | `sensor.driveway_model_y_shift_state` ∉ {D,R,N} | "Tesla isn't parked." |
+| Battery | `sensor.driveway_model_y_battery_level` ≥ 50 | "Tesla battery too low — leave it plugged in." |
+| Idempotent | `lock...charge_cable_lock` ≠ unlocked | "Charge cable already unlocked." |
+| (all pass) | → `lock.unlock` on `lock.driveway_model_y_charge_cable_lock` | "Charge cable unlocked — you can unplug now." |
 
 The 50% battery floor keeps the car plugged in until it's charged enough; below
-that, the button refuses and tells the user why.
+that, the button refuses and tells the user why. The "plugged in" gate doubles as
+a parked-at-charger proof (a plugged car can't be driving), and the not-in-gear
+gate is belt-and-suspenders against a stale `shift_state`.
 
-## One-time setup (manual, not GitOps)
+## Setup status
 
-The Tessie account token is NOT stored in git — it lives in HA `.storage` on the
-PVC via the integration's config flow.
+Token + Tessie integration are already added (token lives in HA `.storage` on the
+PVC, NOT git). Entity IDs in the script already match the live `driveway_model_y`
+entities. Remaining manual step: add the dashboard button.
 
-1. **Generate a Tessie token:** Tessie app/site → Settings → Developer / API →
-   create an access token. (Lifetime sub covers API command access.)
-2. **Add the integration:** HA → Settings → Devices & Services → Add Integration
-   → **Tessie** → paste the token. It auto-discovers the vehicle(s).
-3. **Note the entity prefix.** Tessie names entities after the car's display
-   name, e.g. a car named "Model 3" → `sensor.model_3_battery_level`. The script
-   ships with the placeholder prefix **`tesla`**.
-4. **Rename the placeholders** in [config.yaml](config.yaml) `scripts.yaml` to
-   match — replace each `tesla` entity prefix:
-   - `device_tracker.tesla_location`
-   - `sensor.tesla_shift_state`
-   - `sensor.tesla_battery_level`
-   - `cover.tesla_charge_port`
-   Then commit + push (Flux → Karmada → edge1 → HA reload).
-5. **Add the dashboard button** (storage-mode dashboard, added in the UI):
+**Add the dashboard button** (storage-mode dashboard, added in the HA UI):
 
    ```yaml
    show_name: true
    show_icon: true
    type: button
-   name: Release Charge Port
+   name: Release Charge Cable
    icon: mdi:ev-plug-tesla
    tap_action:
      action: perform-action
@@ -66,12 +60,12 @@ PVC via the integration's config flow.
 
 ## Reproducibility caveat
 
-If the cluster is wiped and the HA PVC lost, redo steps 1–2 (token + integration)
-— that state is not in git. The script, kill switch, and gates ARE in git and
-restore automatically.
+If the cluster is wiped and the HA PVC lost, regenerate the Tessie token and
+re-add the integration — that state is not in git. The script, kill switch, and
+gates ARE in git and restore automatically.
 
 ## Testing
 
-After setup, with the car home + parked + ≥50%: press the button → notification
-"you can unplug now" and the charge port releases. Below 50%: press → "battery
-too low" and nothing happens. Logbook records every attempt and its outcome.
+With the car home + plugged in + ≥50%: press the button → notification "you can
+unplug now" and the cable lock releases. Below 50%: press → "battery too low" and
+nothing happens. Logbook records every attempt and its outcome.

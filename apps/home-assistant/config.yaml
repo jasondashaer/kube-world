@@ -84,16 +84,16 @@ data:
 
   automations.yaml: "[]"
   scripts.yaml: |
-    # Tesla charge-port unlatch — releases the cable latch so the car can be
-    # unplugged. Charge-port ONLY; no drive/door/cabin actions.
+    # Tesla charge-cable release — unlocks the charge-cable latch so the car can
+    # be unplugged. Releases the CABLE LOCK only; no drive/door/cabin/trunk
+    # actions. Actuator: lock.unlock on the Tessie "charge cable lock" entity.
     #
-    # IMPORTANT: the Tessie integration names entities after the car's display
-    # name. Replace every `tesla` entity prefix below with the real one after
-    # you add the integration (e.g. sensor.<carname>_battery_level).
+    # Entities are for the vehicle "Driveway Model Y" (Tessie display name). If
+    # the car is renamed or replaced, update the entity_ids below to match.
     #
-    # All gates are fail-closed: unknown/unavailable state aborts (never opens).
+    # Gates are fail-closed: unknown/unavailable state aborts (never unlocks).
     tesla_charge_port_unlatch:
-      alias: "Tesla — Release Charge Port"
+      alias: "Tesla — Release Charge Cable"
       icon: mdi:ev-plug-tesla
       mode: single
       sequence:
@@ -106,88 +106,109 @@ data:
               sequence:
                 - service: logbook.log
                   data:
-                    name: "Tesla Charge Port"
+                    name: "Tesla Charge Cable"
                     message: "release blocked — kill switch off"
                 - service: persistent_notification.create
                   data:
                     notification_id: tesla_unlatch
-                    title: "Tesla Charge Port"
-                    message: "Charge-port release is turned off."
+                    title: "Tesla Charge Cable"
+                    message: "Charge-cable release is turned off."
             # Gate 2 — must be at home (fail-closed: away/unknown aborts)
             - conditions:
                 - condition: not
                   conditions:
                     - condition: state
-                      entity_id: device_tracker.tesla_location
+                      entity_id: device_tracker.driveway_model_y_location
                       state: "home"
               sequence:
                 - service: logbook.log
                   data:
-                    name: "Tesla Charge Port"
+                    name: "Tesla Charge Cable"
                     message: "release blocked — not home"
                 - service: persistent_notification.create
                   data:
                     notification_id: tesla_unlatch
-                    title: "Tesla Charge Port"
+                    title: "Tesla Charge Cable"
                     message: "Tesla isn't home."
-            # Gate 3 — must be parked (fail-closed: not 'P' aborts)
+            # Gate 3 — cable must be plugged in (also proves the car is parked at
+            # the charger). Fail-closed: not 'on' / unknown aborts.
             - conditions:
                 - condition: not
                   conditions:
                     - condition: state
-                      entity_id: sensor.tesla_shift_state
-                      state: "P"
+                      entity_id: binary_sensor.driveway_model_y_charge_cable
+                      state: "on"
               sequence:
                 - service: logbook.log
                   data:
-                    name: "Tesla Charge Port"
+                    name: "Tesla Charge Cable"
+                    message: "release blocked — no cable plugged in"
+                - service: persistent_notification.create
+                  data:
+                    notification_id: tesla_unlatch
+                    title: "Tesla Charge Cable"
+                    message: "No cable plugged in."
+            # Gate 4 — not actively in gear (block Drive/Reverse/Neutral). A
+            # plugged-in car at home can't be driving; this is belt-and-suspenders
+            # against a stale/odd shift_state.
+            - conditions:
+                - condition: state
+                  entity_id: sensor.driveway_model_y_shift_state
+                  state:
+                    - "D"
+                    - "R"
+                    - "N"
+              sequence:
+                - service: logbook.log
+                  data:
+                    name: "Tesla Charge Cable"
                     message: "release blocked — not parked"
                 - service: persistent_notification.create
                   data:
                     notification_id: tesla_unlatch
-                    title: "Tesla Charge Port"
+                    title: "Tesla Charge Cable"
                     message: "Tesla isn't parked."
-            # Gate 4 — battery >= 50% (fail-closed: below 50 OR unknown aborts)
+            # Gate 5 — battery >= 50% (fail-closed: below 50 OR unknown aborts)
             - conditions:
                 - condition: not
                   conditions:
                     - condition: numeric_state
-                      entity_id: sensor.tesla_battery_level
+                      entity_id: sensor.driveway_model_y_battery_level
                       above: 49
               sequence:
                 - service: logbook.log
                   data:
-                    name: "Tesla Charge Port"
+                    name: "Tesla Charge Cable"
                     message: "release blocked — battery below 50% or unknown"
                 - service: persistent_notification.create
                   data:
                     notification_id: tesla_unlatch
-                    title: "Tesla Charge Port"
+                    title: "Tesla Charge Cable"
                     message: "Tesla battery too low — leave it plugged in."
-            # Gate 5 — already unlocked (idempotent no-op)
+            # Gate 6 — already unlocked (idempotent no-op)
             - conditions:
                 - condition: state
-                  entity_id: cover.tesla_charge_port
-                  state: "open"
+                  entity_id: lock.driveway_model_y_charge_cable_lock
+                  state: "unlocked"
               sequence:
                 - service: persistent_notification.create
                   data:
                     notification_id: tesla_unlatch
-                    title: "Tesla Charge Port"
-                    message: "Charge port already unlocked."
-          # All gates passed — release the latch
+                    title: "Tesla Charge Cable"
+                    message: "Charge cable already unlocked."
+          # All gates passed — release the cable latch
           default:
-            - service: cover.open_cover
+            - service: lock.unlock
               target:
-                entity_id: cover.tesla_charge_port
+                entity_id: lock.driveway_model_y_charge_cable_lock
             - service: logbook.log
               data:
-                name: "Tesla Charge Port"
+                name: "Tesla Charge Cable"
                 message: "released via HA dashboard (all gates passed)"
-                entity_id: cover.tesla_charge_port
+                entity_id: lock.driveway_model_y_charge_cable_lock
             - service: persistent_notification.create
               data:
                 notification_id: tesla_unlatch
-                title: "Tesla Charge Port"
-                message: "Charge port unlocked — you can unplug now."
+                title: "Tesla Charge Cable"
+                message: "Charge cable unlocked — you can unplug now."
   scenes.yaml: "[]"

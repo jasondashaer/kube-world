@@ -136,13 +136,17 @@ data:
                     notification_id: tesla_unlatch
                     title: "Tesla Charge Cable"
                     message: "Charge-cable release is turned off."
-            # Gate 2 — must be at home (fail-closed: away/unknown aborts)
+            # Gate 2 — must be at home (fail-closed: away/unknown aborts).
+            # Tessie's device_tracker reports the state as "Home" (capitalized,
+            # not the zone slug "home"), so match both casings.
             - conditions:
                 - condition: not
                   conditions:
                     - condition: state
                       entity_id: device_tracker.driveway_model_y_location
-                      state: "home"
+                      state:
+                        - "home"
+                        - "Home"
               sequence:
                 - service: logbook.log
                   data:
@@ -173,11 +177,15 @@ data:
                     message: "No cable plugged in."
             # Gate 4 — not actively in gear (block Drive/Reverse/Neutral). A
             # plugged-in car at home can't be driving; this is belt-and-suspenders
-            # against a stale/odd shift_state.
+            # against a stale/odd shift_state. Tessie reports shift_state
+            # lowercase (e.g. "p"), so block both casings of d/r/n.
             - conditions:
                 - condition: state
                   entity_id: sensor.driveway_model_y_shift_state
                   state:
+                    - "d"
+                    - "r"
+                    - "n"
                     - "D"
                     - "R"
                     - "N"

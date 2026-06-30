@@ -23,9 +23,9 @@ aborts (never unlocks).
 | Gate | Pass condition | Message on fail |
 |------|----------------|-----------------|
 | Kill switch | `input_boolean.tesla_unlatch_enabled` = on | "Charge-cable release is turned off." |
-| Home | `device_tracker.driveway_model_y_location` = home | "Tesla isn't home." |
+| Home | `device_tracker.driveway_model_y_location` ∈ {home, Home} | "Tesla isn't home." |
 | Plugged in | `binary_sensor.driveway_model_y_charge_cable` = on | "No cable plugged in." |
-| Not in gear | `sensor.driveway_model_y_shift_state` ∉ {D,R,N} | "Tesla isn't parked." |
+| Not in gear | `sensor.driveway_model_y_shift_state` ∉ {d,r,n,D,R,N} | "Tesla isn't parked." |
 | Battery | `sensor.driveway_model_y_battery_level` ≥ 50 | "Tesla battery too low — leave it plugged in." |
 | Idempotent | `lock...charge_cable_lock` ≠ unlocked | "Charge cable already unlocked." |
 | (all pass) | → `lock.unlock` on `lock.driveway_model_y_charge_cable_lock` | "Charge cable unlocked — you can unplug now." |

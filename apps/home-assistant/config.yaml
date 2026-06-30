@@ -77,6 +77,10 @@ data:
         name: "Tesla charge-port release enabled"
         icon: mdi:ev-plug-tesla
         initial: true
+      tesla_unlock_doors_enabled:
+        name: "Tesla door unlock enabled"
+        icon: mdi:car-door
+        initial: true
 
     # Dedicated YAML dashboard for the Tesla charge-cable button. Keeps the
     # default storage-mode dashboards untouched and adds a "Tesla" sidebar item.
@@ -242,6 +246,102 @@ data:
                 notification_id: tesla_unlatch
                 title: "Tesla Charge Cable"
                 message: "Charge cable unlocked — you can unplug now."
+    # Tesla door unlock — unlocks ALL doors (Tesla has no per-door command), then
+    # auto-re-locks after 60s. Intent: let someone open the driver door to stow
+    # the charge adapter, then the car secures itself. mode:restart so a second
+    # press restarts the 60s window. Caveat: the relock relies on this script
+    # staying alive for the delay; an HA restart inside the window would skip it
+    # (car stays unlocked — but only ever while parked at home).
+    tesla_unlock_doors:
+      alias: "Tesla — Unlock Doors (auto-relock 1 min)"
+      icon: mdi:car-door
+      mode: restart
+      sequence:
+        - choose:
+            # Gate 1 — feature hard-disabled by its own kill switch
+            - conditions:
+                - condition: state
+                  entity_id: input_boolean.tesla_unlock_doors_enabled
+                  state: "off"
+              sequence:
+                - service: logbook.log
+                  data:
+                    name: "Tesla Doors"
+                    message: "unlock blocked — kill switch off"
+                - service: persistent_notification.create
+                  data:
+                    notification_id: tesla_unlock_doors
+                    title: "Tesla Doors"
+                    message: "Door unlock is turned off."
+            # Gate 2 — must be at home (fail-closed; Tessie reports "Home")
+            - conditions:
+                - condition: not
+                  conditions:
+                    - condition: state
+                      entity_id: device_tracker.driveway_model_y_location
+                      state:
+                        - "home"
+                        - "Home"
+              sequence:
+                - service: logbook.log
+                  data:
+                    name: "Tesla Doors"
+                    message: "unlock blocked — not home"
+                - service: persistent_notification.create
+                  data:
+                    notification_id: tesla_unlock_doors
+                    title: "Tesla Doors"
+                    message: "Tesla isn't home."
+            # Gate 3 — not actively in gear (block d/r/n, both casings)
+            - conditions:
+                - condition: state
+                  entity_id: sensor.driveway_model_y_shift_state
+                  state:
+                    - "d"
+                    - "r"
+                    - "n"
+                    - "D"
+                    - "R"
+                    - "N"
+              sequence:
+                - service: logbook.log
+                  data:
+                    name: "Tesla Doors"
+                    message: "unlock blocked — not parked"
+                - service: persistent_notification.create
+                  data:
+                    notification_id: tesla_unlock_doors
+                    title: "Tesla Doors"
+                    message: "Tesla isn't parked."
+          # All gates passed — unlock all doors, hold 60s, then re-lock
+          default:
+            - service: lock.unlock
+              target:
+                entity_id: lock.driveway_model_y_lock
+            - service: logbook.log
+              data:
+                name: "Tesla Doors"
+                message: "doors unlocked via HA dashboard (auto-relock in 60s)"
+                entity_id: lock.driveway_model_y_lock
+            - service: persistent_notification.create
+              data:
+                notification_id: tesla_unlock_doors
+                title: "Tesla Doors"
+                message: "Doors unlocked — they will lock again in 1 minute."
+            - delay: "00:01:00"
+            - service: lock.lock
+              target:
+                entity_id: lock.driveway_model_y_lock
+            - service: logbook.log
+              data:
+                name: "Tesla Doors"
+                message: "doors auto-relocked after 60s"
+                entity_id: lock.driveway_model_y_lock
+            - service: persistent_notification.create
+              data:
+                notification_id: tesla_unlock_doors
+                title: "Tesla Doors"
+                message: "Doors re-locked."
   scenes.yaml: "[]"
   tesla-dashboard.yaml: |
     # User-facing dashboard: release button + a READ-ONLY status card. Visible to
@@ -264,6 +364,13 @@ data:
             tap_action:
               action: perform-action
               perform_action: script.tesla_charge_port_unlatch
+          - type: button
+            name: Unlock Doors (locks again in 1 min)
+            icon: mdi:car-door
+            icon_height: 80px
+            tap_action:
+              action: perform-action
+              perform_action: script.tesla_unlock_doors
           - type: entities
             title: Status
             entities:
@@ -292,13 +399,26 @@ data:
             tap_action:
               action: perform-action
               perform_action: script.tesla_charge_port_unlatch
+          - type: button
+            name: Unlock Doors (locks again in 1 min)
+            icon: mdi:car-door
+            icon_height: 80px
+            tap_action:
+              action: perform-action
+              perform_action: script.tesla_unlock_doors
           - type: entities
             title: Status
             entities:
               - entity: input_boolean.tesla_unlatch_enabled
                 name: Release enabled (kill switch)
+              - entity: input_boolean.tesla_unlock_doors_enabled
+                name: Door unlock enabled (kill switch)
               - entity: lock.driveway_model_y_charge_cable_lock
                 name: Cable lock
+              - entity: lock.driveway_model_y_lock
+                name: Car doors lock
+              - entity: binary_sensor.driveway_model_y_front_driver_door
+                name: Driver door
               - entity: binary_sensor.driveway_model_y_charge_cable
                 name: Cable plugged in
               - entity: sensor.driveway_model_y_battery_level

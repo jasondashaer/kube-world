@@ -47,11 +47,14 @@ via the `lovelace:` block. Default storage-mode dashboards are left untouched
 
 | Dashboard | ConfigMap key | Sidebar item | Who sees it | Contents |
 |-----------|---------------|--------------|-------------|----------|
-| User | `tesla-dashboard.yaml` | "Tesla" | **all** logged-in users | release button ONLY |
-| Admin | `tesla-admin-dashboard.yaml` | "Tesla (Admin)" | **admins only** (`require_admin: true`) | release button + full status card (kill switch, cable lock, plugged, battery, gear, location) |
+| User | `tesla-dashboard.yaml` | "Tesla" | **all** logged-in users | release button + **read-only** status (plugged, battery, gear, location) |
+| Admin | `tesla-admin-dashboard.yaml` | "Tesla (Admin)" | **admins only** (`require_admin: true`) | release button + full status incl. **controls** (kill switch, cable lock) |
 
 This is the two-tier split: a non-admin (e.g. the `kube-world-users` group) can
-**only** trigger the gated release; the kill switch and diagnostics are admin-only.
+**only** trigger the gated release and view the read-only gate inputs. The two
+interactive controls — the kill switch (`input_boolean`) and the cable lock
+(`lock`, which an entities card renders as a direct unlock toggle) — are
+admin-only, so a non-admin can never bypass the gates or disable the feature.
 The Tessie **integration config itself** (Settings → Devices & Services) is already
 admin-only by HA's native RBAC — non-admins can't open or reconfigure it.
 

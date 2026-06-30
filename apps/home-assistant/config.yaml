@@ -236,10 +236,13 @@ data:
                 message: "Charge cable unlocked — you can unplug now."
   scenes.yaml: "[]"
   tesla-dashboard.yaml: |
-    # User-facing dashboard: ONE button to release the charge cable. Visible to
-    # all logged-in users (no require_admin). No status/diagnostic entities, so
-    # non-admins can ONLY trigger the gated release — nothing else. Full controls
-    # live on the separate "Tesla (Admin)" dashboard (tesla-admin-dashboard.yaml).
+    # User-facing dashboard: release button + a READ-ONLY status card. Visible to
+    # all logged-in users (no require_admin). The status card shows only the
+    # sensors the button validates against (plugged, battery, gear, location) —
+    # all read-only, no toggles. The two interactive controls (kill switch +
+    # cable lock) are deliberately excluded; they live on "Tesla (Admin)" so a
+    # non-admin can ONLY trigger the gated release, never unlock directly or flip
+    # the kill switch.
     title: Tesla
     views:
       - title: Charge
@@ -253,6 +256,17 @@ data:
             tap_action:
               action: perform-action
               perform_action: script.tesla_charge_port_unlatch
+          - type: entities
+            title: Status
+            entities:
+              - entity: binary_sensor.driveway_model_y_charge_cable
+                name: Cable plugged in
+              - entity: sensor.driveway_model_y_battery_level
+                name: Battery
+              - entity: sensor.driveway_model_y_shift_state
+                name: Gear
+              - entity: device_tracker.driveway_model_y_location
+                name: Location
   tesla-admin-dashboard.yaml: |
     # Admin-only dashboard (registered with require_admin: true). Same release
     # button PLUS the full status card (kill switch, cable lock, plugged,

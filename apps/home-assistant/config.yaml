@@ -78,6 +78,18 @@ data:
         icon: mdi:ev-plug-tesla
         initial: true
 
+    # Dedicated YAML dashboard for the Tesla charge-cable button. Keeps the
+    # default storage-mode dashboards untouched and adds a "Tesla" sidebar item.
+    lovelace:
+      mode: storage
+      dashboards:
+        tesla-charge:
+          mode: yaml
+          title: Tesla
+          icon: mdi:ev-plug-tesla
+          show_in_sidebar: true
+          filename: tesla-dashboard.yaml
+
     # Packages — organized config by area/function
     # homeassistant:
     #   packages: !include_dir_named packages/
@@ -212,3 +224,34 @@ data:
                 title: "Tesla Charge Cable"
                 message: "Charge cable unlocked — you can unplug now."
   scenes.yaml: "[]"
+  tesla-dashboard.yaml: |
+    # YAML-mode dashboard: one big button to release the charge cable, plus a
+    # read-only status card. Reached via the "Tesla" item in the HA sidebar.
+    title: Tesla
+    views:
+      - title: Charge
+        path: charge
+        icon: mdi:ev-plug-tesla
+        cards:
+          - type: button
+            name: Release Charge Cable
+            icon: mdi:ev-plug-tesla
+            icon_height: 80px
+            tap_action:
+              action: perform-action
+              perform_action: script.tesla_charge_port_unlatch
+          - type: entities
+            title: Status
+            entities:
+              - entity: input_boolean.tesla_unlatch_enabled
+                name: Release enabled (kill switch)
+              - entity: lock.driveway_model_y_charge_cable_lock
+                name: Cable lock
+              - entity: binary_sensor.driveway_model_y_charge_cable
+                name: Cable plugged in
+              - entity: sensor.driveway_model_y_battery_level
+                name: Battery
+              - entity: sensor.driveway_model_y_shift_state
+                name: Gear
+              - entity: device_tracker.driveway_model_y_location
+                name: Location

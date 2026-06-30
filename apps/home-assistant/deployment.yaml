@@ -298,7 +298,7 @@ spec:
               # 4. Copy GitOps-managed configs from ConfigMap to PVC
               # (Can't use subPath mounts — they're read-only and prevent
               # runtime patching of placeholders)
-              for f in configuration.yaml automations.yaml scripts.yaml scenes.yaml; do
+              for f in configuration.yaml automations.yaml scripts.yaml scenes.yaml tesla-dashboard.yaml; do
                 if [ -f "/config-templates/${f}" ]; then
                   cp "/config-templates/${f}" "/config/${f}"
                 fi

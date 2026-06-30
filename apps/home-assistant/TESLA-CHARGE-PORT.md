@@ -35,28 +35,19 @@ that, the button refuses and tells the user why. The "plugged in" gate doubles a
 a parked-at-charger proof (a plugged car can't be driving), and the not-in-gear
 gate is belt-and-suspenders against a stale `shift_state`.
 
-## Setup status
+## Setup status — complete (GitOps)
 
-Token + Tessie integration are already added (token lives in HA `.storage` on the
-PVC, NOT git). Entity IDs in the script already match the live `driveway_model_y`
-entities. Remaining manual step: add the dashboard button.
+Token + Tessie integration are added (token lives in HA `.storage` on the PVC,
+NOT git). Entity IDs in the script match the live `driveway_model_y` entities.
 
-**Add the dashboard button** (storage-mode dashboard, added in the HA UI):
+The **button is GitOps too** — a dedicated YAML-mode dashboard ships in
+[config.yaml](config.yaml) as the `tesla-dashboard.yaml` ConfigMap key, copied to
+the PVC by the init container and registered via the `lovelace:` block. It adds a
+**"Tesla" item in the HA sidebar** with a big "Release Charge Cable" button plus a
+read-only status card (kill switch, cable lock, plugged, battery, gear, location).
+The default storage-mode dashboards are left untouched (`lovelace.mode: storage`).
 
-   ```yaml
-   show_name: true
-   show_icon: true
-   type: button
-   name: Release Charge Cable
-   icon: mdi:ev-plug-tesla
-   tap_action:
-     action: perform-action
-     perform_action: script.tesla_charge_port_unlatch
-   ```
-   (Older HA: `action: call-service` / `service: script.tesla_charge_port_unlatch`.)
-
-   Optionally add an entities card with `input_boolean.tesla_unlatch_enabled` so
-   the kill switch is visible.
+Nothing left to click in the UI — just push and the sidebar page appears.
 
 ## Reproducibility caveat
 

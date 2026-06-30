@@ -40,14 +40,22 @@ gate is belt-and-suspenders against a stale `shift_state`.
 Token + Tessie integration are added (token lives in HA `.storage` on the PVC,
 NOT git). Entity IDs in the script match the live `driveway_model_y` entities.
 
-The **button is GitOps too** — a dedicated YAML-mode dashboard ships in
-[config.yaml](config.yaml) as the `tesla-dashboard.yaml` ConfigMap key, copied to
-the PVC by the init container and registered via the `lovelace:` block. It adds a
-**"Tesla" item in the HA sidebar** with a big "Release Charge Cable" button plus a
-read-only status card (kill switch, cable lock, plugged, battery, gear, location).
-The default storage-mode dashboards are left untouched (`lovelace.mode: storage`).
+The **buttons are GitOps too** — two YAML-mode dashboards ship in
+[config.yaml](config.yaml), copied to the PVC by the init container and registered
+via the `lovelace:` block. Default storage-mode dashboards are left untouched
+(`lovelace.mode: storage`).
 
-Nothing left to click in the UI — just push and the sidebar page appears.
+| Dashboard | ConfigMap key | Sidebar item | Who sees it | Contents |
+|-----------|---------------|--------------|-------------|----------|
+| User | `tesla-dashboard.yaml` | "Tesla" | **all** logged-in users | release button ONLY |
+| Admin | `tesla-admin-dashboard.yaml` | "Tesla (Admin)" | **admins only** (`require_admin: true`) | release button + full status card (kill switch, cable lock, plugged, battery, gear, location) |
+
+This is the two-tier split: a non-admin (e.g. the `kube-world-users` group) can
+**only** trigger the gated release; the kill switch and diagnostics are admin-only.
+The Tessie **integration config itself** (Settings → Devices & Services) is already
+admin-only by HA's native RBAC — non-admins can't open or reconfigure it.
+
+Nothing left to click in the UI — just push and the sidebar pages appear.
 
 ## Reproducibility caveat
 

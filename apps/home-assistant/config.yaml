@@ -83,12 +83,23 @@ data:
     lovelace:
       mode: storage
       dashboards:
+        # User-facing: single release button. No require_admin → all logged-in
+        # users see it.
         tesla-charge:
           mode: yaml
           title: Tesla
           icon: mdi:ev-plug-tesla
           show_in_sidebar: true
           filename: tesla-dashboard.yaml
+        # Admin-only: full controls + status card. require_admin hides it from
+        # non-admin (kube-world-users) accounts entirely.
+        tesla-admin:
+          mode: yaml
+          title: Tesla (Admin)
+          icon: mdi:ev-plug-tesla
+          show_in_sidebar: true
+          require_admin: true
+          filename: tesla-admin-dashboard.yaml
 
     # Packages — organized config by area/function
     # homeassistant:
@@ -225,9 +236,28 @@ data:
                 message: "Charge cable unlocked — you can unplug now."
   scenes.yaml: "[]"
   tesla-dashboard.yaml: |
-    # YAML-mode dashboard: one big button to release the charge cable, plus a
-    # read-only status card. Reached via the "Tesla" item in the HA sidebar.
+    # User-facing dashboard: ONE button to release the charge cable. Visible to
+    # all logged-in users (no require_admin). No status/diagnostic entities, so
+    # non-admins can ONLY trigger the gated release — nothing else. Full controls
+    # live on the separate "Tesla (Admin)" dashboard (tesla-admin-dashboard.yaml).
     title: Tesla
+    views:
+      - title: Charge
+        path: charge
+        icon: mdi:ev-plug-tesla
+        cards:
+          - type: button
+            name: Release Charge Cable
+            icon: mdi:ev-plug-tesla
+            icon_height: 80px
+            tap_action:
+              action: perform-action
+              perform_action: script.tesla_charge_port_unlatch
+  tesla-admin-dashboard.yaml: |
+    # Admin-only dashboard (registered with require_admin: true). Same release
+    # button PLUS the full status card (kill switch, cable lock, plugged,
+    # battery, gear, location). Non-admin accounts never see this page.
+    title: Tesla (Admin)
     views:
       - title: Charge
         path: charge

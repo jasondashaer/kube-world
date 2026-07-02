@@ -1,0 +1,85 @@
+# Cloudflare Tunnel connector for public Home Assistant access.
+#
+# Exposes Home Assistant at a PUBLIC hostname (ha.kubew.dev) without opening
+# any inbound ports or putting clients on Tailscale. cloudflared dials OUT to
+# Cloudflare's edge (443) and proxies requests to the in-cluster HA Service.
+# TLS is terminated at Cloudflare's edge, so no cert-manager cert is needed for
+# the public hostname. The existing tailnet host (ha.edge1.kubew.dev) is
+# untouched.
+#
+# Remote-managed (token) tunnel: the hostname -> service route and DNS record
+# are configured in the Cloudflare Zero Trust dashboard. This connector only
+# needs the tunnel TOKEN, provided via the `cloudflared-token` Secret (created
+# imperatively, NOT committed — see CLOUDFLARE-TUNNEL.md).
+#
+# Runs on edge1 (same cluster as HA) via Karmada PropagationPolicy
+# (workload-type=iot) so it can reach the HA Service over cluster DNS.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflared
+  namespace: home-assistant
+  labels:
+    app.kubernetes.io/name: cloudflared
+    app.kubernetes.io/part-of: kube-world
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cloudflared
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cloudflared
+        app.kubernetes.io/part-of: kube-world
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: cloudflared
+          image: docker.io/cloudflare/cloudflared:2026.6.1
+          args:
+            - tunnel
+            - --no-autoupdate
+            - --metrics
+            - 0.0.0.0:2000
+            - run
+          env:
+            # cloudflared auto-reads TUNNEL_TOKEN for a remote-managed tunnel.
+            - name: TUNNEL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cloudflared-token
+                  key: token
+          ports:
+            - name: metrics
+              containerPort: 2000
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: 2000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 2000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "20m"
+            limits:
+              memory: "128Mi"
+              cpu: "100m"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL

@@ -1,0 +1,28 @@
+# Karmada PropagationPolicy for the Cloudflare Tunnel connector.
+#
+# Places cloudflared on the same edge/IoT cluster as Home Assistant so it can
+# reach the HA Service over cluster DNS. Targets clusters labeled
+# workload-type=iot (same selector as the home-assistant policy).
+---
+apiVersion: policy.karmada.io/v1alpha1
+kind: PropagationPolicy
+metadata:
+  name: cloudflared
+  namespace: home-assistant
+spec:
+  resourceSelectors:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: cloudflared
+  placement:
+    clusterAffinity:
+      labelSelector:
+        matchExpressions:
+          - key: workload-type
+            operator: In
+            values:
+              - iot
+    spreadConstraints:
+      - spreadByField: cluster
+        maxGroups: 1
+        minGroups: 1

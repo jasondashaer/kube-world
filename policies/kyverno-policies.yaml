@@ -134,7 +134,7 @@ spec:
         pattern:
           spec:
             containers:
-              - image: "ghcr.io/* | docker.io/library/* | docker.io/rancher/* | registry.k8s.io/*"
+              - image: "ghcr.io/* | docker.io/library/* | docker.io/rancher/* | docker.io/cloudflare/* | registry.k8s.io/*"
 
 ---
 apiVersion: kyverno.io/v1

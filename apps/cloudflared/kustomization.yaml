@@ -1,0 +1,12 @@
+# cloudflared kustomization.
+#
+# Applied by Flux to the Karmada API; the PropagationPolicy in
+# karmada/propagation-policies/cloudflared.yaml distributes the Deployment to
+# the edge1 (workload-type=iot) cluster. The tunnel token Secret is created
+# imperatively on the edge cluster (see CLOUDFLARE-TUNNEL.md) and is NOT part
+# of this kustomization.
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - deployment.yaml

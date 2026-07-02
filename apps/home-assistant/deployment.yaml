@@ -116,7 +116,7 @@ spec:
             - sh
             - -c
             - |
-              apk add --no-cache git python3 py3-bcrypt py3-jwt >/dev/null 2>&1
+              apk add --no-cache git curl python3 py3-bcrypt py3-jwt >/dev/null 2>&1
 
               # 1. Install OIDC custom component, pinned to a known-good tag.
               # v1.x natively supports both the web UI and the companion app
@@ -143,6 +143,24 @@ spec:
                 mkdir -p /config/custom_components
                 cp -r hass-oidc-auth/custom_components/auth_oidc "$COMP_DIR"
                 rm -rf hass-oidc-auth
+              fi
+
+              # 1b. Install kiosk-mode Lovelace plugin (hides the sidebar for
+              # non-admin users). Pinned release asset, served from /config/www
+              # (= /local) and loaded globally via frontend.extra_module_url.
+              mkdir -p /config/www
+              KIOSK_VERSION="1.7.2"
+              if [ "$(cat /config/www/.kiosk-mode-version 2>/dev/null)" != "$KIOSK_VERSION" ]; then
+                echo "Installing kiosk-mode v${KIOSK_VERSION}..."
+                if curl -fsSL -o /config/www/kiosk-mode.js \
+                    "https://github.com/maykar/kiosk-mode/releases/download/${KIOSK_VERSION}/kiosk-mode.js"; then
+                  echo "$KIOSK_VERSION" > /config/www/.kiosk-mode-version
+                  echo "kiosk-mode v${KIOSK_VERSION} installed"
+                else
+                  echo "WARN: kiosk-mode download failed"
+                fi
+              else
+                echo "kiosk-mode v${KIOSK_VERSION} already installed"
               fi
 
               # 2. Pre-seed onboarding + auth to skip the first-time wizard.

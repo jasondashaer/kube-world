@@ -44,6 +44,17 @@ variable "edge_clusters" {
   }
 }
 
+variable "extra_records" {
+  description = "Single-host CNAME records for services on a specific machine (see module docs)"
+  type        = map(string)
+  default = {
+    # Aletheia dev/beta — runs directly on Jackson's MacBook via dev-up.sh + a local
+    # TLS-terminating reverse proxy (not a kube-world cluster). Revisit once Aletheia
+    # gets its own hardware/cluster in its 3b phase — this record moves or is removed.
+    aletheia = "jacksons-macbook-pro-2"
+  }
+}
+
 #===============================================================================
 # Tailscale
 #===============================================================================

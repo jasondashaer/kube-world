@@ -11,6 +11,7 @@ module "dns" {
   tailnet_dns_suffix   = var.tailnet_dns_suffix
   central_hostname     = var.central_hostname
   edge_clusters        = var.edge_clusters
+  extra_records        = var.extra_records
 }
 
 module "tailscale" {
@@ -33,6 +34,10 @@ output "dns_central_target" {
 
 output "dns_edge_targets" {
   value = module.dns.edge_cname_targets
+}
+
+output "dns_extra_targets" {
+  value = module.dns.extra_cname_targets
 }
 
 output "tailscale_auth_key" {

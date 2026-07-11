@@ -50,6 +50,18 @@ variable "edge_clusters" {
   default = {}
 }
 
+variable "extra_records" {
+  description = <<-EOT
+    Single-host CNAME records for services that don't fit the central/edge-cluster
+    model (e.g. a project dev instance running on a specific machine, not a k8s
+    cluster). Overrides the wildcard for that exact name — DNS exact match beats
+    wildcard match. Key = subdomain label (e.g. "aletheia"), value = tailscale
+    hostname (suffixed with tailnet_dns_suffix, same as every other record here).
+  EOT
+  type        = map(string)
+  default     = {}
+}
+
 #===============================================================================
 # Zone lookup (assumes domain is already registered on Cloudflare)
 #===============================================================================
@@ -101,6 +113,22 @@ resource "cloudflare_record" "edge_wildcard" {
 }
 
 #===============================================================================
+# Single-host records — exact-match, so they take precedence over the wildcard
+# for services that live on one specific machine rather than a whole cluster.
+#===============================================================================
+resource "cloudflare_record" "extra" {
+  for_each = var.extra_records
+
+  zone_id = data.cloudflare_zone.main.id
+  name    = each.key
+  content = "${each.value}.${var.tailnet_dns_suffix}"
+  type    = "CNAME"
+  ttl     = 60
+  proxied = false
+  comment = "Single-host: ${each.key}.${var.domain} → ${each.value}"
+}
+
+#===============================================================================
 # Outputs
 #===============================================================================
 output "zone_id" {
@@ -129,4 +157,12 @@ output "edge_cname_targets" {
 output "nameservers" {
   description = "Cloudflare nameservers for the zone"
   value       = data.cloudflare_zone.main.name_servers
+}
+
+output "extra_cname_targets" {
+  description = "Single-host CNAME targets"
+  value = {
+    for name, hostname in var.extra_records :
+    name => "${name}.${var.domain} → ${hostname}.${var.tailnet_dns_suffix}"
+  }
 }

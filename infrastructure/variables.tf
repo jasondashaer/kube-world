@@ -45,13 +45,19 @@ variable "edge_clusters" {
 }
 
 variable "extra_records" {
-  description = "Single-host CNAME records for services on a specific machine (see module docs)"
-  type        = map(string)
+  description = "Single-host CNAME records for services on a specific machine or tunnel (see module docs)"
+  type = map(object({
+    target  = string
+    proxied = bool
+  }))
   default = {
-    # Aletheia dev/beta — runs directly on Jackson's MacBook via dev-up.sh + a local
-    # TLS-terminating reverse proxy (not a kube-world cluster). Revisit once Aletheia
-    # gets its own hardware/cluster in its 3b phase — this record moves or is removed.
-    aletheia = "jacksons-macbook-pro-2"
+    # Aletheia dev/beta — public via Cloudflare Tunnel "aletheia-dev" running on Jackson's
+    # MacBook alongside dev-up.sh (tunnel config: ~/.cloudflared/config.yml). Revisit once
+    # Aletheia gets its own hardware/cluster in its 3b phase — this record moves or is removed.
+    aletheia = {
+      target  = "f343a4cd-6436-4341-a1b1-ee20364b8423.cfargotunnel.com"
+      proxied = true
+    }
   }
 }
 

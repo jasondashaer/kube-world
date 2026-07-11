@@ -53,13 +53,17 @@ variable "edge_clusters" {
 variable "extra_records" {
   description = <<-EOT
     Single-host CNAME records for services that don't fit the central/edge-cluster
-    model (e.g. a project dev instance running on a specific machine, not a k8s
-    cluster). Overrides the wildcard for that exact name — DNS exact match beats
-    wildcard match. Key = subdomain label (e.g. "aletheia"), value = tailscale
-    hostname (suffixed with tailnet_dns_suffix, same as every other record here).
+    model (e.g. a project dev instance on a specific machine, or a Cloudflare Tunnel).
+    Overrides the wildcard for that exact name — DNS exact match beats wildcard match.
+    Key = subdomain label (e.g. "aletheia"); target = full CNAME target FQDN
+    (a tailscale MagicDNS name, a <tunnel-id>.cfargotunnel.com, etc.);
+    proxied = true routes through Cloudflare's edge (required for tunnel targets).
   EOT
-  type        = map(string)
-  default     = {}
+  type = map(object({
+    target  = string
+    proxied = bool
+  }))
+  default = {}
 }
 
 #===============================================================================
@@ -121,11 +125,12 @@ resource "cloudflare_record" "extra" {
 
   zone_id = data.cloudflare_zone.main.id
   name    = each.key
-  content = "${each.value}.${var.tailnet_dns_suffix}"
+  content = each.value.target
   type    = "CNAME"
-  ttl     = 60
-  proxied = false
-  comment = "Single-host: ${each.key}.${var.domain} → ${each.value}"
+  # Cloudflare requires ttl=1 ("automatic") on proxied records.
+  ttl     = each.value.proxied ? 1 : 60
+  proxied = each.value.proxied
+  comment = "Single-host: ${each.key}.${var.domain} → ${each.value.target}"
 }
 
 #===============================================================================
@@ -162,7 +167,7 @@ output "nameservers" {
 output "extra_cname_targets" {
   description = "Single-host CNAME targets"
   value = {
-    for name, hostname in var.extra_records :
-    name => "${name}.${var.domain} → ${hostname}.${var.tailnet_dns_suffix}"
+    for name, rec in var.extra_records :
+    name => "${name}.${var.domain} → ${rec.target}${rec.proxied ? " (proxied)" : ""}"
   }
 }
